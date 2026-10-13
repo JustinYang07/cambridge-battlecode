@@ -24,7 +24,9 @@ void fight(World& w, std::vector<Option>& out) {
         o.turns("travel", static_cast<float>(std::max(0, dist(w.pos, e.pos) - w.range)));
         o.turns("kill time", turnsToKill);
         const float edge = turnsToDie / std::max(turnsToKill, 0.1f);
-        o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.0f, 1.5f));
+        // Never exactly zero: a losing fight still shows up (with a tiny score) when you inspect
+        // the decision, so it is visibly considered and rejected.
+        o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.02f, 1.5f));
         if (e.channeling) o.mul("interrupt channel", 1.5f);
         o.mul("role appetite", w.role().fightAppetite);
         o.c.note << "kill in " << static_cast<int>(turnsToKill) << ", die in " << static_cast<int>(turnsToDie);

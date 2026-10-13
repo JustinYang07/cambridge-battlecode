@@ -98,19 +98,25 @@ void Bot::play_turn() {
         }
         fuel::mark("execute");
 
-        // Trace the chosen option first, then the best alternatives (partial selection, no sort of all).
+        // Trace the chosen option, then the best option of each other kind (so a rejected fight
+        // or bank is visible even when several farm options outscore it), then the best of the rest.
         const Candidate* top[Trace::kMaxCandidates];
         int n = 0;
         if (chosen >= 0) top[n++] = &options[static_cast<std::size_t>(chosen)].c;
-        while (n < std::min(Trace::kMaxCandidates, tune::trace_candidates)) {
-            int best = -1;
-            for (int i = 0; i < static_cast<int>(options.size()); ++i) {
-                const auto* cand = &options[static_cast<std::size_t>(i)].c;
-                if (std::find(top, top + n, cand) != top + n) continue;
-                if (best < 0 || options[static_cast<std::size_t>(i)].score > options[static_cast<std::size_t>(best)].score) best = i;
+        const int limit = std::min(Trace::kMaxCandidates, tune::trace_candidates);
+        for (int pass = 0; pass < 2 && n < limit; ++pass) {
+            while (n < limit) {
+                int best = -1;
+                for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+                    const auto& o = options[static_cast<std::size_t>(i)];
+                    if (std::find(top, top + n, &o.c) != top + n) continue;
+                    // First pass: only kinds not yet shown.
+                    if (pass == 0 && std::any_of(top, top + n, [&](const Candidate* c) { return c->kind == o.c.kind; })) continue;
+                    if (best < 0 || o.score > options[static_cast<std::size_t>(best)].score) best = i;
+                }
+                if (best < 0) break;
+                top[n++] = &options[static_cast<std::size_t>(best)].c;
             }
-            if (best < 0) break;
-            top[n++] = &options[static_cast<std::size_t>(best)].c;
         }
         trace().candidates(top, n, changed);
         fuel::mark("trace");

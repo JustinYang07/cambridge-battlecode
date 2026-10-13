@@ -94,7 +94,7 @@ inline constexpr unsigned long long fuel_per_scored_group = 6000;    // farm sco
 inline constexpr unsigned long long fresh_turn_fuel = 90000;         // a fresh turn starts with ~96.8k                                // distance-from-us search cut-off
 
 // ---- tracing
-inline constexpr int trace_candidates = 3;
+inline constexpr int trace_candidates = 4;
 inline constexpr int full_trace_every = 25;
 inline constexpr bool trace_fuel_profile = false;  // add per-section fuel to detailed traces (debugging)   // turns between full traces when the decision is unchanged
 

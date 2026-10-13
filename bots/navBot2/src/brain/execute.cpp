@@ -181,19 +181,24 @@ void heal(World& w) {
         nav().stepToward(w, Statics::get().allySpawn, true, &avoid, Statics::get().spawnCenter);
         return;
     }
-    // Monsters do not chase: get out of reach first, then recall (damage would cancel it).
-    if (nav().escapeTurns(w) > 0) {
+    // Enemy champions do chase: a 5-turn recall in their sight just gets interrupted, so walk
+    // home along a route around their reach. One consistent move: previously "escape their
+    // reach" and "walk home" alternated whenever an enemy stood between us and home, and the
+    // champion bounced in place next to it (Varg on packs).
+    bool enemyClose = false;
+    for (const auto& g : w.ghosts)
+        if (w.round - g.round <= 1 && dist(g.pos, w.pos) <= g.range + 5) enemyClose = true;
+    if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit)) {
+        trace().note("enemy close: walking home around it");
+        nav().stepToward(w, Statics::get().allySpawn, true, &avoid, Statics::get().spawnCenter);
+        combat::act(w, combat::Focus{}, false);
+        return;
+    }
+    // Monsters do not chase: get out of their reach first, then recall (damage would cancel it).
+    if (w.incoming > 0 && nav().escapeTurns(w) > 0) {
         if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), tune::monster_range);
         if (nav().escapeTurns(w) > 0) return;
     }
-    // Enemy champions do chase: a 5-turn recall in their sight just gets interrupted, so keep
-    // walking home around them until none has been seen close by.
-    for (const auto& g : w.ghosts)
-        if (w.round - g.round <= 1 && dist(g.pos, w.pos) <= g.range + 5) {
-            trace().note("enemy close: walking home");
-            nav().stepToward(w, Statics::get().allySpawn, true, &avoid, Statics::get().spawnCenter);
-            return;
-        }
     try {
         me.recall();
         trace().action("rc");
