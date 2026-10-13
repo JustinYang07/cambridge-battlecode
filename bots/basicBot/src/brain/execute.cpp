@@ -69,9 +69,18 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
     if (groupMemberInRange(w, g.id)) {
         combat::act(w, focus, true);
     } else {
+        // Aim at members that are still standing; dead members' tiles are empty and standing
+        // next to one leaves us out of reach of the rest (a melee champion would idle forever).
         bc::bitboard goals;
         goals.clear();
-        for (auto t : g.tiles) goals |= nav().standTiles(w, t, w.range);
+        bool anyLive = false;
+        for (const auto& c : w.camps)
+            if (c.groupId == g.id && c.hp > 0) {
+                goals |= nav().standTiles(w, c.pos, w.range);
+                anyLive = true;
+            }
+        if (!anyLive)
+            for (auto t : g.tiles) goals |= nav().standTiles(w, t, w.range);
         // Never stand on a spawn tile unless capturing: an occupied tile stops the whole group respawning.
         goals = goals & ~g.tileMask;
         const auto avoid = w.dangerExcept(g.id);
