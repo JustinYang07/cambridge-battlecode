@@ -31,7 +31,7 @@ which is git-ignored (experiments, replays, scraped games, platform session).
 | **Replays** | Every lab game, every scraped replay, and anything in `replays/` |
 | **Decision explorer** | A per-champion timeline of decisions (colour = option kind, white line = health, red tick = turn lost to fuel). For any round it shows the options the bot weighed and the points behind each score. Includes the embedded official visualiser, draft reasoning and raw logs. |
 | **Maps** | Terrain, camps, altars and constants for the map pool |
-| **Platform** | Live ladder, connecting your account, replay scraping, and an API explorer |
+| **Platform** | Live ladder, connecting your account, replay scraping (ticked teams or the latest games from everyone), scouting of drafts and records, and an API explorer |
 
 ## How decisions are scored
 
@@ -70,10 +70,15 @@ python3 lab/traces.py <replay> --deaths
 - **Trace format.** Writing stdout and formatting text costs fuel, and the engine keeps about
   1 MiB of stdout per team, so the bot writes a compact, self-describing encoding
   (`core/trace.h`). `labkit/replays.py` decodes it.
-- **Scraping.** Match lists need a signed-in session. Paste your browser's `cookie` header on
-  the Platform page. It is stored only in `lab/data/platform.json` (mode 600) and sent only
-  to the event origin. Use the API explorer to confirm the match-list path, then set it
-  under "Match-list endpoints".
+- **Scraping.** Needs a signed-in session. Copy the `event_session` cookie from your browser
+  (DevTools → Application → Cookies → 2026a.battlecode.co.uk) into the Cookie box on the
+  Platform page. It is stored only in `lab/data/platform.json` (mode 600, git-ignored) and
+  sent only to the event site. Sessions expire, so paste a fresh one if scraping reports
+  "not signed in". The scraper walks `/api/v1/match-groups?scope=all[&team=…]` (newest
+  first, paging with `before=<createdAt>_<id>`), opens each finished group, and downloads
+  `/api/v1/matches/<id>/bundle`. Platform bundles contain only the replay, with no stdout,
+  so other teams' games open in the official visualiser. The match statistics (drafts,
+  gems, kills, items) feed the scouting table.
 
 ## Layout
 

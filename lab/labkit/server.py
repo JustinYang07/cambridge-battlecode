@@ -75,9 +75,12 @@ class Lab:
                         meta = json.loads(side.read_text())
                     except json.JSONDecodeError:
                         meta = {}
+                result = meta.get("result") or {}
                 out.append({"path": str(p.relative_to(config.ROOT)), "source": source, "map": meta.get("map"),
-                            "botA": None, "botB": None, "title": p.stem, "time": p.stat().st_mtime,
-                            "context": meta.get("context")})
+                            "botA": (meta.get("teamA") or {}).get("teamName"), "botB": (meta.get("teamB") or {}).get("teamName"),
+                            "winner": meta.get("winner"), "rounds": meta.get("rounds"),
+                            "gems": [t.get("gems") for t in result.get("teams", [])] or None,
+                            "title": p.stem, "time": p.stat().st_mtime})
         out.sort(key=lambda r: r.get("time") or 0, reverse=True)
         return out
 
@@ -91,6 +94,15 @@ class Lab:
         data = replays.read_bundle(path)
         data["path"] = rel
         data["game"] = self._game_for(rel)
+        side = path.with_suffix(".json")
+        if data["game"] is None and side.exists():
+            try:
+                meta = json.loads(side.read_text())
+                data["game"] = {"map": meta.get("map"), "botA": (meta.get("teamA") or {}).get("teamName"),
+                                "botB": (meta.get("teamB") or {}).get("teamName"), "result": meta.get("result"),
+                                "scraped": meta}
+            except json.JSONDecodeError:
+                pass
         with self._lock:
             self._decoded[key] = data
             while len(self._decoded) > 12:
@@ -258,6 +270,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(lab.platform.probe(q.get("path", "")))
         if path == "/api/platform/scrape-log":
             return self._json(lab.scrape_log[-200:])
+        if path == "/api/platform/scouting":
+            return self._json(platform.scouting())
         self._error(404, "unknown endpoint")
 
     def _api_post(self, path: str, body: dict) -> None:
@@ -283,14 +297,10 @@ class Handler(BaseHTTPRequestHandler):
             name = runner.snapshot(body["bot"], body.get("label") or None, body.get("gitRef") or None)
             return self._json({"name": name})
         if path == "/api/platform/settings":
-            paths = body.get("matchesPaths")
-            if isinstance(paths, str):
-                paths = [p.strip() for p in paths.splitlines() if p.strip()]
-            return self._json(lab.platform.save_settings(cookie=body.get("cookie"), token=body.get("token"),
-                                                         matchesPaths=paths))
+            return self._json(lab.platform.save_settings(cookie=body.get("cookie"), token=body.get("token")))
         if path == "/api/platform/scrape":
             team_ids = body.get("teamIds") or []
-            limit = int(body.get("limit") or 20)
+            limit = max(1, min(int(body.get("limit") or 20), 500))
 
             def work():
                 log = lambda line: lab.scrape_log.append(time.strftime("%H:%M:%S ") + line)  # noqa: E731
