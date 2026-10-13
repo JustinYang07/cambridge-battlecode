@@ -128,7 +128,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("abandon fight", tune::abandon_factor);
     }
     // Gem and gold clusters: quick, free and safe, a good use of time between bigger camps.
-    if (g.harmless && c.travel <= tune::safe_camp_radius) o.mul("safe camp nearby", tune::safe_camp_bonus);
+    // Waiting for a respawn is neither a quick safe kill nor finishing what we started: those
+    // bonuses made a respawning gem cluster outscore every wolf (expanse), so they skip waits.
+    const bool waiting = c.wait > 0;
+    if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds)
@@ -141,8 +144,8 @@ Option scoreGroup(World& w, const Candidate& c) {
         const float ratio = pressure / std::max(w.alliedPower(g.center, 6), 1.0f);
         if (ratio > 1.0f) o.mul("contested", 1.0f / (1.0f + (ratio - 1.0f) * static_cast<float>(w.gems) / 40.0f));
     }
-    if (w.lastTarget == g.id && (w.lastOption == static_cast<int>(OptionKind::farm) ||
-                                 w.lastOption == static_cast<int>(OptionKind::capture))) {
+    if (!waiting && w.lastTarget == g.id && (w.lastOption == static_cast<int>(OptionKind::farm) ||
+                                             w.lastOption == static_cast<int>(OptionKind::capture))) {
         // Finish what we started, all the more when we have already put damage into it.
         const float done = std::clamp(1.0f - mem.healthLeft, 0.0f, 1.0f);
         o.mul("committed", tune::engaged_bonus + tune::focus_bonus_per_damage * done);
@@ -185,7 +188,10 @@ void farm(World& w, std::vector<Option>& out) {
             minKill = g.totalHealth * left /
                       (std::max(combat::campDamagePerTurn(w, g), 1.0f) * static_cast<float>(tune::max_team_per_camp));
         }
-        const float time = static_cast<float>(cheb) + tune::capture_turns + minKill;
+        // Include the respawn wait: without it a respawning camp's bound looked huge, it took
+        // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
+        // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
+        const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
         pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier};
     }
     fuel::mark("farm.pre");
