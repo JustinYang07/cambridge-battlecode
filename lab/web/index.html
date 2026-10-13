@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CAMBC Lab</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2338bdf8'/%3E%3Cpath d='M4 11l3-6 2 4 1.5-2L12 11' stroke='%23051018' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="shell">
+    <nav class="sidebar">
+      <div class="brand"><span class="logo"></span><div><b>CAMBC Lab</b><small>backtest · inspect · iterate</small></div></div>
+      <a href="#/" data-route="dashboard">Dashboard</a>
+      <a href="#/lab" data-route="lab">A/B Lab</a>
+      <a href="#/replays" data-route="replays">Replays</a>
+      <a href="#/maps" data-route="maps">Maps</a>
+      <a href="#/platform" data-route="platform">Platform &amp; scraping</a>
+      <div class="sidebar-foot" id="jobstatus"></div>
+    </nav>
+    <main id="view"><div class="loading">Loading…</div></main>
+  </div>
+  <div id="toast"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
