@@ -37,5 +37,10 @@ struct Focus {
 void act(World& w, const Focus& focus, bool beforeMove);
 // Cast support abilities (heals, shields) that do not depend on a target.
 void support(World& w);
+// A damage spell reaches 4 tiles, beyond basic-attack range (and monster range 3): cast it
+// instead of stepping closer. Returns true if a spell was cast.
+bool castFromRange(World& w, const Focus& focus);
+// Stun or hit an enemy that is tributing or recalling: a stun cancels the channel.
+bool interruptChannels(World& w);
 
 } // namespace combat

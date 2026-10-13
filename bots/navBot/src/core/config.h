@@ -33,6 +33,12 @@ inline constexpr float heal_threshold = 0.35f;      // below this fraction, heal
 inline constexpr int recall_walk_cutoff = 6;        // walk home instead of recalling if this close
 inline constexpr int monster_range = 3;
 
+// ---- staying alive around enemy champions
+inline constexpr int enemy_memory_rounds = 10;      // remember enemy sightings this long
+inline constexpr int enemy_watch_radius = 7;        // enemies this close count as pressure
+inline constexpr float alone_bank_factor = 0.8f;    // solo champions bank at this fraction of their target
+inline constexpr int bag_avoid_gems = 20;           // carrying this many gems, path around enemy reach
+
 // ---- fighting enemy champions
 inline constexpr float kill_gold_value = 50.0f;
 inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit

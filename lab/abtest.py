@@ -34,8 +34,10 @@ def print_report(exp: dict) -> None:
         print(f"{g['map']:<12}{g['opponent']:<24}{g['candidateSide']:<6}{verdict:<8}{gems:>11}{r['rounds']:>7}")
     o = summary["overall"]
     if o["played"]:
-        print(f"\n{exp['candidate']}: {o['wins']}W {o['losses']}L of {o['played']}, "
-              f"avg gem diff {o['gemDiff'] / o['played']:+.0f}, faults {o['faults']}")
+        n = o["played"]
+        print(f"\n{exp['candidate']}: {o['wins']}W {o['losses']}L of {n}, "
+              f"avg gem diff {o['gemDiff'] / n:+.0f}, faults {o['faults']} | per game: deaths {o['deaths'] / n:.1f}, "
+              f"killed by enemy {o['killedByEnemy'] / n:.1f}, gems lost {o['gemsLost'] / n:.0f}")
 
 
 def main() -> int:

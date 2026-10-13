@@ -109,6 +109,13 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("abandon fight", 0.7f);
     }
     if (mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= 10) o.mul("enemy nearby", 0.6f);
+    // Enemy champions around the camp: worse the more we carry and the more outnumbered we are.
+    const float pressure = w.enemyPressure(g.center, tune::enemy_watch_radius);
+    if (pressure > 0 && w.gems >= tune::bag_avoid_gems) {
+        // Only a real bag in front of a stronger enemy group is worth giving up a camp for.
+        const float ratio = pressure / std::max(w.alliedPower(g.center, 6), 1.0f);
+        if (ratio > 1.0f) o.mul("contested", 1.0f / (1.0f + (ratio - 1.0f) * static_cast<float>(w.gems) / 40.0f));
+    }
     if (w.lastTarget == g.id && (w.lastOption == static_cast<int>(OptionKind::farm) ||
                                  w.lastOption == static_cast<int>(OptionKind::capture)))
         o.mul("committed", tune::engaged_bonus);

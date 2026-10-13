@@ -1,4 +1,5 @@
 #include "world.h"
+#include <algorithm>
 #include <variant>
 #include "config.h"
 #include "fuel.h"
@@ -108,8 +109,13 @@ void World::refresh(bool firstTurn) {
             e.range = c.attack_range();
             e.channeling = c.is_recalling() || c.is_submitting_gems();
             enemies.push_back(e);
+            const float dps = e.strength + e.focus * 1.5f / tune::spell_cooldown;
+            auto it = std::find_if(ghosts.begin(), ghosts.end(), [&](const EnemyGhost& g) { return g.handle == c; });
+            if (it == ghosts.end()) ghosts.push_back({c, e.pos, round, dps, e.range});
+            else *it = {c, e.pos, round, dps, e.range};
         }
     }
+    std::erase_if(ghosts, [&](const EnemyGhost& g) { return round - g.round > tune::enemy_memory_rounds; });
     fuel::mark("refresh.champs");
 
     // Camps: presence from camp_tiles against the static camp table.
@@ -235,6 +241,36 @@ bool World::abilityReady(int slot) {
     auto& r = ready_[static_cast<std::size_t>(slot)];
     if (r < 0) r = (*abilities_)[static_cast<std::size_t>(slot)].is_ready() ? 1 : 0;
     return r == 1;
+}
+
+float World::enemyPressure(bc::vec2 at, int radius) const {
+    float total = 0;
+    for (const auto& g : ghosts) {
+        const int age = round - g.round;
+        // An unseen enemy may have walked toward us since: widen the radius with its age.
+        if (dist(g.pos, at) > radius + age) continue;
+        total += g.dps * (age == 0 ? 1.0f : 0.6f);
+    }
+    return total;
+}
+
+float World::alliedPower(bc::vec2 at, int radius) const {
+    const float mine = strength * (1.0f + (kit.hasReset ? tune::reset_attack_bonus : 0.0f)) + kit.spellDps;
+    return mine * static_cast<float>(1 + alliesWithin(at, radius));
+}
+
+int World::alliesWithin(bc::vec2 at, int radius) const {
+    int n = 0;
+    for (const auto& a : allies) n += dist(a.pos, at) <= radius;
+    return n;
+}
+
+bc::bitboard World::enemyReach() const {
+    bc::bitboard zone;
+    zone.clear();
+    for (const auto& g : ghosts)
+        if (round - g.round <= 3) zone.draw_chebyshev(g.pos, static_cast<float>(g.range + 2 + (round - g.round)));
+    return zone;
 }
 
 bool World::campsInRangeOf(bc::vec2 tile, int r) const {

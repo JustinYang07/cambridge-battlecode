@@ -93,7 +93,10 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             const auto far = goals & ~closeIn;
             if (!far.is_empty()) goals = far;
         }
-        const auto avoid = w.dangerExcept(g.id);
+        auto avoid = w.dangerExcept(g.id);
+        if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
+        // Casters hit from 4 tiles: spend the turn casting rather than walking into range.
+        combat::castFromRange(w, focus);
         nav().stepToward(w, goals, dist(w.pos, g.center) > 4, &avoid);
         combat::act(w, focus, false);
     }
@@ -113,7 +116,22 @@ void capture(World& w, const GroupInfo& g) {
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
     const auto altar = Statics::get().altars[static_cast<std::size_t>(altarIdx)];
-    if (dist(w.pos, altar) > 1) nav().stepToward(w, altar, 1, dist(w.pos, altar) > 3, &w.danger);
+    auto avoid = w.danger;
+    if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
+    if (dist(w.pos, altar) > 1) nav().stepToward(w, altar, 1, dist(w.pos, altar) > 3, &avoid);
+    // A tribute is a stationary channel a stun or kill cancels: never start a long one with
+    // an enemy able to reach us before it completes.
+    const int tributeTurns = std::max(1, (w.gems + 9) / 10);
+    bool enemyClose = false;
+    for (const auto& g : w.ghosts)
+        if (w.round == g.round && dist(g.pos, w.pos) <= g.range + 1 + tributeTurns) enemyClose = true;
+    // Only abort when that enemy group out-guns us here; otherwise stand and tribute.
+    enemyClose = enemyClose && w.enemyPressure(w.pos, tune::enemy_watch_radius) > w.alliedPower(w.pos, 5);
+    if (dist(w.pos, altar) <= 1 && enemyClose && tributeTurns > 1) {
+        trace().note("unsafe to tribute");
+        if (!nav().stepEscape(w)) nav().stepToward(w, Statics::get().allySpawn, true);
+        return;
+    }
     if (dist(w.pos, altar) <= 1) {
         try {
             me.submit_gems(altar);
@@ -143,8 +161,9 @@ void heal(World& w) {
         return;
     }
     const int walk = nav().distTo(w, Statics::get().spawnCenter);
+    const auto avoid = w.danger | w.enemyReach();
     if (walk <= tune::recall_walk_cutoff) {
-        nav().stepToward(w, Statics::get().allySpawn, true, &w.danger);
+        nav().stepToward(w, Statics::get().allySpawn, true, &avoid);
         return;
     }
     // Monsters do not chase: get out of reach first, then recall (damage would cancel it).
@@ -152,6 +171,14 @@ void heal(World& w) {
         if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), tune::monster_range);
         if (nav().escapeTurns(w) > 0) return;
     }
+    // Enemy champions do chase: a 5-turn recall in their sight just gets interrupted, so keep
+    // walking home around them until none has been seen close by.
+    for (const auto& g : w.ghosts)
+        if (w.round - g.round <= 1 && dist(g.pos, w.pos) <= g.range + 5) {
+            trace().note("enemy close: walking home");
+            nav().stepToward(w, Statics::get().allySpawn, true, &avoid);
+            return;
+        }
     try {
         me.recall();
         trace().action("rc");
@@ -181,6 +208,8 @@ void fight(World& w, const Option& o) {
 } // namespace
 
 void execute(World& w, const Option& o) {
+    // Whatever we are doing, cancelling an enemy tribute or recall is worth a stun.
+    combat::interruptChannels(w);
     const auto& statics = Statics::get();
     const bool farming = o.kind == OptionKind::farm || o.kind == OptionKind::capture;
     comms::claimGroup(w.slot, farming ? o.target : -1);

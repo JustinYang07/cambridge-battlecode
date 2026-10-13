@@ -47,10 +47,20 @@ void bank(World& w, std::vector<Option>& out) {
     o.add("bag", gems);
     o.turns("travel", static_cast<float>(bestTravel));
     o.turns("tribute", std::ceil(gems / 10.0f));
-    o.mul("bag fullness", std::pow(std::min(gems / w.role().bankTarget, 1.5f), 1.5f));
+    // Alone, a full bag is an invitation: bank at a lower bag size.
+    const bool alone = w.alliesWithin(w.pos, 6) == 0;
+    const float target = w.role().bankTarget * (alone ? tune::alone_bank_factor : 1.0f);
+    o.mul("bag fullness", std::pow(std::min(gems / target, 1.5f), 1.5f));
+    if (alone) o.c.note << "alone";
     if (w.teamGems + w.gems >= 1000) o.mul("wins the game", 20.0f);
     if (w.round > 1850) o.mul("score before time", 4.0f);
-    if (combat::threatPerTurn(w, w.pos) > 0) o.mul("enemies near", tune::danger_bank_boost);
+    const float pressure = w.enemyPressure(w.pos, tune::enemy_watch_radius);
+    // Too weak to cross enemy ground with a bag: recalling home keeps the gems, a walk may not.
+    if (pressure > 0 && w.hpFrac() < 0.4f) o.mul("too weak to cross", 0.3f);
+    if (pressure > 0) {
+        const float ratio = pressure / std::max(w.alliedPower(w.pos, 5), 1.0f);
+        o.mul("enemies near", tune::danger_bank_boost * std::clamp(ratio, 0.5f, 3.0f));
+    }
     if (w.lastOption == static_cast<int>(OptionKind::bank)) o.mul("committed", 1.2f);
     // Our camp is respawning: bank in the dead time instead of standing guard with a full bag.
     if (w.lastTarget >= 0 && w.lastOption == static_cast<int>(OptionKind::farm) &&

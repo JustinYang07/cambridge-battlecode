@@ -33,6 +33,16 @@ struct EnemySeen {
     bool channeling = false;  // recalling / tributing: a stationary, interruptible target
 };
 
+// Where an enemy was last seen; vision is not shared, so remembering recent sightings
+// is the only way to avoid walking back into a group that just left our view.
+struct EnemyGhost {
+    cambc::champion handle;
+    cambc::vec2 pos;
+    int round = 0;
+    float dps = 0;
+    int range = 1;
+};
+
 struct AllySeen {
     cambc::vec2 pos;
     std::optional<cambc::champion> handle;  // loaded only when we can heal
@@ -82,6 +92,7 @@ public:
     std::vector<EnemySeen> enemies;
     std::vector<AllySeen> allies;
     std::vector<CampSeen> camps;
+    std::vector<EnemyGhost> ghosts;  // enemies seen recently (including this turn)
 
     // ---- memory across turns
     std::vector<GroupMemory> groups;
@@ -96,6 +107,13 @@ public:
     // Local bit test on this turn's exported vision (bitboard calls cost ~30-300 fuel each).
     bool isVisible(cambc::vec2 t) const;
     bool campsInRangeOf(cambc::vec2 tile, int range) const;
+    // Enemy champion damage per turn that could be on `at` soon (visible + recently seen, decayed).
+    float enemyPressure(cambc::vec2 at, int radius) const;
+    // Our side's damage per turn around `at`: us plus visible allies within `radius`.
+    float alliedPower(cambc::vec2 at, int radius) const;
+    int alliesWithin(cambc::vec2 at, int radius) const;
+    // Tiles enemies can hit soon (their reach + 2), for pathing while carrying gems.
+    cambc::bitboard enemyReach() const;
     float incomingCampDamage(cambc::vec2 tile) const;
     const CampSeen* campAt(cambc::vec2 tile) const;
     // Danger zones except the given group's (we accept its hits while fighting it).

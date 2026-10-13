@@ -239,6 +239,42 @@ void act(World& w, const Focus& focus, bool beforeMove) {
     if (attacked) resetAndAttack(w, focus);
 }
 
+bool castFromRange(World& w, const Focus& focus) {
+    if (w.kit.spellModifiers <= 0) return false;
+    return castOnTargets(w, focus, true);
+}
+
+bool interruptChannels(World& w) {
+    bool anyChanneling = false;
+    for (const auto& e : w.enemies) anyChanneling = anyChanneling || e.channeling;
+    if (!anyChanneling) return false;
+    auto& me = bc::self();
+    if (!me.can_cast()) return false;
+    for (int slot = 0; slot < 2; ++slot) {
+        const auto& a = w.abilities()[static_cast<std::size_t>(slot)];
+        const bool stuns = a.is_cc() || (a.is_aoe_damage() && shape(a).radius > 0 && a.info() &&
+                                         std::holds_alternative<bc::ability_aoe_damage>(*a.info()) &&
+                                         std::get<bc::ability_aoe_damage>(*a.info()).duration > 0);
+        if (!stuns || !w.abilityReady(slot)) continue;
+        const int range = static_cast<int>(shape(a).range);
+        for (auto& e : w.enemies) {
+            if (!e.channeling || e.hp <= 0 || dist(e.pos, w.pos) > range) continue;
+            try {
+                const bool ok = a.is_aoe_damage() ? a.use(e.pos) : a.use(e.handle);
+                if (ok) {
+                    w.spentAbility(slot);
+                    FixedStr<24> msg;
+                    trace().action((msg << "st" << e.pos.x << ',' << e.pos.y).view());
+                    trace().note("interrupted enemy channel");
+                    return true;
+                }
+            } catch (const bc::error&) {
+            }
+        }
+    }
+    return false;
+}
+
 void support(World& w) {
     auto& me = bc::self();
     if (!(w.kit.hasHeal || w.incoming > 0 || !w.enemies.empty())) return;

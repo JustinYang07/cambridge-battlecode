@@ -29,19 +29,25 @@ void survive(World& w, std::vector<Option>& out) {
             if (turnsLeft < escape + 4.0f) o.mul("about to die", 4.0f);
         }
         if (w.gems > 0) o.mul("protect bag", 1.0f + std::min(1.0f, w.gems / 50.0f));
+        // Weak with enemies around: get home before they find us.
+        if (f < 0.6f && w.enemyPressure(w.pos, tune::enemy_watch_radius + 3) > 0) o.mul("enemies around", 2.5f);
         o.finish();
         out.push_back(std::move(o));
     }
 
     const float threat = combat::threatPerTurn(w, w.pos);
-    if (threat > 0) {
-        const float turnsToDie = w.hp / threat;
-        const float danger = std::clamp((10.0f - turnsToDie) / 10.0f, 0.0f, 1.0f);
+    const float pressure = w.enemyPressure(w.pos, 5);
+    if (threat > 0 || pressure > 0) {
+        const float turnsToDie = w.hp / std::max(threat, pressure);
+        const float outnumbered = pressure / std::max(w.alliedPower(w.pos, 5), 1.0f);
+        // Danger rises as death gets close, and with a bag when we are outnumbered.
+        const float bagRisk = w.gems >= tune::bag_avoid_gems ? (outnumbered - 1.0f) * 0.8f : 0.0f;
+        const float danger = std::clamp(std::max((10.0f - turnsToDie) / 10.0f, bagRisk), 0.0f, 1.0f);
         Option o;
         o.kind = OptionKind::flee;
         o.c.target << "flee";
         o.add("danger", danger * 150.0f);
-        o.add("bag", static_cast<float>(w.gems) * 0.5f * danger);
+        o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
         o.turns("lost farming", 25.0f);
         o.c.note << "die in " << static_cast<int>(turnsToDie);
         o.finish();

@@ -207,7 +207,7 @@ def aggregate(exp: dict) -> dict:
     """Candidate-centric totals: overall, per map and per opponent."""
     def blank():
         return {"played": 0, "wins": 0, "losses": 0, "gemDiff": 0, "gemsFor": 0, "gemsAgainst": 0,
-                "rounds": 0, "faults": 0}
+                "rounds": 0, "faults": 0, "deaths": 0, "killedByEnemy": 0, "gemsLost": 0}
 
     overall, per_map, per_opp = blank(), {}, {}
     for g in exp["games"]:
@@ -225,6 +225,11 @@ def aggregate(exp: dict) -> dict:
             bucket["gemDiff"] += gems_for - gems_against
             bucket["rounds"] += r.get("rounds") or 0
             bucket["faults"] += r["faults"][mine]
+            ours, theirs = r["teams"][mine], r["teams"][1 - mine]
+            bucket["deaths"] += ours.get("deaths", 0)
+            bucket["killedByEnemy"] += theirs.get("kills", 0)
+            # Gems picked up but never tributed (lost to deaths, or still carried at the end).
+            bucket["gemsLost"] += sum(c.get("collectedGems", 0) - c.get("submittedGems", 0) for c in ours.get("champions", []))
     return {"overall": overall, "perMap": per_map, "perOpponent": per_opp}
 
 
