@@ -51,6 +51,14 @@ inline constexpr float gold_value_opening = 0.2f;  // gems per gold in the openi
 inline constexpr int opening_rounds = 300;
 inline constexpr float opening_gold_bonus = 1.0f;   // gold-only clusters in the opening (A/B: 1.8 cost ~125 gems/game, 3.0 neutral; off)
 
+// ---- decision stability
+inline constexpr float switch_hysteresis = 1.2f;    // last turn's decision gets this edge
+inline constexpr int flip_lock_turns = 6;           // after A,B,A,B commit to the newest choice this long
+inline constexpr float lock_emergency_hp = 0.3f;    // below this health a lock no longer binds
+inline constexpr int party_commit_turns = 8;        // once a party is ready, engage for at least this long
+inline constexpr float stuck_factor = 0.3f;         // a decision that left us bouncing between two tiles...
+inline constexpr int stuck_turns = 8;               // ...is penalised this long
+
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
 inline constexpr int build_variant = 7;            // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,

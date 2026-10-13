@@ -18,8 +18,7 @@ void fight(World& w, std::vector<Option>& out) {
         o.kind = OptionKind::fight;
         o.enemy = e.handle;
         o.at = e.pos;
-        o.c.target << 'e';
-        o.c.target.point(e.pos.x, e.pos.y);
+        o.c.target << 'e' << static_cast<int>(static_cast<cambc::handle_champion_t>(e.handle));
         o.add("their bag", static_cast<float>(e.gems));
         o.add("kill gold", tune::kill_gold_value * goldValue(w));
         o.turns("travel", static_cast<float>(std::max(0, dist(w.pos, e.pos) - w.range)));

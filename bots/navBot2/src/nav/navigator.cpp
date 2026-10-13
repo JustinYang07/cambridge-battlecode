@@ -119,9 +119,20 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     bc::bitboard visited, here;
     here.clear();
     here.set(w.pos);
-    if (avoid) {
-        // First try a route that never enters the avoided zones (our own tile may be inside one).
-        auto walls = blockedNow | (*avoid & ~goals);
+    // While a decision is marked stuck (we were bouncing between two tiles), ignore the avoid
+    // layer: a safe route and the plain fallback pointing opposite ways caused exactly that.
+    if (avoid && w.stuckTurns == 0) {
+        // First try a route that never enters the avoided zones. If we are already inside one,
+        // free a small bubble around us so the safe route can lead out of it; otherwise every
+        // step from in here fell back to the plain route, which pointed back the way we came.
+        auto zone = *avoid & ~goals;
+        if (zone.is_set(w.pos)) {
+            bc::bitboard bubble;
+            bubble.clear();
+            bubble.draw_chebyshev(w.pos, 2.0f);
+            zone = zone & ~bubble;
+        }
+        auto walls = blockedNow | zone;
         walls.set(w.pos, false);
         field.compute_to(walls, goals, here, visited);
         if (visited.is_set(w.pos)) blockedNow = walls;

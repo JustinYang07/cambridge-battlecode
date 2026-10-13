@@ -102,6 +102,15 @@ public:
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
     cambc::vec2 lastAttacked{-1, -1};  // camp we hit last turn: keep hitting it until it dies
+    // Recent decisions (kind, target; newest first) for hysteresis and flip detection.
+    std::array<std::pair<int, std::string>, 4> history{};
+    std::pair<int, std::string> lock{-1, ""};
+    int lockTurns = 0;
+    int partyGroup = -1, partyReadyUntil = -1;  // once a party is judged ready, engage for a while
+    std::array<cambc::vec2, 6> posHistory{};     // our tile after each turn, newest first
+    std::pair<int, std::string> stuck{-1, ""};   // decision that left us bouncing between two tiles
+    int stuckTurns = 0;
+    bool forceReplan = false;
     float prevHp = -1;
 
     void refresh(bool firstTurn);

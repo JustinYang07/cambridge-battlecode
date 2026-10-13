@@ -62,6 +62,15 @@ void bank(World& w, std::vector<Option>& out) {
         o.mul("enemies near", tune::danger_bank_boost * std::clamp(ratio, 0.5f, 3.0f));
     }
     if (w.lastOption == static_cast<int>(OptionKind::bank)) o.mul("committed", 1.2f);
+    // Same test the executor uses before tributing: a stronger enemy close to the altar means
+    // we would only walk up, back off and walk up again. Pick something else instead.
+    const auto at = altars[static_cast<std::size_t>(bestIdx)];
+    const int tributeTurns = std::max(1, (w.gems + 9) / 10);
+    bool enemyClose = false;
+    for (const auto& gh : w.ghosts)
+        if (w.round == gh.round && dist(gh.pos, at) <= gh.range + 2 + tributeTurns) enemyClose = true;
+    if (enemyClose && tributeTurns > 1 && w.enemyPressure(at, tune::enemy_watch_radius) > w.alliedPower(at, 5))
+        o.mul("unsafe altar", 0.2f);
     // Our camp is respawning: bank in the dead time instead of standing guard with a full bag.
     if (w.lastTarget >= 0 && w.lastOption == static_cast<int>(OptionKind::farm) &&
         w.lastTarget < static_cast<int>(w.groups.size())) {

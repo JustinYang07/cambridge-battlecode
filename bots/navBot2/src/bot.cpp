@@ -19,7 +19,7 @@ bool isGroupPlan(const Option& o) { return o.kind == OptionKind::farm || o.kind 
 } // namespace
 
 bool Bot::needsReplan(const World& w) const {
-    if (!plan_ || planAge_ >= tune::replan_every) return true;
+    if (!plan_ || planAge_ >= tune::replan_every || w.forceReplan) return true;
     if (w.beingHit || w.incoming > 0 || !w.enemies.empty() || w.gems != planGems_) return true;
     if (w.hpFrac() < 0.6f) return true;
     // Only steady, long-running plans are worth keeping; everything else is re-evaluated.
@@ -71,8 +71,9 @@ void Bot::play_turn() {
         std::vector<Option> options;
         int chosen = -1;
         if (needsReplan(w)) {
+            w.forceReplan = false;
             options = brain::think(w);
-            chosen = brain::choose(options);
+            chosen = brain::choose(options, w);
             if (chosen >= 0) {
                 plan_ = options[static_cast<std::size_t>(chosen)];
                 planAge_ = 0;
@@ -93,6 +94,7 @@ void Bot::play_turn() {
             const auto& pick = options[static_cast<std::size_t>(chosen)];
             changed = w.lastOption != static_cast<int>(pick.kind) || w.lastTarget != pick.target;
             brain::execute(w, pick);
+            brain::noteMovement(w);
         }
         fuel::mark("execute");
 

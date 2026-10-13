@@ -87,6 +87,8 @@ class _Decoder:
                 return f"altar({x},{y})"
         if code.startswith("e("):
             return "enemy" + code[1:]
+        if code.startswith("e") and code[1:].isdigit():
+            return f"enemy #{code[1:]}"
         return code
 
     def line(self, tag: str, value, pos: int) -> None:

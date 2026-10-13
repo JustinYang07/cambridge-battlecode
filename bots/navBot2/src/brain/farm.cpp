@@ -81,7 +81,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.expectDamage = fight.damage;
 
         const bool engaged = w.engagedGroup == g.id;
-        const float escapeCost = static_cast<float>(nav().escapeTurns(w)) * solo.hitting;
+        // Only charge the walk-out when monsters are already hitting us. Charging it whenever we
+        // stood inside a sleeping camp's range made the verdict flip with every step in and out
+        // (Varg alternated farm / heal-first on collision for 50+ rounds).
+        const float escapeCost = engaged ? static_cast<float>(nav().escapeTurns(w)) * solo.hitting : 0.0f;
         if (fight.damage > budget) {
             o.mul("too strong", 0.05f);
         } else if (fight.damage + reserve + escapeCost > w.hp) {

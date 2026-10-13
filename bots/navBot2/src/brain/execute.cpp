@@ -36,7 +36,14 @@ int alliesNear(const World& w, const GroupInfo& g) {
 // Wait just outside monster range until enough allies have arrived to pull the group.
 bool waitForParty(World& w, const GroupInfo& g, int need) {
     const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
-    const bool partyReady = need <= 1 || alliesNear(w, g) >= need - 1;
+    // Readiness has hysteresis: allies hovering at the edge of the count radius used to flip
+    // it every turn, so two champions stepped in and out waiting on each other.
+    const bool committed = w.partyGroup == g.id && w.round <= w.partyReadyUntil;
+    const bool partyReady = need <= 1 || committed || alliesNear(w, g) >= need - 1;
+    if (partyReady && !committed && need > 1) {
+        w.partyGroup = g.id;
+        w.partyReadyUntil = w.round + tune::party_commit_turns;
+    }
     if (mem.healthLeft < 0.99f || partyReady) {
         w.waitingTurns = 0;
         return false;
@@ -101,7 +108,10 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         combat::act(w, focus, false);
     }
     // Last monster just died: start standing on the capture tiles straight away.
-    if (groupVisiblyCleared(w, g) && !g.tileMask.is_set(w.pos) && bc::self().can_move()) {
+    // Not while it is respawning: then the "step off the spawn tile" rule above fires next turn
+    // and the two bounced champions between tiles for 100+ rounds.
+    if (status != GroupStatus::respawning && groupVisiblyCleared(w, g) && !g.tileMask.is_set(w.pos) &&
+        bc::self().can_move()) {
         trace().note("cleared");
         nav().stepToward(w, g.tileMask, false);
     }
@@ -116,22 +126,27 @@ void capture(World& w, const GroupInfo& g) {
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
     const auto altar = Statics::get().altars[static_cast<std::size_t>(altarIdx)];
-    auto avoid = w.danger;
-    if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
-    if (dist(w.pos, altar) > 1) nav().stepToward(w, altar, 1, dist(w.pos, altar) > 3, &avoid);
-    // A tribute is a stationary channel a stun or kill cancels: never start a long one with
-    // an enemy able to reach us before it completes.
+    // A tribute is a stationary channel a stun or kill cancels: never start a long one with a
+    // stronger enemy able to reach the altar before it completes. Judged at the altar (not at
+    // our tile) so the verdict does not flip as we step toward it and back.
     const int tributeTurns = std::max(1, (w.gems + 9) / 10);
     bool enemyClose = false;
     for (const auto& g : w.ghosts)
-        if (w.round == g.round && dist(g.pos, w.pos) <= g.range + 1 + tributeTurns) enemyClose = true;
-    // Only abort when that enemy group out-guns us here; otherwise stand and tribute.
-    enemyClose = enemyClose && w.enemyPressure(w.pos, tune::enemy_watch_radius) > w.alliedPower(w.pos, 5);
-    if (dist(w.pos, altar) <= 1 && enemyClose && tributeTurns > 1) {
-        trace().note("unsafe to tribute");
-        if (!nav().stepEscape(w)) nav().stepToward(w, Statics::get().allySpawn, true);
+        if (w.round == g.round && dist(g.pos, altar) <= g.range + 2 + tributeTurns) enemyClose = true;
+    const bool unsafe = tributeTurns > 1 && enemyClose &&
+                        w.enemyPressure(altar, tune::enemy_watch_radius) > w.alliedPower(altar, 5);
+    if (unsafe) {
+        // Keep our distance instead of walking up and backing off every other turn.
+        trace().note("unsafe to tribute: holding");
+        if (dist(w.pos, altar) <= 1 || w.enemyPressure(w.pos, 3) > 0) {
+            if (!nav().stepEscape(w)) nav().stepToward(w, Statics::get().allySpawn, true);
+        }
+        combat::act(w, combat::Focus{}, false);
         return;
     }
+    auto avoid = w.danger;
+    if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
+    if (dist(w.pos, altar) > 1) nav().stepToward(w, altar, 1, dist(w.pos, altar) > 3, &avoid);
     if (dist(w.pos, altar) <= 1) {
         try {
             me.submit_gems(altar);
