@@ -77,6 +77,11 @@ public:
     const Tuning& role() const { return tuning(type); }
     // Another allied slot in `mask` (bit per slot) is a tank that will lead the pull.
     bool tankAmong(unsigned mask) const;
+    // An ally is the monsters' target in a group already in a fight, and stays the target once
+    // we stand at our attack range: it is nearer, or as near and drafted earlier (monsters hit
+    // the nearest champion each round, ties to the earliest draft slot). Then we can (re)join
+    // without taking the hits.
+    bool allyTanking(int groupId) const;
 
     // ---- this turn
     int round = 0;
@@ -139,6 +144,7 @@ private:
     void loadNearbyCamps();
     void updateGroups();
     std::vector<std::uint8_t> visibleBits_, campBits_;
+    std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::optional<std::array<cambc::ability, 2>> abilities_;
     std::array<signed char, 2> ready_{-1, -1};  // -1 unknown this turn, else 0/1
 };

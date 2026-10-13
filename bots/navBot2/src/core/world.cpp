@@ -33,6 +33,7 @@ void World::refresh(bool firstTurn) {
         ranged = me.attack_range() > 1;
         groups.assign(statics.groups.size(), GroupMemory{});
         const auto allyList = bc::champions(bc::team::ally);
+        allyHandles_ = allyList;
         allyCount = static_cast<int>(std::min<std::size_t>(allyList.size(), allyTypes.size()));
         for (std::size_t i = 0; i < allyList.size(); ++i) {
             if (allyList[i] == me) slot = static_cast<int>(i);
@@ -236,6 +237,33 @@ bool World::isVisible(bc::vec2 t) const { return bit(visibleBits_, t); }
 bool World::tankAmong(unsigned mask) const {
     for (int i = 0; i < allyCount; ++i)
         if (i != slot && (mask >> i) & 1u && isTank(allyTypes[static_cast<std::size_t>(i)])) return true;
+    return false;
+}
+
+bool World::allyTanking(int groupId) const {
+    if (groupId < 0 || groups[static_cast<std::size_t>(groupId)].healthLeft >= 0.99f) return false;
+    // Cheap test first: any ally (from the occupancy board) beside a live member at all.
+    bool anyNear = false;
+    for (const auto& c : camps)
+        if (c.groupId == groupId && c.hp > 0 && c.strength > 0)
+            for (const auto& a : allies) anyNear |= dist(a.pos, c.pos) <= tune::monster_range;
+    if (!anyNear) return false;
+    for (int i = 0; i < static_cast<int>(allyHandles_.size()); ++i) {
+        if (i == slot) continue;
+        bc::vec2 at;
+        try {
+            const auto& h = allyHandles_[static_cast<std::size_t>(i)];
+            if (!h.is_visible() || !h.is_alive()) continue;
+            at = h.position();
+        } catch (const bc::error&) {
+            continue;
+        }
+        for (const auto& c : camps) {
+            if (c.groupId != groupId || c.hp <= 0 || c.strength <= 0) continue;
+            const int d = dist(at, c.pos);
+            if (d <= tune::monster_range && (d < range || (d == range && i < slot))) return true;
+        }
+    }
     return false;
 }
 

@@ -62,7 +62,11 @@ Option scoreGroup(World& w, const Candidate& c) {
         // 727 party fights). A tank stands adjacent and was drafted first, so it takes nearly every
         // hit while the rest of the party, ranged allies at full range especially, takes almost none.
         const bool tankLeads = !role.leadsPull && w.tankAmong(comms::claimersMask(g.id, w.slot));
-        const float share = role.leadsPull ? 1.0f : tankLeads ? 0.05f : role.partyAbsorb;
+        // Seen, not assumed: an ally is already beside the fight and the monsters are not hitting
+        // us, so they are on it. Vendetta used to recall from lanes' elk at half health while Varg
+        // took over the hits right behind it.
+        const bool allyTanks = !w.beingHit && w.allyTanking(g.id);
+        const float share = allyTanks ? 0.05f : role.leadsPull ? 1.0f : tankLeads ? 0.05f : role.partyAbsorb;
         // With k attackers the fight is k times shorter and we absorb a share of the hits,
         // so per-head damage is solo * share / k (what campFight computes, without re-simulating).
         auto damageFor = [&](int k) {
@@ -72,7 +76,8 @@ Option scoreGroup(World& w, const Candidate& c) {
         while (need < tune::max_team_per_camp && damageFor(need) > budget) ++need;
         const int k = std::max(need, 1 + claims);
         const auto fight = k == 1 ? solo : combat::campFight(w, g, left, k, share);
-        if (tankLeads) o.c.note << "tank soaks";
+        if (allyTanks) o.c.note << "ally tanking";
+        else if (tankLeads) o.c.note << "tank soaks";
         if (role.followsParty && claims > 0) o.mul("support joins party", 1.5f);
         o.need = need;
         if (k > 1) o.mul("our share", 1.0f / static_cast<float>(k));

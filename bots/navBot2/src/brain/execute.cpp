@@ -195,9 +195,17 @@ void heal(World& w) {
         return;
     }
     // Monsters do not chase: get out of their reach first, then recall (damage would cancel it).
+    const int leftGroup = w.engagedGroup;
     if (w.incoming > 0 && nav().escapeTurns(w) > 0) {
         if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), tune::monster_range);
         if (nav().escapeTurns(w) > 0) return;
+        // An ally still beside the camp takes over the hits once we are out of reach: look again
+        // next turn (rejoining may beat the trip home) instead of committing to a 5-turn recall.
+        if (w.allyTanking(leftGroup)) {
+            trace().note("ally tanking: rethinking before recall");
+            combat::act(w, combat::Focus{}, false);
+            return;
+        }
     }
     try {
         me.recall();
