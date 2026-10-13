@@ -9,6 +9,7 @@ self-describing encoding (see bots/basicBot/src/core/trace.h):
   @G[id,"label",x,y]     camp-group legend; targets "g<id>"
   @A[[x,y],...]          altar legend; targets "a<index>"
   @U[u,"champion"]       which champion plays slot u
+  @P[regions,[region per group],[region per slot]]   team plan
   @t[r,u,x,y,hp,gems,gold,kind,score,fuel,"target","actions",lost]          every turn
   @T[r,u,hp,maxHp,gems,gold,fuel,lost,[[kind,"target",score,x,y,"note",[[factor,value],...]],...],"actions","note"]
   @D{...}                draft scores, once per pick
@@ -63,6 +64,7 @@ class TeamLog:
     groups: dict[int, dict] = field(default_factory=dict)
     altars: list[list[int]] = field(default_factory=list)
     units: dict[int, str] = field(default_factory=dict)
+    plan: dict | None = None
     stdout_bytes: int = 0
 
 
@@ -99,6 +101,8 @@ class _Decoder:
             log.altars = value
         elif tag == "@U":
             log.units[value[0]] = value[1]
+        elif tag == "@P" and isinstance(value, list) and len(value) >= 3:
+            log.plan = {"regions": value[0], "groupRegion": value[1], "slotRegion": value[2]}
         elif tag == "@t" and isinstance(value, list) and len(value) >= 12:
             r, u, x, y, hp, gm, au, kind, score, fuel, target, act = value[:12]
             log.turns.append({"r": r, "u": u, "x": x, "y": y, "hp": hp, "gm": gm, "au": au,
@@ -131,7 +135,7 @@ def _parse_stdout(raw: bytes, limit_other: int = 4000) -> TeamLog:
             continue
         for line in segment.splitlines():
             tag = line[:2]
-            if tag in ("@t", "@T", "@D", "@K", "@G", "@A", "@U"):
+            if tag in ("@t", "@T", "@D", "@K", "@G", "@A", "@U", "@P"):
                 try:
                     value = json.loads(line[2:])
                 except json.JSONDecodeError:
@@ -151,7 +155,7 @@ def read_bundle(path: Path) -> dict:
             name = f"team-{side}.stdout"
             log = _parse_stdout(bundle.read(name)) if name in names else TeamLog()
             out["teams"][side] = {"turns": log.turns, "details": log.details, "drafts": log.drafts,
-                                  "other": log.other, "groups": log.groups, "altars": log.altars, "units": log.units,
+                                  "other": log.other, "groups": log.groups, "altars": log.altars, "units": log.units, "plan": log.plan,
                                   "stdoutBytes": log.stdout_bytes}
     return out
 

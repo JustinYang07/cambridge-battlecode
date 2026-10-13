@@ -52,6 +52,13 @@ void bank(World& w, std::vector<Option>& out) {
     if (w.round > 1850) o.mul("score before time", 4.0f);
     if (combat::threatPerTurn(w, w.pos) > 0) o.mul("enemies near", tune::danger_bank_boost);
     if (w.lastOption == static_cast<int>(OptionKind::bank)) o.mul("committed", 1.2f);
+    // Our camp is respawning: bank in the dead time instead of standing guard with a full bag.
+    if (w.lastTarget >= 0 && w.lastOption == static_cast<int>(OptionKind::farm) &&
+        w.lastTarget < static_cast<int>(w.groups.size())) {
+        const auto& mem = w.groups[static_cast<std::size_t>(w.lastTarget)];
+        const int wait = mem.status == GroupStatus::respawning ? mem.respawnAt - w.round : 0;
+        if (wait >= bestTravel * 2) o.mul("bank while camp respawns", 3.0f);
+    }
     o.finish();
     out.push_back(std::move(o));
 }

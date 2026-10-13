@@ -51,25 +51,68 @@ Scored score(bc::champion_draft pick, int teamSize, bool firstPick) {
     return s;
 }
 
+// Role template by roster size, filled from per-category priority lists. The first pick is
+// always a tank: monsters hit the nearest champion and break ties by draft order, so slot 0
+// soaks camp damage for every party it is in. Priorities follow the ladder's winning drafts.
+// Casters are left out until navBot uses range-4 spells well (A/B showed no gain yet).
+enum class Slot : std::uint8_t { tank, farmer, hybrid, caster, support };
+
+const std::vector<Slot>& templateFor(int teamSize) {
+    static const std::vector<Slot> t3{Slot::tank, Slot::farmer, Slot::hybrid};
+    static const std::vector<Slot> t4{Slot::tank, Slot::farmer, Slot::hybrid, Slot::tank};
+    static const std::vector<Slot> t5{Slot::tank, Slot::farmer, Slot::hybrid, Slot::tank, Slot::farmer};
+    return teamSize <= 3 ? t3 : teamSize == 4 ? t4 : t5;
+}
+
+const std::vector<bc::champion_draft>& priorities(Slot slot) {
+    using D = bc::champion_draft;
+    static const std::vector<D> tank{D::ryth, D::marcella, D::varg, D::ren};
+    static const std::vector<D> farmer{D::vendetta, D::vesper_vale, D::varg, D::cassi_and_issac};
+    static const std::vector<D> hybrid{D::varg, D::marcella, D::ryth, D::vendetta};
+    static const std::vector<D> caster{D::stellar, D::tavi, D::cassi_and_issac, D::prism};
+    static const std::vector<D> support{D::willow, D::stellar};
+    switch (slot) {
+    case Slot::tank: return tank;
+    case Slot::farmer: return farmer;
+    case Slot::hybrid: return hybrid;
+    case Slot::caster: return caster;
+    case Slot::support: return support;
+    }
+    return tank;
+}
+
+const char* slotName(Slot s) {
+    static constexpr std::array<const char*, 5> names{"tank", "farmer", "hybrid", "caster", "support"};
+    return names[static_cast<std::size_t>(s)];
+}
+
 } // namespace
 
 void play_draft() {
     const auto mine = bc::draft::current_draft(bc::team::ally);
     const int teamSize = static_cast<int>(bc::draft::team_size());
+    const auto& plan = templateFor(teamSize);
+    const auto pickIndex = std::min(mine.size(), plan.size() - 1);
+    const Slot want = plan[pickIndex];
+    auto taken = [&](bc::champion_draft d) { return std::find(mine.begin(), mine.end(), d) != mine.end(); };
 
+    // Highest-priority champion of the wanted category we have not picked; otherwise the
+    // best-scoring champion left (rosters are independent, so only our own picks block).
     std::vector<Scored> options;
-    for (int i = 0; i < kChampionDrafts; ++i) {
-        const auto pick = static_cast<bc::champion_draft>(i);
-        if (std::find(mine.begin(), mine.end(), pick) == mine.end()) options.push_back(score(pick, teamSize, mine.empty()));
+    for (auto d : priorities(want))
+        if (!taken(d)) options.push_back({d, static_cast<float>(10 - options.size()), 0, 0, 1});
+    if (options.empty()) {
+        for (int i = 0; i < kChampionDrafts; ++i) {
+            const auto d = static_cast<bc::champion_draft>(i);
+            if (!taken(d)) options.push_back(score(d, teamSize, false));
+        }
+        std::sort(options.begin(), options.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
     }
-    std::sort(options.begin(), options.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
     if (options.empty()) return;
 
     Json j;
-    j.begin().field("pick", static_cast<int>(mine.size())).field("teamSize", teamSize).array("opts");
-    for (const auto& o : options)
-        j.begin().field("k", name(o.pick)).field("s", o.score).field("farm", o.farm).field("survive", o.survive)
-            .field("bodies", o.bodies).end();
+    j.begin().field("pick", static_cast<int>(mine.size())).field("teamSize", teamSize).field("role", slotName(want)).array("opts");
+    for (const auto& o : options) j.begin().field("k", name(o.pick)).field("s", o.score).end();
     j.endArray().field("chosen", name(options.front().pick)).end();
     std::printf("@D%.*s\n", static_cast<int>(j.view().size()), j.view().data());
     std::fflush(stdout);

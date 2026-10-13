@@ -6,6 +6,7 @@
 #include "../core/config.h"
 #include "../core/fuel.h"
 #include "../nav/navigator.h"
+#include "../strategy/plan.h"
 #include "scorers.h"
 
 namespace bc = cambc;
@@ -95,6 +96,13 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (claims > 0) o.mul("ally capturing", tune::ally_claim_factor);
     }
 
+    // Spread out: prefer camps in our squad's region, leave other squads' regions to them.
+    const int home = strategy::homeRegion(w);
+    const int region = home >= 0 ? strategy::plan().groupRegion[static_cast<std::size_t>(g.id)] : -1;
+    if (home >= 0 && region >= 0) {
+        if (region == home) o.mul("home region", tune::home_region_bonus);
+        else o.mul("other squad's region", tune::other_region_factor);
+    }
     if (w.engagedGroup >= 0 && w.engagedGroup != g.id) {
         // Walking away from monsters that are hitting us costs health on the way out.
         o.turns("leave fight", static_cast<float>(nav().escapeTurns(w)));
@@ -119,7 +127,8 @@ void farm(World& w, std::vector<Option>& out) {
     constexpr int kMax = 64;
     std::array<Candidate, kMax> pre;
     int n = 0;
-    const float maxMultiplier = tune::engaged_bonus * 1.3f;
+    // Largest product of '*' factors any option can get (committed, join/support party, home region).
+    const float maxMultiplier = tune::engaged_bonus * 1.5f * tune::home_region_bonus;
     const float gv = goldValue(w);
     for (const auto& g : statics.groups) {
         if (n >= kMax) break;

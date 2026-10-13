@@ -46,6 +46,9 @@ inline constexpr unsigned long long fuel_reserve_full_trace = 40000; // skip the
 inline constexpr unsigned long long fuel_for_full_scoring = 60000;   // score max_scored_groups only above this
 inline constexpr int bfs_radius = 48;
 inline constexpr int replan_every = 8;                               // rescore at least this often
+inline constexpr unsigned long long fuel_for_planning = 70000;      // advance the team plan only with this much left
+inline constexpr float home_region_bonus = 1.5f;                     // camps in our squad's region
+inline constexpr float other_region_factor = 0.4f;                   // camps in another squad's region
 inline constexpr unsigned long long fuel_per_scored_group = 6000;    // farm scoring cost per group
 inline constexpr unsigned long long fresh_turn_fuel = 90000;         // a fresh turn starts with ~96.8k                                // distance-from-us search cut-off
 

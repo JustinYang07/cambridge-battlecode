@@ -3,6 +3,7 @@
 import { api, cssVar, fmt, h, kindColor, kindSwatch, mount, onKey } from "../ui.js";
 import { cellSizeFor, drawMap, drawPoint, drawTarget, drawTrail } from "../mapview.js";
 
+const REGION_COLORS = ["#f97316", "#22c55e", "#3b82f6", "#e879f9", "#facc15", "#14b8a6", "#ef4444", "#a3a3a3"];
 const SLOT_COLORS = ["#38bdf8", "#f472b6", "#a3e635", "#fb923c", "#c084fc", "#facc15", "#2dd4bf", "#f87171"];
 const ACTIONS = [
   [/^m(-?\d+),(-?\d+)$/, "move to ($1,$2)"], [/^d(-?\d+),(-?\d+)$/, "dash to ($1,$2)"],
@@ -115,6 +116,18 @@ export async function render({ path }) {
       const width = Math.max(260, mapCanvas.parentElement?.clientWidth || 400);
       const cell = cellSizeFor(info, width, 460);
       const ctx = drawMap(mapCanvas, info, { cell, legendOnly: !mapInfo });
+      // Team plan: ring each camp group in its region's colour.
+      if (team.plan) {
+        team.plan.groupRegion.forEach((r, gid) => {
+          const g = team.groups[gid];
+          if (r < 0 || !g) return;
+          ctx.strokeStyle = REGION_COLORS[r % REGION_COLORS.length];
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(g.x * cell + cell / 2, g.y * cell + cell / 2, Math.max(cell * 1.6, 6), 0, Math.PI * 2);
+          ctx.stroke();
+        });
+      }
       const sel = turnAt(state.slot, state.round);
       const trail = bySlot[state.slot].filter((t) => t.r <= state.round && t.r > state.round - 40 && t.x >= 0).map((t) => [t.x, t.y]);
       drawTrail(ctx, cell, trail, SLOT_COLORS[state.slot % 8]);
@@ -184,6 +197,8 @@ export async function render({ path }) {
         const t = turnAt(u, state.round);
         return h("tr.click", { onclick: () => { state.slot = u; refresh(); } },
           h("td", h("span.kind", { style: { background: SLOT_COLORS[u % 8], borderRadius: "50%" } }), u === state.slot ? h("b", unitName(u)) : unitName(u)),
+          h("td", team.plan && team.plan.slotRegion[u] !== undefined
+            ? h("span.pill", { style: { color: REGION_COLORS[team.plan.slotRegion[u] % REGION_COLORS.length] } }, `region ${team.plan.slotRegion[u]}`) : ""),
           h("td", t ? [kindSwatch(t.k), t.k] : "–"),
           h("td.muted", t?.label || ""),
           h("td.num", t ? fmt.int(t.hp) : "–"),
@@ -288,7 +303,7 @@ export async function render({ path }) {
       h("div.explorer",
         h("div.grid", { style: { alignContent: "start" } },
           h("div.card", h("h2", mapInfo ? `Map · ${game.map}` : "Map (legend only)"), mapCanvas,
-            h("p.hint", "Dots are your champions at this round; the line is the selected champion's last 40 rounds; the crosshair is its current target.")),
+            h("p.hint", "Dots are your champions at this round; the line is the selected champion's last 40 rounds; the crosshair is its current target. Coloured rings show the team plan's regions (each champion's home region is in the list below).")),
           h("div.card", h("h2", "Champions"), champList)),
         h("div.card", why)));
     requestAnimationFrame(refresh);

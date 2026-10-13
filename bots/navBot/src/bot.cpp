@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
+#include "strategy/plan.h"
 #include "core/comms.h"
 #include "core/config.h"
 #include "core/fixed_str.h"
@@ -60,6 +61,10 @@ void Bot::play_turn() {
         trace().action(me.is_recalling() ? "ch:rc" : me.is_submitting_gems() ? "ch:t" : "ch:tp");
     } else {
         nav().beginTurn();
+        if (!strategy::plan().ready) {
+            strategy::step(w);
+            if (strategy::plan().ready) trace().forceFull();
+        }
         // Commit to a plan like a human would: rescoring every option costs most of a turn's
         // fuel, so only replan when something relevant changed.
         std::vector<Option> options;

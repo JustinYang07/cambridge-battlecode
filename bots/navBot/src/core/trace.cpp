@@ -74,6 +74,18 @@ void Trace::legend() {
     std::fflush(stdout);
 }
 
+void Trace::plan(int regions, const std::vector<int>& groupRegion, const std::array<int, 8>& slotRegion, int bodies) {
+    auto& j = buffer();
+    j.reset();
+    j.raw("@P");
+    j.array().value(static_cast<long long>(regions)).array();
+    for (int r : groupRegion) j.value(static_cast<long long>(r));
+    j.endArray().array();
+    for (int i = 0; i < bodies && i < 8; ++i) j.value(static_cast<long long>(slotRegion[static_cast<std::size_t>(i)]));
+    j.endArray().endArray();
+    write(j.view());
+}
+
 void Trace::beginTurn(int round, int slot, const char* champion) {
     round_ = round;
     slot_ = slot;

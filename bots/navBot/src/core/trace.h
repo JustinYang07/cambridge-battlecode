@@ -7,6 +7,7 @@
 //   @G[id,"label",x,y]     camp-group legend (first turn, slot 0); targets say "g<id>"
 //   @A[[x,y],...]          altar legend (first turn, slot 0); targets say "a<index>"
 //   @U[u,"champion"]       which champion plays slot u (each bot's first turn)
+//   @P[regions,[region per group],[region per slot]]   team plan (slot 0, once)
 //   @t[r,u,x,y,hp,gems,gold,kind,score,fuel,"target","actions",lost]   every turn
 //   @T[r,u,hp,maxHp,gems,gold,fuel,lost,[[kind,"target",score,x,y,"note",[[factor,value],...]],...],"actions","note"]
 // kind and factor are dictionary ids. The detailed @T line is written when the decision
@@ -15,6 +16,7 @@
 // Define BB_NO_TRACE to compile tracing out for fuel-sensitive submissions.
 #include <array>
 #include <string_view>
+#include <vector>
 #include "fixed_str.h"
 
 struct Factor {
@@ -40,6 +42,8 @@ public:
 
     void configure(int teamBodies, int slot, const char* champion);
     void legend();  // camp groups and altars, once per team
+    // Team plan for the lab: @P[regions,[groupRegion...],[slotRegion...]]
+    void plan(int regions, const std::vector<int>& groupRegion, const std::array<int, 8>& slotRegion, int bodies);
     void beginTurn(int round, int slot, const char* champion);
     void state(int x, int y, float hp, float maxHp, int gems, int gold, bool alive);
     // `chosen` must be first; the rest are the best alternatives.
