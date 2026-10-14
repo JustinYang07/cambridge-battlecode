@@ -47,7 +47,7 @@ async function pollJobs() {
     const s = await api("/api/jobs");
     el.replaceChildren(
       s.current ? h("div", "Running ", h("a", { href: `#/exp/${s.current}` }, s.current)) : h("div", "No experiment running"),
-      s.queued ? h("div", `${s.queued} queued`) : null,
+      ...(s.queued ? [h("div", `${s.queued} queued`)] : []),  // a null child would print "null"
     );
   } catch (err) {
     el.textContent = err.message.includes("access key") ? "Access key needed: open the shared link" : "Server offline";

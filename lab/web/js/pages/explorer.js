@@ -31,7 +31,8 @@ export async function render({ path }) {
   const mapInfo = game?.map ? await api(`/api/maps/${game.map}`).catch(() => null) : null;
   const traced = ["a", "b"].filter((s) => data.teams[s].turns.length);
   const state = {
-    tab: traced.length ? "decisions" : "visualiser",
+    tab: traced.length ? "watch" : "visualiser",
+    follow: true,  // watch tab: decisions follow the visualiser's round
     side: game ? (game.candidateSide === "B" && traced.includes("b") ? "b" : traced[0]) : traced[0],
     slot: 0, round: 1,
   };
@@ -39,6 +40,7 @@ export async function render({ path }) {
   const root = h("div");
   mount(root);
   let stopKeys = () => {};
+  let stopPoll = () => {};
 
   function teamName(side) {
     if (game) return side === "a" ? game.botA : game.botB;
@@ -47,6 +49,7 @@ export async function render({ path }) {
 
   function draw() {
     stopKeys();
+    stopPoll();
     const header = h("div.page-head",
       h("div",
         h("h1", game ? `${game.botA} vs ${game.botB}` : data.file),
@@ -58,10 +61,11 @@ export async function render({ path }) {
         traced.length > 1 ? h("div.chips", traced.map((s) => h("span.chip" + (s === state.side ? ".on" : ""),
           { onclick: () => { state.side = s; state.slot = 0; draw(); } }, `${s.toUpperCase()}: ${teamName(s)}`))) : null,
         h("a.btn", { href: `/files/${encodeURI(data.path)}`, download: "" }, "Download")));
-    const tabs = h("div.tabs", [["decisions", "Decisions"], ["visualiser", "Official visualiser"], ["draft", "Draft"], ["logs", "Raw logs"]]
+    const tabs = h("div.tabs", [["watch", "Visualiser + decisions"], ["decisions", "Decisions"], ["visualiser", "Official visualiser"], ["draft", "Draft"], ["logs", "Raw logs"]]
       .map(([k, label]) => h("button" + (state.tab === k ? ".on" : ""), { onclick: () => { state.tab = k; draw(); } }, label)));
     let body;
-    if (state.tab === "decisions") body = traced.length ? decisions() : h("div.empty", "Neither team printed basicBot decision traces. Use the official visualiser or raw logs.");
+    if (state.tab === "decisions" || state.tab === "watch")
+      body = traced.length ? decisions(state.tab === "watch") : h("div.empty", "Neither team printed basicBot decision traces. Use the official visualiser or raw logs.");
     else if (state.tab === "visualiser") body = h("iframe.vis", { src: `/visualiser/index.html?replay=${encodeURIComponent(`/files/${data.path}`)}` });
     else if (state.tab === "draft") body = draft();
     else body = logs();
@@ -69,7 +73,7 @@ export async function render({ path }) {
   }
 
   // ------------------------------------------------------------------ decisions tab
-  function decisions() {
+  function decisions(watch = false) {
     const team = data.teams[state.side];
     const slots = [...new Set(team.turns.map((t) => t.u))].sort((a, b) => a - b);
     if (!slots.includes(state.slot)) state.slot = slots[0];
@@ -224,7 +228,12 @@ export async function render({ path }) {
           h("dt", "bag · gold"), h("dd", `${t.gm} gems · ${t.au} gold`),
           h("dt", "fuel used"), h("dd", t.fuel ? `${fmt.int(t.fuel)} / ~97k` : "–", t.lost ? h("span.bad", ` · ${t.lost} turns lost so far`) : "")),
         h("h3", { style: { marginTop: "16px" } }, d ? `Options considered (scored on round ${d.r}${d.r !== t.r ? `, ${t.r - d.r} rounds ago` : ""})` : "No detailed decision recorded yet"),
-        d?.note ? h("p.hint", d.note) : null,
+        // The bot re-scores far more often than it writes full breakdowns (fuel): when this turn's
+        // choice scores differently, say so instead of implying the old breakdown is current.
+        ...(d && d.r !== t.r && opts[0] && Math.abs(opts[0].s - t.s) > 0.5
+          ? [h("p.hint.warn", `Re-scored since round ${d.r}: this turn the bot chose ${t.k} ${t.label || ""} at ${fmt.num(t.s)} points. The full breakdown below is from round ${d.r}; the bot only records one when its decision changes, its view of enemies changes, or every 25 rounds.`)]
+          : []),
+        ...(d?.note ? [h("p.hint", d.note)] : []),  // replaceChildren would print a null as "null"
         ...opts.map((o, i) => optionCard(o, i === 0, maxScore)));
     }
 
@@ -254,7 +263,9 @@ export async function render({ path }) {
       }
     }
 
-    function setRound(r) {
+    function setRound(r, fromVisualiser = false) {
+      // Moving our own timeline in the watch tab means "let me look around": stop following.
+      if (watch && !fromVisualiser && state.follow) { state.follow = false; followBox.checked = false; }
       state.round = r;
       slider.value = r;
       refresh();
@@ -263,7 +274,7 @@ export async function render({ path }) {
     function refresh() {
       roundLabel.textContent = `round ${state.round} / ${maxRound}`;
       drawTimeline();
-      drawMapFrame();
+      if (!watch) drawMapFrame();
       drawChamps();
       drawWhy();
     }
@@ -281,6 +292,7 @@ export async function render({ path }) {
       e.preventDefault();
     });
 
+    requestAnimationFrame(refresh);
     const summary = h("div.tiles", slots.map((u) => {
       const list = bySlot[u];
       const share = (k) => list.filter((t) => t.k === k).length / Math.max(1, list.length);
@@ -290,6 +302,62 @@ export async function render({ path }) {
         h("div.l", `farm ${fmt.pct(share("farm") + share("capture"))} · bank ${fmt.pct(share("bank"))} · heal ${fmt.pct(share("heal"))} · dead ${fmt.pct(share("dead"))}`),
         h("div.l", `${deaths} deaths · ${list[list.length - 1]?.lost || 0} lost turns`));
     }));
+
+    // ---- watch tab: the official visualiser beside the decision panel. The visualiser is served
+    // from this origin (/visualiser/), so we can read its seek slider, whose aria-valuetext reads
+    // "Round 57 of 490, ..." (or "Draft round 2" during the draft), and follow it.
+    const OFFSET_KEY = "cambc-lab-vis-offset";
+    let offset = 0;
+    try { offset = Number(localStorage.getItem(OFFSET_KEY)) || 0; } catch {}
+    const followBox = h("input", { type: "checkbox", checked: state.follow, onchange: (e) => { state.follow = e.target.checked; } });
+    const visRound = h("span.mono.muted", "visualiser: –");
+    const offsetLabel = h("b.mono", String(offset));
+    const setOffset = (d) => {
+      offset += d;
+      offsetLabel.textContent = (offset > 0 ? "+" : "") + offset;
+      try { localStorage.setItem(OFFSET_KEY, String(offset)); } catch {}
+      lastSeen = null;
+    };
+    const iframe = watch ? h("iframe.vis.watch-frame", { src: `/visualiser/index.html?replay=${encodeURIComponent(`/files/${data.path}`)}` }) : null;
+    let lastSeen = null;
+    function pollVisualiser() {
+      let text = null;
+      try {
+        const el = iframe.contentDocument?.querySelector('input[type="range"][aria-label^="Seek timeline"]');
+        text = el?.getAttribute("aria-valuetext") || null;
+      } catch { return; }  // not loaded yet
+      if (!text) { visRound.textContent = "visualiser: loading…"; return; }
+      const draftMatch = /^Draft round/.test(text);
+      const m = text.match(/Round (\d+)/);
+      visRound.textContent = `visualiser: ${draftMatch ? "draft" : m ? `round ${m[1]}` : text.split(",")[0]}`;
+      if (!m || draftMatch || !state.follow) return;
+      const r = Math.min(maxRound, Math.max(1, Number(m[1]) + offset));
+      if (r !== lastSeen) { lastSeen = r; if (r !== state.round) setRound(r, true); }
+    }
+    if (watch) {
+      const timer = setInterval(pollVisualiser, 150);
+      stopPoll = () => clearInterval(timer);
+    }
+
+    if (watch) {
+      return h("div",
+        h("div.watch",
+          h("div.watch-vis", iframe,
+            h("div.row", { style: { marginTop: "8px", gap: "14px", flexWrap: "wrap" } },
+              h("label.row", followBox, " Follow visualiser"), visRound,
+              h("span.row", { title: "Rounds to add to the visualiser's round before looking up decisions" }, "offset ",
+                h("button", { onclick: () => setOffset(-1) }, "−"), offsetLabel, h("button", { onclick: () => setOffset(1) }, "+")),
+              h("span.hint", "Play or scrub in the visualiser; the panel follows. Click our timeline to browse on your own (turns following off)."))),
+          h("div.watch-side",
+            h("div.card", h("h2", "Champions"), champList),
+            h("div.card", why))),
+        h("div.card", { style: { marginTop: "16px" } },
+          h("div.card-head", h("h2", "Timeline"), h("div.row", roundLabel)),
+          h("div.legend", ["farm", "capture", "bank", "heal", "flee", "fight", "wait", "channel", "dead"].map((k) => h("span", kindSwatch(k), k)),
+            h("span", "white line = health · red tick = lost turn")),
+          h("div.timeline-wrap", timeline),
+          h("div.row", { style: { marginTop: "8px" } }, slider)));
+    }
 
     const wrap = h("div",
       summary,
@@ -306,7 +374,6 @@ export async function render({ path }) {
             h("p.hint", "Dots are your champions at this round; the line is the selected champion's last 40 rounds; the crosshair is its current target. Coloured rings show the team plan's regions (each champion's home region is in the list below).")),
           h("div.card", h("h2", "Champions"), champList)),
         h("div.card", why)));
-    requestAnimationFrame(refresh);
     return wrap;
   }
 
@@ -328,7 +395,7 @@ export async function render({ path }) {
   }
 
   draw();
-  return () => stopKeys();
+  return () => { stopKeys(); stopPoll(); };
 }
 
 function legendInfo(team) {
