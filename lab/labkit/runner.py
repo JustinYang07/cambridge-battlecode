@@ -81,7 +81,7 @@ def summarise_stats(stats: dict) -> dict:
 
 
 def run_match(bot_a: str, bot_b: str, map_name: str, out_dir: Path, rounds: int | None = None,
-              timeout: float = 600) -> dict:
+              timeout: float = 600, fuel: int | None = None) -> dict:
     """Play one match; returns the summarised result plus the replay path."""
     out_dir.mkdir(parents=True, exist_ok=True)
     stats_path = out_dir / "stats.json"
@@ -89,6 +89,8 @@ def run_match(bot_a: str, bot_b: str, map_name: str, out_dir: Path, rounds: int 
            "-o", str(out_dir), "--statistics", str(stats_path)]
     if rounds:
         cmd += ["--rounds", str(rounds)]
+    if fuel:
+        cmd += ["--fuel", str(fuel)]
     started = time.time()
     proc = subprocess.run(cmd, cwd=config.ROOT, capture_output=True, text=True, timeout=timeout)
     (out_dir / "runner.log").write_text(proc.stdout + proc.stderr)
@@ -143,6 +145,15 @@ class ExperimentSpec:
     name: str = ""
     notes: str = ""
     rounds: int | None = None
+    # Fuel per turn for each sample. Games are deterministic, but tiny fuel differences change the
+    # bots' fuel-dependent choices and the games diverge from there: playing each (map, side,
+    # opponent) at several nearby budgets samples that noise, so averages can be trusted.
+    fuels: list[int] | None = None
+
+
+def fuel_samples(n: int, base: int = 100_000, step: int = 1_000) -> list[int]:
+    """n budgets centred on the engine default (100k), `step` apart: 3 -> 99k, 100k, 101k."""
+    return [base + step * (k - (n - 1) // 2) for k in range(n)]
 
 
 class ExperimentStore:
@@ -184,16 +195,18 @@ class ExperimentStore:
 def plan(spec: ExperimentSpec) -> dict:
     exp_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     games = []
-    for opponent in spec.opponents:
-        for map_name in spec.maps:
-            sides = ("A", "B") if spec.both_sides else ("A",)
-            for side in sides:
-                bot_a, bot_b = (spec.candidate, opponent) if side == "A" else (opponent, spec.candidate)
-                games.append({"idx": len(games), "map": map_name, "opponent": opponent,
-                              "candidateSide": side, "botA": bot_a, "botB": bot_b, "status": "queued"})
+    for fuel in spec.fuels or [None]:
+        for opponent in spec.opponents:
+            for map_name in spec.maps:
+                sides = ("A", "B") if spec.both_sides else ("A",)
+                for side in sides:
+                    bot_a, bot_b = (spec.candidate, opponent) if side == "A" else (opponent, spec.candidate)
+                    games.append({"idx": len(games), "map": map_name, "opponent": opponent,
+                                  "candidateSide": side, "botA": bot_a, "botB": bot_b, "status": "queued",
+                                  **({"fuel": fuel} if fuel else {})})
     return {"id": exp_id, "name": spec.name or f"{spec.candidate} vs {', '.join(spec.opponents)}",
             "notes": spec.notes, "candidate": spec.candidate, "opponents": spec.opponents,
-            "maps": spec.maps, "bothSides": spec.both_sides, "rounds": spec.rounds,
+            "maps": spec.maps, "bothSides": spec.both_sides, "rounds": spec.rounds, "fuels": spec.fuels,
             "createdAt": time.time(), "status": "queued", "games": games, "gitCommit": _git_head()}
 
 
@@ -230,7 +243,31 @@ def aggregate(exp: dict) -> dict:
             bucket["killedByEnemy"] += theirs.get("kills", 0)
             # Gems picked up but never tributed (lost to deaths, or still carried at the end).
             bucket["gemsLost"] += sum(c.get("collectedGems", 0) - c.get("submittedGems", 0) for c in ours.get("champions", []))
-    return {"overall": overall, "perMap": per_map, "perOpponent": per_opp}
+    return {"overall": overall, "perMap": per_map, "perOpponent": per_opp, "paired": paired_stats(exp)}
+
+
+def paired_stats(exp: dict) -> dict:
+    """Gem difference per game with a standard error, per opponent.
+
+    Maps are strongly side-biased, so each unit is one (opponent, map, fuel) with both sides
+    averaged; units are then treated as independent samples. 95% CI is about mean +/- 2 SE.
+    """
+    units: dict[tuple, list[int]] = {}
+    for g in exp["games"]:
+        r = g.get("result")
+        if not r or "winner" not in r:
+            continue
+        mine = 0 if g["candidateSide"] == "A" else 1
+        diff = r["teams"][mine]["gems"] - r["teams"][1 - mine]["gems"]
+        units.setdefault((g["opponent"], g["map"], g.get("fuel")), []).append(diff)
+    out: dict = {}
+    for opp in dict.fromkeys(k[0] for k in units):
+        vals = [sum(v) / len(v) for k, v in units.items() if k[0] == opp]
+        n = len(vals)
+        mean = sum(vals) / n if n else 0.0
+        var = sum((x - mean) ** 2 for x in vals) / (n - 1) if n > 1 else 0.0
+        out[opp] = {"units": n, "mean": round(mean, 1), "se": round((var / n) ** 0.5, 1) if n else 0.0}
+    return out
 
 
 def execute(exp: dict, store: ExperimentStore, jobs: int | None = None,
@@ -260,11 +297,18 @@ def execute(exp: dict, store: ExperimentStore, jobs: int | None = None,
                 store.save(exp)
                 return
             game["status"] = "running"
-        out = config.EXPERIMENTS_DIR / exp["id"] / "games" / f"{game['idx']:03d}-{game['map']}-{game['candidateSide']}"
-        try:
-            result = run_match(game["botA"], game["botB"], game["map"], out, exp.get("rounds"))
-        except Exception as err:  # noqa: BLE001 - surface any runner failure in the UI
-            result = {"error": str(err)}
+        fuel = game.get("fuel")
+        suffix = f"-f{fuel // 1000}k" if fuel else ""
+        out = config.EXPERIMENTS_DIR / exp["id"] / "games" / f"{game['idx']:03d}-{game['map']}-{game['candidateSide']}{suffix}"
+        result: dict = {}
+        # Parallel runs on Windows occasionally collide on a build file ("Access is denied"): retry.
+        for _attempt in range(3):
+            try:
+                result = run_match(game["botA"], game["botB"], game["map"], out, exp.get("rounds"), fuel=fuel)
+            except Exception as err:  # noqa: BLE001 - surface any runner failure in the UI
+                result = {"error": str(err)}
+            if "error" not in result or "denied" not in str(result["error"]).lower():
+                break
         with lock:
             game["result"] = result
             game["status"] = "error" if "error" in result else "done"
