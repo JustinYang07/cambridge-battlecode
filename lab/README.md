@@ -12,6 +12,13 @@ python3 -m venv .venv && .venv/bin/pip install cambc   # once per machine (the l
 python3 lab/server.py                                  # http://localhost:8765
 ```
 
+On Windows the venv's CLI is `.venv\Scripts\cambc.exe`, which the lab also finds:
+
+```powershell
+python -m venv .venv; .venv\Scripts\pip install cambc
+python lab\server.py
+```
+
 To share with teammates on the same network:
 
 ```bash

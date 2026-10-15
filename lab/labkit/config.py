@@ -19,9 +19,9 @@ PLATFORM_URL = os.environ.get("CAMBC_EVENT_URL", "https://2026a.battlecode.co.uk
 
 def cambc_binary() -> str:
     """Prefer the project venv's CLI, then whatever is on PATH."""
-    local = ROOT / ".venv" / "bin" / "cambc"
-    if local.exists():
-        return str(local)
+    for local in (ROOT / ".venv" / "bin" / "cambc", ROOT / ".venv" / "Scripts" / "cambc.exe"):
+        if local.exists():
+            return str(local)
     found = shutil.which("cambc")
     if not found:
         raise RuntimeError("cambc CLI not found: run `python3 -m venv .venv && .venv/bin/pip install cambc`")
@@ -34,8 +34,10 @@ def visualiser_dir() -> Path | None:
     if override:
         return Path(override)
     cache = Path(os.environ.get("CAMBC_CACHE", Path.home() / "Library" / "Caches" / "cambc"))
-    if not cache.exists():
-        cache = Path.home() / ".cache" / "cambc"
+    for fallback in (Path.home() / ".cache" / "cambc", Path(os.environ.get("LOCALAPPDATA", "")) / "cambc"):
+        if cache.exists():
+            break
+        cache = fallback
     candidates = sorted((cache / "assets").glob("*/visualiser/index.html"), key=lambda p: p.stat().st_mtime)
     return candidates[-1].parent if candidates else None
 
