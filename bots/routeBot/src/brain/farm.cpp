@@ -1,9 +1,11 @@
 // Farming camp groups: kill every monster, then hold a spawn tile for the capture.
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include "../combat/combat.h"
 #include "../core/comms.h"
 #include "../core/config.h"
+#include "../core/trace.h"
 #include "../core/fuel.h"
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
@@ -28,6 +30,50 @@ float goldValue(const World& w) {
                 static_cast<float>(w.round - tune::opening_rounds) / static_cast<float>(tune::late_game_round - tune::opening_rounds);
     else v = tune::gold_value_late;
     return w.kit.goldBonus ? v * 1.4f : v;  // Vesper Vale earns 20% more from every gold drop
+}
+
+// ---- the middle of the map
+// On maps with a busy centre (see centreIsBusy), camps toward the geometric centre are worth more than their own reward: the middle is where
+// rotations are short and the map is contested. The bonus scales with the camp's radius from the
+// centre, each axis measured against half the map's size (so wide maps work too): x max at the
+// centre, x1 in the corners.
+namespace {
+// Radius of a tile from the map centre: each axis against half the map's size, 0 centre .. 1 corner.
+float centreRadius(bc::vec2 p) {
+    const auto& s = Statics::get();
+    const float hx = std::max(static_cast<float>(s.width) / 2.0f, 1.0f), hy = std::max(static_cast<float>(s.height) / 2.0f, 1.0f);
+    const float dx = (static_cast<float>(p.x) + 0.5f - hx) / hx, dy = (static_cast<float>(p.y) + 0.5f - hy) / hy;
+    return std::min(std::sqrt((dx * dx + dy * dy) / 2.0f), 1.0f);
+}
+
+// Only on maps whose centre is busier than their outskirts: more camps per area inside
+// tune::centre_zone than outside it (monoliths excluded). Ring maps (elkring) and edge-heavy maps
+// have no middle worth pulling toward: there the bonus cost up to ~470 gems/game.
+bool centreIsBusy() {
+    static int verdict = -1;
+    if (verdict >= 0) return verdict == 1;
+    int inner = 0, outer = 0;
+    for (const auto& g : Statics::get().groups) {
+        if (g.hasMonolith || (g.gems == 0 && g.gold == 0)) continue;
+        (centreRadius(g.center) < tune::centre_zone ? inner : outer) += 1;
+    }
+    // Areas in the normalised square [-1,1]^2 (area 4): the inner zone is a disc of radius zone * sqrt(2).
+    const float innerArea = 3.14159265f * 2.0f * tune::centre_zone * tune::centre_zone;
+    const float outerArea = std::max(4.0f - innerArea, 1e-3f);
+    verdict = static_cast<float>(inner) / innerArea > static_cast<float>(outer) / outerArea ? 1 : 0;
+    trace().note(verdict ? "map centre is busy: middle bonus on" : "map centre is quiet: middle bonus off");
+    return verdict == 1;
+}
+} // namespace
+
+float centreBonus(const World& w, const GroupInfo& g) {
+    if (!centreIsBusy()) return 1.0f;
+    const float radius = centreRadius(g.center);
+    // Healthier means bolder (none at half health), and never where visible enemies outnumber us.
+    const float bold = std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f);
+    if (bold <= 0) return 1.0f;
+    if (w.enemyPressure(g.center, tune::enemy_watch_radius) > w.alliedPower(g.center, 6)) return 1.0f;
+    return 1.0f + (tune::centre_bonus_max - 1.0f) * (1.0f - radius) * bold;
 }
 
 namespace {
@@ -237,6 +283,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         const float done = std::clamp(1.0f - mem.healthLeft, 0.0f, 1.0f);
         o.mul("committed", tune::engaged_bonus + tune::focus_bonus_per_damage * done);
     }
+    if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
     o.finish();
     return o;
 }
@@ -254,7 +301,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     for (const auto& g : statics.groups) {

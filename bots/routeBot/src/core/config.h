@@ -9,6 +9,10 @@ inline constexpr float gold_value_early = 0.20f;   // gems per gold before late 
 inline constexpr float gold_value_late = 0.03f;    // gold is nearly worthless near the end
 inline constexpr int late_game_round = 1500;
 
+// ---- the middle of the map (brain/farm.cpp): bonus by radius from the geometric centre
+inline constexpr float centre_bonus_max = 1.3f;     // farm score at the centre, falling linearly to x1 in the corners
+inline constexpr float centre_zone = 0.5f;          // the centre: radius below this (0 centre .. 1 corner) for the busy-centre test
+
 // ---- farming
 inline constexpr float capture_turns = 5.0f;        // engine capture time
 inline constexpr float reset_attack_bonus = 1.0f / 8.0f; // attack reset adds ~1 attack per cooldown
