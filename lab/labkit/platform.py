@@ -65,7 +65,9 @@ class Platform:
             raise PlatformError("refusing to send credentials outside the event origin")
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json, */*"}
         if auth and self.settings.get("cookie"):
-            headers["Cookie"] = self.settings["cookie"]
+            cookie = self.settings["cookie"].strip()
+            # A bare value pasted from DevTools' cookie table: send it as the session cookie.
+            headers["Cookie"] = cookie if "=" in cookie else f"event_session={cookie}"
         if auth and self.settings.get("token"):
             headers["Authorization"] = f"Bearer {self.settings['token']}"
         req = urllib.request.Request(url, headers=headers)
