@@ -141,6 +141,8 @@ inline constexpr int raid_max_alive = 1;             // at most this many enemy 
 inline constexpr int enemy_alive_every = 4;          // check enemy deaths every this many rounds (fuel)
 inline constexpr float raid_cluster_factor = 3.0f;   // gem/gold clusters on their half (at full health)
 inline constexpr float raid_camp_factor = 1.5f;      // monster camps on their half (at full health); x1 at half health
+inline constexpr int raid_min_window = 25;           // whole enemy team dead with at least this many rounds to their first respawn...
+inline constexpr float raid_own_half_factor = 0.4f;  // ...our half's camps get this (at full health): take theirs first
 
 // ---- regrouping (strategy/regroup.h): an enemy on our half pulls nearby allies to the spotter
 inline constexpr int regroup_radius = 15;            // allies this close to the spotter respond

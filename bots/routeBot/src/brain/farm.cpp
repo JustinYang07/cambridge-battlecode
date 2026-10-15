@@ -199,6 +199,13 @@ Option scoreGroup(World& w, const Candidate& c) {
             o.mul("raid: their team is down", 1.0f + (full - 1.0f) * bold);
         }
     }
+    // Their whole team is dead with time left to use it: take their nearest camps first. Ours will
+    // still be there when the window closes, theirs will not be open again.
+    if (w.enemyBodies >= 2 && w.enemiesAlive == 0 && w.enemyRespawnAt - w.round >= tune::raid_min_window &&
+        dist(g.center, statics.enemySpawnCenter) >= dist(g.center, statics.spawnCenter)) {
+        const float bold = std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f);
+        if (bold > 0) o.mul("their team is dead: theirs first", 1.0f - (1.0f - tune::raid_own_half_factor) * bold);
+    }
     // Regrouping: stay with the spotter. Camps beside it are fine, the rest wait for the fight.
     if (regroup::active() && dist(g.center, regroup::at()) > tune::regroup_leash) o.mul("regrouping", tune::regroup_farm_factor);
     if (w.engagedGroup >= 0 && w.engagedGroup != g.id) {
