@@ -115,6 +115,15 @@ void Bot::play_turn() {
         if (chosen >= 0) {
             const auto& pick = options[static_cast<std::size_t>(chosen)];
             changed = w.lastOption != static_cast<int>(pick.kind) || w.lastTarget != pick.target;
+            // Party rotation bookkeeping: who is working this party camp with us. Moving to another
+            // party camp keeps the mates (so they can follow); a solo camp ends the party.
+            if (pick.kind == OptionKind::farm || pick.kind == OptionKind::capture) {
+                if (pick.target == w.partyCamp) w.partyMates |= comms::claimersMask(pick.target, w.slot);
+                else {
+                    if (pick.kind == OptionKind::farm && pick.need <= 1) w.partyMates = 0;
+                    w.partyCamp = pick.target;
+                }
+            }
             brain::execute(w, pick);
             brain::noteMovement(w);
         }

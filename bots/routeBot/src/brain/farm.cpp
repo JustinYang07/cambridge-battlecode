@@ -189,8 +189,28 @@ Option scoreGroup(World& w, const Candidate& c) {
                 o.kind = OptionKind::heal;
             }
         }
+        // Party rotation: our party camp is down for a while and this one is up. The party's leader
+        // (lowest slot) moves on first; mates follow when a mate already claims the new camp. While
+        // rotating, the party is on its way, so we are not "awaiting help".
+        bool rotating = false;
+        if (tune::party_rotation && need > 1 && g.id != w.lastTarget && w.partyMates != 0) {
+            if (comms::claimersMask(g.id, w.slot) & w.partyMates) {
+                rotating = true;
+                o.mul("follow the party", tune::rotate_bonus);
+            } else if (w.lastTarget >= 0 && w.lastTarget < static_cast<int>(w.groups.size())) {
+                const auto& from = w.groups[static_cast<std::size_t>(w.lastTarget)];
+                // Leader: the lowest slot among mates still at our camp (one off banking cannot lead).
+                const unsigned present = w.partyMates & comms::claimersMask(w.lastTarget, w.slot);
+                const bool leader = (present & ((1u << w.slot) - 1u)) == 0;
+                if (leader && from.status == GroupStatus::respawning && from.respawnAt - w.round >= tune::rotate_min_wait &&
+                    mem.status != GroupStatus::respawning) {
+                    rotating = true;
+                    o.mul("lead the party on", tune::rotate_bonus);
+                }
+            }
+        }
         // Once a fight has started, waiting for help is no longer an option: finish or leave.
-        awaiting = need > 1 + claims && !engaged;
+        awaiting = need > 1 + claims && !engaged && !rotating;
         if (awaiting) {
             o.mul("awaiting help", 0.7f);
             o.turns("gather", 8.0f);

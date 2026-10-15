@@ -13,6 +13,11 @@ inline constexpr int late_game_round = 700;
 inline constexpr float centre_bonus_max = 1.3f;     // farm score at the centre, falling linearly to x1 in the corners
 inline constexpr float centre_zone = 0.5f;          // the centre: radius below this (0 centre .. 1 corner) for the busy-centre test
 
+// ---- party rotation: a party moves on together instead of waiting out its camp's respawn
+inline constexpr bool party_rotation = true;        // A/B switch
+inline constexpr int rotate_min_wait = 5;           // our party camp is down at least this long...
+inline constexpr float rotate_bonus = 1.5f;         // ...the next free party camp (leader) / the mates' new camp (followers)
+
 // ---- farming
 inline constexpr float capture_turns = 5.0f;        // engine capture time
 inline constexpr float reset_attack_bonus = 1.0f / 8.0f; // attack reset adds ~1 attack per cooldown
@@ -89,9 +94,10 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
-inline constexpr int build_variant = 7;            // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
+inline constexpr int build_variant = 11;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
-                                                 // 7 treasure>monster, 8 treasure>home, 9 treasure>power
+                                                 // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
+                                                 // 10 monster>treasure, 11 jungle>power>durability (casters focus)
 inline constexpr bool stat_matching = false;     // Ryth buys health (bonus hp -> strength), casters focus
 inline constexpr bool lock_own_altars = true;  // also lock unlocked altars on our side as we pass (A/B switch)
 inline constexpr bool buy_altar_locks = true;   // keep an altar lock: cancel enemy tributes, lock enemy-side altars
@@ -109,6 +115,8 @@ inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
 inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
 inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
+inline constexpr int their_half_fight_round = 150;  // from this round, fights against enemies on their half...
+inline constexpr float their_half_fight_factor = 0.25f;  // ...score this (channelling targets and raids exempt)
 inline constexpr int chase_radius = 6;              // enemies further than this are not chased...
 inline constexpr float chase_factor = 0.3f;         // ...their fight score gets this (unless channelling)
 

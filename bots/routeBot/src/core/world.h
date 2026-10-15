@@ -130,6 +130,9 @@ public:
     std::pair<int, std::string> stuck{-1, ""};   // decision that left us bouncing between two tiles
     int stuckTurns = 0;
     bool forceReplan = false;
+    // Party rotation: allies (bit per slot) who worked the party camp we are on, and that camp.
+    unsigned partyMates = 0;
+    int partyCamp = -1;
     float prevHp = -1;
 
     void refresh(bool firstTurn);

@@ -60,6 +60,13 @@ void fight(World& w, std::vector<Option>& out) {
         const float missing = std::clamp(1.0f - e.hp / std::max(e.maxHp, 1.0f), 0.0f, 1.0f);
         if (missing > 0.05f) o.mul("enemy hurt", 1.0f + tune::fight_hurt_bonus * missing);
         if (e.channeling) o.mul("interrupt channel", 1.5f);
+        // After the early game, fights on their half are where we die (lanes: nearly half our
+        // mid-game deaths, after chasing or fighting there). Farm instead. A channelling enemy and a
+        // raid (their team down) are still worth it.
+        const bool raiding = w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive && w.enemyRespawnAt > w.round;
+        if (w.round >= tune::their_half_fight_round && !e.channeling && !raiding &&
+            dist(e.pos, Statics::get().enemySpawnCenter) < dist(e.pos, Statics::get().spawnCenter))
+            o.mul("fight on their half", tune::their_half_fight_factor);
         // Favourable fight: more of us than them around the target (allies walking to an alert
         // there count too, before we can see them). Then a kill is worth more than its gold: the
         // enemy is out for 60 rounds. Healthier means bolder: x1 at half health up to x2 at full.
