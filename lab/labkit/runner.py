@@ -175,7 +175,16 @@ class ExperimentStore:
         tmp = path.with_suffix(".tmp")
         with self._lock:
             tmp.write_text(json.dumps(exp, indent=1))
-            os.replace(tmp, path)
+            # On Windows the replace fails while another process (the web lab, a reader) has the
+            # file open: retry briefly instead of losing the experiment.
+            for attempt in range(20):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    time.sleep(0.1)
 
     def list(self) -> list[dict]:
         out = []
@@ -272,13 +281,13 @@ def paired_stats(exp: dict) -> dict:
 
 def execute(exp: dict, store: ExperimentStore, jobs: int | None = None,
             on_update: Callable[[dict], None] | None = None,
-            should_stop: Callable[[], bool] | None = None) -> dict:
-    """Build every bot once, then play all queued games in parallel."""
+            should_stop: Callable[[], bool] | None = None, build_bots: bool = True) -> dict:
+    """Build every bot once (unless the caller already did), then play all queued games in parallel."""
     jobs = jobs or max(1, (os.cpu_count() or 2) - 1)
     exp["status"] = "building"
     store.save(exp)
     try:
-        for bot in dict.fromkeys([exp["candidate"], *exp["opponents"]]):
+        for bot in dict.fromkeys([exp["candidate"], *exp["opponents"]]) if build_bots else ():
             build(bot)
     except BuildError as err:
         exp["status"], exp["error"] = "failed", str(err)
