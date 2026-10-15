@@ -48,7 +48,21 @@ Option scoreGroup(World& w, const Candidate& c) {
     o.target = g.id;
     o.at = c.nearest;
     o.c.target << 'g' << g.id;
-    o.add("gems", static_cast<float>(g.gems));
+    // Endgame: gems still carried at the round limit count for nothing, so a camp whose gems cannot
+    // reach an altar in time is worth only its gold (lifetime gold is the first tiebreak).
+    bool gemsInTime = true;
+    const int maxRounds = static_cast<int>(bc::constants::max_rounds);
+    if (g.gems > 0 && w.round > maxRounds - tune::endgame_window) {
+        int toAltar = 1 << 20;
+        for (int i = 0; i < static_cast<int>(statics.altars.size()); ++i)
+            if (const int d = fields::toAltar(i, g.center); d >= 0) toAltar = std::min(toAltar, d);
+        const float ticks = static_cast<float>((w.gems + g.gems + 9) / 10);
+        const float finish = static_cast<float>(w.round) + w.walkTurns(static_cast<float>(c.travel)) +
+                             static_cast<float>(c.wait) + tune::capture_turns + static_cast<float>(toAltar) + ticks;
+        gemsInTime = finish < static_cast<float>(maxRounds);
+        if (!gemsInTime) o.c.note << "too late to bank; ";
+    }
+    o.add("gems", gemsInTime ? static_cast<float>(g.gems) : 0.0f);
     o.add("gold", static_cast<float>(g.gold) * goldValue(w));
     // Long walks cost more than their turns: a far camp is often contested or respawned by the
     // time we arrive, and walking past nearer camps leaves them to the enemy (collision: walking

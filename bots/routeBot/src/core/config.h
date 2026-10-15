@@ -35,6 +35,8 @@ inline constexpr float respawn_wait_weight = 1.0f;  // turns spent waiting count
 // ---- banking
 inline constexpr float bank_target_gems = 60.0f;    // carrying this many makes banking compelling
 inline constexpr float bank_min_gems = 1.0f;
+inline constexpr int endgame_window = 300;          // last rounds where tribute timing against the round limit is checked
+inline constexpr int stun_range = 4;                // enemy crowd control reaches this far (cancels tributes)
 inline constexpr float carry_risk_per_gem = 0.004f; // farm scores shrink as the bag gets heavier
 inline constexpr float danger_bank_boost = 2.0f;
 
@@ -83,6 +85,7 @@ inline constexpr int build_variant = 7;            // 0 default, 1 treasure rush
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power
 inline constexpr bool stat_matching = false;     // Ryth buys health (bonus hp -> strength), casters focus
+inline constexpr bool lock_own_altars = true;  // also lock unlocked altars on our side as we pass (A/B switch)
 inline constexpr bool buy_altar_locks = true;   // keep an altar lock: cancel enemy tributes, lock enemy-side altars
 inline constexpr bool buy_tp_crystals = false;
 

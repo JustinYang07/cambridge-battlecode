@@ -152,23 +152,40 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
 }
 
 void capture(World& w, const GroupInfo& g) {
-    if (!g.tileMask.is_set(w.pos)) nav().stepToward(w, g.tileMask, dist(w.pos, g.center) > 3, &w.danger, g.center);
-    else trace().action("cap");
+    if (!g.tileMask.is_set(w.pos)) {
+        nav().stepToward(w, g.tileMask, dist(w.pos, g.center) > 3, &w.danger, g.center);
+        w.captureTurns = 0;
+    } else {
+        trace().action("cap");
+        // A capture tile within tribute range of an altar: captures resolve before channels, and a
+        // tribute banks the whole bag when it completes, including gems captured mid-channel. Start
+        // a tribute timed to finish just as the capture does, and the reward is banked with it.
+        if (w.lastTarget == g.id && w.lastOption == static_cast<int>(OptionKind::capture)) ++w.captureTurns;
+        else w.captureTurns = 1;
+        const int ticks = std::max(1, (w.gems + 9) / 10);
+        if (w.gems > 0 && w.captureTurns + ticks >= static_cast<int>(tune::capture_turns)) {
+            for (auto a : Statics::get().altars)
+                if (dist(a, w.pos) <= bc::constants::submit_gems_range) {
+                    try {
+                        bc::self().submit_gems(a);
+                        trace().note("tribute timed with the capture beside an altar");
+                        return;
+                    } catch (const bc::error&) {
+                    }
+                    break;
+                }
+        }
+    }
     combat::act(w, combat::Focus{}, false);
 }
 
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
     const auto altar = Statics::get().altars[static_cast<std::size_t>(altarIdx)];
-    // A tribute is a stationary channel a stun or kill cancels: never start a long one with a
-    // stronger enemy able to reach the altar before it completes. Judged at the altar (not at
-    // our tile) so the verdict does not flip as we step toward it and back.
-    const int tributeTurns = std::max(1, (w.gems + 9) / 10);
-    bool enemyClose = false;
-    for (const auto& g : w.ghosts)
-        if (w.round == g.round && dist(g.pos, altar) <= g.range + 2 + tributeTurns) enemyClose = true;
-    const bool unsafe = tributeTurns > 1 && enemyClose &&
-                        w.enemyPressure(altar, tune::enemy_watch_radius) > w.alliedPower(altar, 5);
+    // A tribute is a stationary channel only a stun or a kill cancels (damage does not): never start
+    // one an enemy stunner can reach in time, or that the enemies about could kill us during.
+    // Judged at the altar (not at our tile) so the verdict does not flip as we step toward it.
+    const bool unsafe = w.tributeAtRisk(altar, w.gems);
     if (unsafe) {
         // Keep our distance instead of walking up and backing off every other turn.
         trace().note("unsafe to tribute: holding");

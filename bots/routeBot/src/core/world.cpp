@@ -151,11 +151,22 @@ void World::refresh(bool firstTurn) {
             e.range = c.attack_range();
             e.tributing = c.is_submitting_gems();
             e.channeling = c.is_recalling() || e.tributing;
+            if (e.index >= 0 && e.index < static_cast<int>(enemyStun_.size())) {
+                auto& known = enemyStun_[static_cast<std::size_t>(e.index)];
+                if (known < 0) {
+                    known = 0;
+                    try {
+                        for (const auto& a : c.abilities()) known = known || a.is_cc();
+                    } catch (const bc::error&) {
+                    }
+                }
+                e.stun = known > 0;
+            }
             enemies.push_back(e);
             const float dps = e.strength + e.focus * 1.5f / tune::spell_cooldown;
             auto it = std::find_if(ghosts.begin(), ghosts.end(), [&](const EnemyGhost& g) { return g.handle == c; });
-            if (it == ghosts.end()) ghosts.push_back({c, e.pos, round, dps, e.range});
-            else *it = {c, e.pos, round, dps, e.range};
+            if (it == ghosts.end()) ghosts.push_back({c, e.pos, round, dps, e.range, e.stun});
+            else *it = {c, e.pos, round, dps, e.range, e.stun};
         }
     }
     std::erase_if(ghosts, [&](const EnemyGhost& g) { return round - g.round > tune::enemy_memory_rounds; });
@@ -398,4 +409,17 @@ const CampSeen* World::campAt(bc::vec2 tile) const {
     for (const auto& c : camps)
         if (c.pos == tile) return &c;
     return nullptr;
+}
+
+bool World::tributeAtRisk(bc::vec2 altar, int bag) const {
+    // ceil(bag / 10) ticks; the turn we start is the first, so enemies have that many turns to act.
+    const int ticks = std::max(1, (bag + 9) / 10);
+    float burst = 0;
+    for (const auto& g : ghosts) {
+        if (round - g.round > 1) continue;  // only enemies seen this round or last
+        const int walk = std::max(0, dist(g.pos, altar) - 1);  // we stand beside the altar
+        if (g.stun && walk <= tune::stun_range + ticks) return true;
+        if (walk <= g.range + ticks) burst += g.dps * static_cast<float>(ticks);
+    }
+    return burst >= hp;
 }

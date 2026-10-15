@@ -60,7 +60,16 @@ void bank(World& w, std::vector<Option>& out) {
     if (w.teamGems + w.gems >= 1000) o.mul("wins the game", 20.0f);
     // The game ends when either team reaches 1000: gems still carried then count for nothing.
     else if (w.enemyGems >= tune::race_end_gems) o.mul("enemy about to win", tune::race_end_bank_boost);
-    if (w.round > 1850) o.mul("score before time", 4.0f);
+    // Endgame, tick-exact: the tribute completes at the start of our turn after its last tick
+    // (ceil(bag / 10) ticks, the first on the turn we arrive). Past the round limit it is worthless;
+    // close to it, bank everything now.
+    {
+        const int maxRounds = static_cast<int>(bc::constants::max_rounds);
+        const float done = static_cast<float>(w.round) + w.walkTurns(static_cast<float>(bestTravel)) +
+                           static_cast<float>((w.gems + 9) / 10);
+        if (done >= static_cast<float>(maxRounds)) o.mul("cannot finish before the end", 0.01f);
+        else if (w.round > maxRounds - tune::endgame_window / 2) o.mul("score before time", 4.0f);
+    }
     const float pressure = w.enemyPressure(w.pos, tune::enemy_watch_radius);
     // Too weak to cross enemy ground with a bag: recalling home keeps the gems, a walk may not.
     if (pressure > 0 && w.hpFrac() < 0.4f) o.mul("too weak to cross", 0.3f);
@@ -70,15 +79,10 @@ void bank(World& w, std::vector<Option>& out) {
     }
     if (w.lastOption == static_cast<int>(OptionKind::bank)) o.mul("committed", 1.2f);
     if (mapplan::routeWantsBank(w)) o.mul("route altar visit", tune::route_bonus);
-    // Same test the executor uses before tributing: a stronger enemy close to the altar means
+    // Same test the executor uses before tributing: a stunner or a killing blow could cancel it, so
     // we would only walk up, back off and walk up again. Pick something else instead.
     const auto at = altars[static_cast<std::size_t>(bestIdx)];
-    const int tributeTurns = std::max(1, (w.gems + 9) / 10);
-    bool enemyClose = false;
-    for (const auto& gh : w.ghosts)
-        if (w.round == gh.round && dist(gh.pos, at) <= gh.range + 2 + tributeTurns) enemyClose = true;
-    if (enemyClose && tributeTurns > 1 && w.enemyPressure(at, tune::enemy_watch_radius) > w.alliedPower(at, 5))
-        o.mul("unsafe altar", 0.2f);
+    if (w.tributeAtRisk(at, w.gems)) o.mul("tribute would be cancelled", 0.2f);
     // Our camp is respawning: bank in the dead time instead of standing guard with a full bag.
     if (w.lastTarget >= 0 && w.lastOption == static_cast<int>(OptionKind::farm) &&
         w.lastTarget < static_cast<int>(w.groups.size())) {

@@ -34,6 +34,7 @@ struct EnemySeen {
     int gems = 0, range = 1;
     bool channeling = false;  // recalling / tributing: a stationary, interruptible target
     bool tributing = false;
+    bool stun = false;        // has a crowd-control ability (Tavi, Ren, Cassi, ...)
 };
 
 // Where an enemy was last seen; vision is not shared, so remembering recent sightings
@@ -44,6 +45,7 @@ struct EnemyGhost {
     int round = 0;
     float dps = 0;
     int range = 1;
+    bool stun = false;        // has a crowd-control ability: can cancel our tribute
 };
 
 struct AllySeen {
@@ -117,6 +119,7 @@ public:
     int lastTarget = -1;           // group/altar id of last turn's choice
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
+    int captureTurns = 0;          // consecutive turns standing on the current capture
     cambc::vec2 lastAttacked{-1, -1};  // camp we hit last turn: keep hitting it until it dies
     // Recent decisions (kind, target; newest first) for hysteresis and flip detection.
     std::array<std::pair<int, std::string>, 4> history{};
@@ -144,6 +147,10 @@ public:
     // Our side's damage per turn around `at`: us plus visible allies within `radius`.
     float alliedPower(cambc::vec2 at, int radius) const;
     int alliesWithin(cambc::vec2 at, int radius) const;
+    // A tribute of `gems` started now at `altar` would be cancelled: an enemy stunner can get within
+    // stun range before it finishes, or the enemies near enough can kill us first. Damage alone
+    // does not interrupt a tribute.
+    bool tributeAtRisk(cambc::vec2 altar, int gems) const;
     // Tiles enemies can hit soon (their reach + 2), for pathing while carrying gems.
     cambc::bitboard enemyReach() const;
     float incomingCampDamage(cambc::vec2 tile) const;
@@ -162,6 +169,7 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
+    std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::optional<std::array<cambc::ability, 2>> abilities_;
     std::array<signed char, 2> ready_{-1, -1};  // -1 unknown this turn, else 0/1

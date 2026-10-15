@@ -323,7 +323,9 @@ bool useAltarLock(World& w) {
         if (n) enemySpawn = {static_cast<int>(x / n), static_cast<int>(y / n)};
     }
     const bool enemySide = dist(at, enemySpawn) < dist(at, s.spawnCenter);
-    if (!enemyTribute && !enemySide) return false;
+    // Our own altars too: a lock blocks enemy tributes but not ours, so enemies raiding our side
+    // cannot bank there.
+    if (!enemyTribute && !enemySide && !tune::lock_own_altars) return false;
     try {
         if (bc::vision::has_altar_lock(at)) return false;
         auto& me = bc::self();
@@ -333,6 +335,7 @@ bool useAltarLock(World& w) {
             FixedStr<24> msg;
             trace().action((msg << "lock" << at.x << ',' << at.y).view());
             if (enemyTribute) trace().note("locked altar under an enemy tribute");
+            else if (!enemySide) trace().note("locked our own altar");
             return true;
         }
     } catch (const bc::error&) {
