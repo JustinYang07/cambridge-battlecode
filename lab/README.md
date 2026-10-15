@@ -58,6 +58,7 @@ lookup, not a guess. All tuning constants live in `bots/basicBot/src/core/config
 ```bash
 python3 lab/abtest.py basicBot starter-cpp                 # all maps, both sides
 python3 lab/abtest.py basicBot snap-basicBot-v1 --maps lanes,rows
+python3 lab/abtest.py basicBot snap-basicBot-v1 --samples 5     # each game at 98k..102k fuel: mean +/- 95% CI
 python3 lab/abtest.py --snapshot basicBot --label v1       # freeze current source
 python3 lab/abtest.py --snapshot basicBot --git HEAD~1     # freeze an older commit
 python3 lab/traces.py <replay.repl26a>                     # decisions, fuel, deaths overview
@@ -70,7 +71,13 @@ python3 lab/traces.py <replay> --deaths
 - **Games are deterministic.** Identical code on the same map and side gives an identical
   game, so an A/B run is one game per (map, side, opponent). Small code changes still
   ripple chaotically: treat ±2–3 wins in 18 games as noise and watch the average gem
-  difference and per-map patterns.
+  difference and per-map patterns. Even a change that never triggers shifts fuel use slightly
+  and can swing an 18-game A/B by ~200 gems/game. `--samples N` plays every game at N fuel
+  budgets 1k apart around the 100k default (`cambc run --fuel`), which samples that chaos, and
+  reports the gem difference per opponent with a 95% confidence interval (each map × fuel unit
+  averages both sides, cancelling side bias).
+- **Windows:** parallel games occasionally fail with "Access is denied" while two runs touch the
+  same build file; the runner retries those games.
 - **Fuel.** About 1 fuel per WASM instruction and roughly 97k per turn. A turn that overruns
   is suspended and swallows the next turn. The explorer marks lost turns in red, and the
   bot's fuel rules are in `core/fuel.h` and the memory notes.

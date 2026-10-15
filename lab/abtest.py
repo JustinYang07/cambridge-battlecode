@@ -23,6 +23,8 @@ def print_report(exp: dict) -> None:
     summary = exp.get("summary") or runner.aggregate(exp)
     print(f"\n{exp['name']}  ({exp['id']}, commit {exp.get('gitCommit')})")
     print(f"{'map':<12}{'opponent':<24}{'side':<6}{'result':<8}{'gems':>11}{'round':>7}")
+    if exp.get("fuels"):
+        print("(one row per fuel sample; see the summary below)")
     for g in exp["games"]:
         r = g.get("result") or {}
         if "winner" not in r:
@@ -38,6 +40,8 @@ def print_report(exp: dict) -> None:
         print(f"\n{exp['candidate']}: {o['wins']}W {o['losses']}L of {n}, "
               f"avg gem diff {o['gemDiff'] / n:+.0f}, faults {o['faults']} | per game: deaths {o['deaths'] / n:.1f}, "
               f"killed by enemy {o['killedByEnemy'] / n:.1f}, gems lost {o['gemsLost'] / n:.0f}")
+    for opp, st in (summary.get("paired") or {}).items():
+        print(f"  vs {opp:<22} gem diff per game {st['mean']:+.0f} +/- {2 * st['se']:.0f} (95% CI, {st['units']} map x fuel units, sides averaged)")
 
 
 def main() -> int:
@@ -48,6 +52,8 @@ def main() -> int:
     parser.add_argument("--one-side", action="store_true", help="only play the candidate as team A")
     parser.add_argument("--jobs", type=int, default=None)
     parser.add_argument("--rounds", type=int, default=None)
+    parser.add_argument("--samples", type=int, default=1,
+                        help="play every game at this many fuel budgets around 100k (1k apart) to average out chaos")
     parser.add_argument("--name", default="")
     parser.add_argument("--snapshot", metavar="BOT", help="copy BOT's source to bots/snap-BOT-<label>")
     parser.add_argument("--label")
@@ -62,7 +68,7 @@ def main() -> int:
 
     maps = config.list_maps() if args.maps == "all" else args.maps.split(",")
     spec = runner.ExperimentSpec(args.candidate, args.opponents, maps, not args.one_side, args.name,
-                                 rounds=args.rounds)
+                                 rounds=args.rounds, fuels=runner.fuel_samples(args.samples) if args.samples > 1 else None)
     store = runner.ExperimentStore()
     exp = runner.plan(spec)
     total = len(exp["games"])
