@@ -22,6 +22,14 @@ void buyConsumables(World& w);
 bool hasPassive(cambc::item_passive passive);
 // Progress through the build order, for traces: "jungle-str 3/5".
 std::string progress();
+// What a trip to the shop would buy right now: shards of the current build step we can afford,
+// and whether they finish its emblem. Zero for Tavi, who shops anywhere, and at spawn, where
+// spend() already bought them.
+struct Affordable {
+    int shards = 0;
+    bool completes = false;
+};
+Affordable affordable(const World& w);
 // Total shards bought so far (emblems count as their shards): a rough "how built are we".
 int shardsOwned();
 

@@ -3,6 +3,7 @@
 #include "../combat/combat.h"
 #include "../core/config.h"
 #include "../nav/navigator.h"
+#include "../shop/shop.h"
 #include "../strategy/regroup.h"
 #include "scorers.h"
 
@@ -12,7 +13,14 @@ namespace scorers {
 
 void survive(World& w, std::vector<Option>& out) {
     const float f = w.hpFrac();
-    if (f < 0.999f) {
+    // Shopping: once we can afford shards, a trip home to spend the gold gets a bonus that keeps
+    // growing every round the gold sits unspent (items are how we scale), and resets once bought.
+    static int affordableSince = -1;
+    const auto buy = shop::affordable(w);
+    const bool canShop = tune::shop_trips && (buy.completes || buy.shards >= tune::shop_min_shards);
+    if (!canShop) affordableSince = -1;
+    else if (affordableSince < 0) affordableSince = w.round;
+    if (f < 0.999f || canShop) {
         Option o;
         o.kind = OptionKind::heal;
         o.at = Statics::get().spawnCenter;
@@ -25,9 +33,12 @@ void survive(World& w, std::vector<Option>& out) {
         const float urgent = tune::heal_urgent_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
         const float urgency = std::clamp((start - f) / (start - urgent), 0.0f, 1.0f);
         o.add("low health", urgency * urgency * 60.0f);
-        // A recall is also a shopping trip once we can afford an emblem.
-        // Only worth the trip when hurt anyway or already close to spawn.
-        if (w.gold >= tune::shop_gold) o.add("shopping", static_cast<float>(w.gold) * goldValue(w) * 0.1f);
+        if (canShop) {
+            o.add("shopping", static_cast<float>(buy.shards) * tune::shop_shard_value * (buy.completes ? 1.5f : 1.0f));
+            const float waited = static_cast<float>(w.round - affordableSince);
+            o.mul("gold waiting to be spent", std::min(1.0f + waited * tune::shop_urgency_per_round, tune::shop_urgency_max));
+            o.c.note << "shop " << buy.shards << (buy.completes ? " (emblem)" : "") << "; ";
+        }
         // Healing itself takes the recall's fixed turns (distance does not matter to a recall), or
         // the walk home when that is shorter. Then we walk back from spawn to where the work is.
         if (w.atSpawn) {

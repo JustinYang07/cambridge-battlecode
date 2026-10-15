@@ -152,6 +152,25 @@ void spend(World& w) {
     }
 }
 
+Affordable affordable(const World& w) {
+    Affordable a;
+    if (w.atSpawn || bc::self().passive() == bc::passive_type::remote_shop) return a;
+    // The build order is rebuilt on every call: cache it for the round.
+    static int cachedRound = -1;
+    static Affordable cached;
+    if (cachedRound == w.round) return cached;
+    cachedRound = w.round;
+    const auto step = currentStep(w.type);
+    if (step) {
+        const unsigned cost = std::max(1u, shardOf(step->first).cost());
+        const int afford = static_cast<int>(static_cast<unsigned>(w.gold) / cost);
+        a.shards = std::min(afford, step->second);
+        a.completes = afford >= step->second;
+    }
+    cached = a;
+    return a;
+}
+
 int shardsOwned() {
     if (!inventory) return 0;
     const auto* counts = inventory->ptr();

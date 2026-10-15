@@ -6,8 +6,8 @@ namespace tune {
 
 // ---- economy: what a unit of reward is worth, in gem-equivalents
 inline constexpr float gold_value_early = 0.20f;   // gems per gold before late game
-inline constexpr float gold_value_late = 0.03f;    // gold is nearly worthless near the end
-inline constexpr int late_game_round = 1500;
+inline constexpr float gold_value_late = 0.01f;    // gold is nearly worthless near the end
+inline constexpr int late_game_round = 700;
 
 // ---- the middle of the map (brain/farm.cpp): bonus by radius from the geometric centre
 inline constexpr float centre_bonus_max = 1.3f;     // farm score at the centre, falling linearly to x1 in the corners
@@ -62,7 +62,11 @@ inline constexpr float heal_start_frac = 1.0f;  // healing urgency grows from fu
 inline constexpr float heal_urgent_frac = 0.35f;  // ...and dominates by here
 inline constexpr float heal_enemy_margin = 0.35f;   // both shift up this much with enemy champions about
 inline constexpr float heal_first_factor = 0.5f;    // a camp that needs a trip home first
-inline constexpr float shop_gold = 150.0f;          // enough gold for an emblem makes a trip home worthwhile
+inline constexpr bool shop_trips = true;            // trips home to spend gold once we can afford shards (A/B switch)
+inline constexpr int shop_min_shards = 3;            // ...this many affordable shards, or the rest of an emblem
+inline constexpr float shop_shard_value = 8.0f;      // gem-equivalents per shard bought now
+inline constexpr float shop_urgency_per_round = 0.02f;  // the trip's bonus grows this much per round the gold waits...
+inline constexpr float shop_urgency_max = 3.0f;      // ...up to this
 inline constexpr float focus_bonus_per_damage = 0.0f;  // extra commitment per damage dealt (A/B: 1.5 cost ~130 gems/game)
 inline constexpr float abandon_factor = 0.7f;  // walking away from a fight we started
 inline constexpr float safe_camp_bonus = 1.4f;      // gem/gold clusters: quick, free, no risk
