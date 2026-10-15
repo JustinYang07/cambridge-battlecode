@@ -1,0 +1,140 @@
+[
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/bot.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/bot.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/bot.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/bot.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/bank.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/bank.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/bank.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/bank.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/brain.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/brain.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/brain.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/brain.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/execute.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/execute.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/execute.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/execute.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/farm.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/farm.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/farm.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/farm.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/fight.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/fight.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/fight.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/fight.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/option.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/option.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/option.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/option.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/survive.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/survive.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/survive.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/brain/survive.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/combat/combat.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/combat/combat.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/combat/combat.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/combat/combat.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/comms.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/comms.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/comms.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/comms.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/fuel.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/fuel.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/fuel.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/fuel.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/profile.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/profile.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/profile.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/profile.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/statics.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/statics.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/statics.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/statics.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/trace.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/trace.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/trace.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/trace.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/world.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/core/world.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/world.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/core/world.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/main.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/main.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/main.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/main.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/fields.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/fields.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/fields.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/fields.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/navigator.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/navigator.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/navigator.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/nav/navigator.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/roster/draft.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/roster/draft.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/roster/draft.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/roster/draft.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/shop/shop.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/shop/shop.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/shop/shop.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/shop/shop.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/mapplan.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/mapplan.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/mapplan.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/mapplan.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/plan.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/plan.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/plan.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/plan.cpp.obj"
+  },
+  {
+    "command": "/Users/justin/Library/Caches/cambc/wasi-sdk-33/bin/clang++ --target=wasm32-wasip1 --sysroot=/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot -I/Users/justin/cambridge-battlecode/sdk/cpp -isystem /Users/justin/Library/Caches/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/regroup.cpp.obj -c /Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/regroup.cpp --sysroot=\"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"/Users/justin/Library/Caches/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "/Users/justin/cambridge-battlecode/bots/routeBot3/.cambc/build",
+    "file": "/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/regroup.cpp",
+    "output": "CMakeFiles/bot.dir/Users/justin/cambridge-battlecode/bots/routeBot3/src/strategy/regroup.cpp.obj"
+  }
+]
