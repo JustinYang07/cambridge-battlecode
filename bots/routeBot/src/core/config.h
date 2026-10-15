@@ -133,8 +133,16 @@ inline constexpr unsigned long long draft_plan_floor = 50000;     // below this,
 inline constexpr unsigned long long draft_prepare_floor = 150000; // first turn: neighbour lists stop here
 inline constexpr unsigned long long draft_describe_floor = 45000; // below this, the draft trace skips the route text
 
+// ---- raids: their team is down (all but tune::raid_max_alive bodies dead)
+inline constexpr int raid_max_alive = 1;             // at most this many enemy bodies alive
+inline constexpr int enemy_alive_every = 4;          // check enemy deaths every this many rounds (fuel)
+inline constexpr float raid_cluster_factor = 3.0f;   // gem/gold clusters on their half (at full health)
+inline constexpr float raid_camp_factor = 1.5f;      // monster camps on their half (at full health); x1 at half health
+
 // ---- regrouping (strategy/regroup.h): an enemy on our half pulls nearby allies to the spotter
 inline constexpr int regroup_radius = 15;            // allies this close to the spotter respond
+inline constexpr int regroup_radius_lone = 25;       // ...this close when the spotter sees a lone enemy
+inline constexpr float regroup_lone_factor = 2.0f;   // a lone enemy on our half: regroup pull x this
 inline constexpr int regroup_arrive = 4;             // this close to the spotter counts as grouped
 inline constexpr int regroup_leash = 6;              // while regrouping, only camps this close to the spotter...
 inline constexpr float regroup_farm_factor = 0.2f;   // ...score normally; the rest get this

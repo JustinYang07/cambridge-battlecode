@@ -98,6 +98,9 @@ public:
     int gems = 0, gold = 0, range = 1;
     bool alive = false, atSpawn = false;
     int teamGems = 0, enemyGems = 0;
+    // Enemy deaths are visible out of vision (champion::is_alive). Bodies: Cassi & Issac are two.
+    int enemyBodies = 0, enemiesAlive = 0;
+    int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
     cambc::bitboard visible, occupied;
     cambc::bitboard danger;        // tiles within reach of live, damaging monsters we can see
     int engagedGroup = -1;         // awake group whose monsters can hit us right now (closest)
@@ -159,6 +162,7 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
+    std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::optional<std::array<cambc::ability, 2>> abilities_;
     std::array<signed char, 2> ready_{-1, -1};  // -1 unknown this turn, else 0/1
 };

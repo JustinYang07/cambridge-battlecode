@@ -48,7 +48,9 @@ void update(World& w) {
     if (alert.fresh && !spotter) {
         const bc::vec2 a{alert.x, alert.y};
         const int d = dist(w.pos, a);
-        if (responding || d <= tune::regroup_radius) {
+        // A lone enemy on our half is a kill waiting to happen: call allies from further away.
+        const int radius = alert.enemies == 1 ? tune::regroup_radius_lone : tune::regroup_radius;
+        if (responding || d <= radius) {
             if (!responding) {
                 FixedStr<40> msg;
                 trace().note((msg << "regroup: " << alert.enemies << " enemy at " << a.x << ',' << a.y).view());

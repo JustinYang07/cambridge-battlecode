@@ -4,7 +4,8 @@
 // Vision is not shared, so the champion that sees an enemy on our half (the spotter) raises a
 // team alert in shared memory (comms bytes 6-7: its own tile and how many enemies it sees) and
 // refreshes it every turn it still sees them. Allies within tune::regroup_radius of the spotter
-// respond: they walk to it, and while there only farm camps close by. The spotter keeps doing
+// respond (tune::regroup_radius_lone, and a stronger pull, when it is a lone enemy): they walk to
+// it, and while there only farm camps close by. The spotter keeps doing
 // what it was doing; the survive scorer backs it off when outnumbered.
 //
 // The regroup lasts until the fight resolves: a kill, a death or a retreat all end with nobody

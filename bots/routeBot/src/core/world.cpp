@@ -104,6 +104,40 @@ void World::refresh(bool firstTurn) {
         for (const auto& c : bc::vision::champions(bc::team::ally))
             if (!(c == me)) allies.push_back(AllySeen{.pos = c.position(), .handle = c, .hp = c.health(), .maxHp = c.max_health()});
     }
+    // Who on their team is dead, and when the first of them respawns (raids need the window).
+    // is_alive costs ~300 fuel per enemy, and these turns run close to the budget (an every-round
+    // check cost Vesper 50+ lost turns on corners), so each champion checks every 4th round,
+    // staggered by slot. A death is then seen up to 3 rounds late: respawns are assumed that early.
+    enemyBodies = static_cast<int>(std::min<std::size_t>(enemyHandles_.size(), enemyDeadSince_.size()));
+    if ((round + slot) % tune::enemy_alive_every == 0) {
+        for (int k = 0; k < enemyBodies; ++k) {
+            bool aliveNow = true;
+            try {
+                aliveNow = enemyHandles_[static_cast<std::size_t>(k)].is_alive();
+            } catch (const bc::error&) {
+            }
+            auto& since = enemyDeadSince_[static_cast<std::size_t>(k)];
+            if (aliveNow) since = -1;
+            else if (since < 0) since = round - (tune::enemy_alive_every - 1);
+        }
+    }
+    enemiesAlive = 0;
+    enemyRespawnAt = -1;
+    for (int k = 0; k < enemyBodies; ++k) {
+        const int since = enemyDeadSince_[static_cast<std::size_t>(k)];
+        if (since < 0) {
+            ++enemiesAlive;
+            continue;
+        }
+        const int back = since + bc::constants::respawn_time;
+        // Past its respawn: it is back (we just have not checked yet).
+        if (back <= round) {
+            ++enemiesAlive;
+            continue;
+        }
+        if (enemyRespawnAt < 0 || back < enemyRespawnAt) enemyRespawnAt = back;
+    }
+    fuel::mark("refresh.enemyAlive");
     if (!enemyTiles.is_empty()) {
         for (const auto& c : bc::vision::champions(bc::team::enemy)) {
             EnemySeen e{.handle = c, .pos = c.position()};

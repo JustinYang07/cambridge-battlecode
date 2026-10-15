@@ -67,6 +67,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     }
 
     bool awaiting = false;  // holding outside a party camp for allies
+    float killTurns = 0;    // estimated fight length (farm options)
     const int claims = comms::claimsOn(g.id, w.slot);
     // Allies whose claim outranks ours: nearer to the camp, or as near and an earlier slot. Only they
     // keep us off a solo camp; a claim from across the map no longer does (it blocked the nearest
@@ -108,6 +109,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (k > 1 && !unlocksAlly) o.mul("our share", 1.0f / static_cast<float>(k));
         if (unlocksAlly) o.c.note << "ally needs us";
         o.turns("kill time", fight.turns);
+        killTurns = fight.turns;
         o.turns("capture", tune::capture_turns);
         o.expectDamage = fight.damage;
 
@@ -170,6 +172,19 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (region == home) o.mul("home region", tune::home_region_bonus);
         else o.mul("other squad's region", tune::other_region_factor);
     }
+    // Raid: their team is (nearly) wiped, so their half is open until the first of them respawns.
+    // Clusters are free and quick (strong pull); monster camps take longer and they may come back
+    // mid-fight (mild pull). Only camps we can finish in time, and bolder the healthier we are.
+    if (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive && w.enemyRespawnAt > w.round &&
+        dist(g.center, statics.enemySpawnCenter) < dist(g.center, statics.spawnCenter)) {
+        const float finish = static_cast<float>(w.round) + w.walkTurns(static_cast<float>(c.travel)) +
+                             static_cast<float>(c.wait) + killTurns + tune::capture_turns;
+        const float bold = std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f);
+        if (finish <= static_cast<float>(w.enemyRespawnAt) && bold > 0) {
+            const float full = g.harmless ? tune::raid_cluster_factor : tune::raid_camp_factor;
+            o.mul("raid: their team is down", 1.0f + (full - 1.0f) * bold);
+        }
+    }
     // Regrouping: stay with the spotter. Camps beside it are fine, the rest wait for the fight.
     if (regroup::active() && dist(g.center, regroup::at()) > tune::regroup_leash) o.mul("regrouping", tune::regroup_farm_factor);
     if (w.engagedGroup >= 0 && w.engagedGroup != g.id) {
@@ -218,7 +233,8 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus;
+                                tune::safe_camp_bonus * tune::route_bonus *
+                                (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     for (const auto& g : statics.groups) {
         if (n >= kMax) break;
