@@ -86,9 +86,9 @@ void regroupOption(World& w, std::vector<Option>& out) {
     o.at = at;
     o.c.target << "regroup";
     o.add("ally sees enemy", tune::regroup_value);
-    if (regroup::enemies() == 1) o.mul("lone enemy: hunt it", tune::regroup_lone_factor);
+    if (regroup::squishySpotter()) o.mul("squishy ally needs help", tune::regroup_squishy_factor);
     o.turns("walk", w.walkTurns(static_cast<float>(d)));
-    o.c.note << regroup::enemies() << " enemy near ally";
+    o.c.note << (regroup::enemies() > 1 ? "enemies" : "an enemy") << (regroup::squishySpotter() ? " near a squishy ally" : " near an ally");
     o.finish();
     out.push_back(std::move(o));
 }

@@ -103,7 +103,10 @@ inline constexpr int bag_avoid_gems = 20;           // carrying this many gems, 
 inline constexpr float kill_gold_value = 50.0f;
 inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
-inline constexpr float kill_denial_value = 20.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights)
+inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
+inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
+inline constexpr int chase_radius = 6;              // enemies further than this are not chased...
+inline constexpr float chase_factor = 0.3f;         // ...their fight score gets this (unless channelling)
 
 // ---- engine-ish constants used for estimates
 inline constexpr int spell_cooldown = 8;
@@ -149,14 +152,16 @@ inline constexpr int raid_min_window = 25;           // whole enemy team dead wi
 inline constexpr float raid_own_half_factor = 0.4f;  // ...our half's camps get this (at full health): take theirs first
 
 // ---- regrouping (strategy/regroup.h): an enemy on our half pulls nearby allies to the spotter
-inline constexpr int regroup_radius = 15;            // allies this close to the spotter respond
-inline constexpr int regroup_radius_lone = 25;       // ...this close when the spotter sees a lone enemy
-inline constexpr float regroup_lone_factor = 2.0f;   // a lone enemy on our half: regroup pull x this
+inline constexpr int regroup_radius = 10;            // allies this close to a sturdy spotter respond...
+inline constexpr int regroup_radius_squishy = 25;    // ...this close to a squishy one (not a tank, or below...
+inline constexpr float squishy_hp = 0.6f;            // ...this health)
+inline constexpr float regroup_squishy_factor = 2.0f;  // regroup pull for a squishy spotter
+inline constexpr int regroup_enemy_radius = 8;       // the alert holds only while the enemy is this close to the spotter
 inline constexpr int regroup_arrive = 4;             // this close to the spotter counts as grouped
 inline constexpr int regroup_leash = 6;              // while regrouping, only camps this close to the spotter...
 inline constexpr float regroup_farm_factor = 0.2f;   // ...score normally; the rest get this
 inline constexpr float regroup_value = 10.0f;        // regroup option: this / walking turns x 100
-inline constexpr int regroup_end_rounds = 10;        // the fight is over when nobody has seen the enemy this long
+inline constexpr int regroup_end_rounds = 2;         // responders stand down this soon after the alert lapses (was 10)
 inline constexpr float regroup_min_hp = 0.5f;        // hurt champions heal instead of responding
 
 // ---- tracing

@@ -46,6 +46,9 @@ void fight(World& w, std::vector<Option>& out) {
                 break;
             }
         o.turns("travel", static_cast<float>(std::max(0, dist(w.pos, e.pos) - w.range)));
+        // Do not chase: an enemy this far off is leaving, and the walk is time not farmed. A
+        // channelling enemy (tribute, recall) is standing still, so it is still worth the walk.
+        if (dist(w.pos, e.pos) > tune::chase_radius && !e.channeling) o.mul("too far to chase", tune::chase_factor);
         o.turns("kill time", turnsToKill);
         // Never exactly zero: a losing fight still shows up (with a tiny score) when you inspect
         // the decision, so it is visibly considered and rejected.
@@ -70,7 +73,7 @@ void fight(World& w, std::vector<Option>& out) {
         const bool atTheirSpawn = dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius;
         if (bodies > enemiesNear && !atTheirSpawn) {
             o.add("kill denies them", tune::kill_denial_value);
-            o.mul("favourable fight", 1.0f + std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f));
+            o.mul("favourable fight", 1.0f + (tune::favourable_max - 1.0f) * std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f));
             o.c.note << "favourable " << bodies << "v" << enemiesNear << "; ";
         }
         // An enemy on or near its own spawn heals fully every round: chasing it there only feeds

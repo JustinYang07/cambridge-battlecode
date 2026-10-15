@@ -11,7 +11,7 @@
 // next turn, and the distance bracket follows the claimer as it walks.
 //
 // Bytes 6 and 7 carry one team alert instead (a team has at most 6 bodies, so they are free):
-//   byte 6: spotter x / 2 + 1 (6 bits) | (enemies seen - 1, capped at 3) << 6
+//   byte 6: spotter x / 2 + 1 (6 bits) | several enemies (bit 6) | squishy spotter (bit 7)
 //   byte 7: spotter y / 2     (6 bits) | (round & 3) << 6
 // Both zero means no alert. The spotter rewrites it every turn it still sees the enemy; a reader
 // that finds it older than last round clears it, so a stale alert never looks fresh again.
@@ -54,10 +54,11 @@ inline constexpr int alert_byte = 6;
 struct Alert {
     bool fresh = false;   // written this round or last
     int x = 0, y = 0;     // spotter's tile (to 2 tiles)
-    int enemies = 0;      // 1..4 (4 = four or more)
+    int enemies = 0;      // 1, or 2 meaning two or more
+    bool squishy = false; // the spotter is fragile (not a tank, or hurt): call harder
 };
 // Read the alert; clears it when stale. Only valid when the team has at most 6 bodies.
 Alert readAlert(int round);
-void raiseAlert(int x, int y, int enemies, int round);
+void raiseAlert(int x, int y, int enemies, bool squishy, int round);
 
 } // namespace comms

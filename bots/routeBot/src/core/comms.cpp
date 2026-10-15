@@ -96,13 +96,13 @@ Alert readAlert(int round) {
     a.fresh = true;
     a.x = ((lo & 0x3F) - 1) * 2;
     a.y = (hi & 0x3F) * 2;
-    a.enemies = (lo >> 6) + 1;
+    a.enemies = (lo & 0x40) ? 2 : 1;
+    a.squishy = (lo & 0x80) != 0;
     return a;
 }
 
-void raiseAlert(int x, int y, int enemies, int round) {
-    const int count = enemies < 1 ? 0 : enemies > 4 ? 3 : enemies - 1;
-    write(alert_byte, static_cast<std::uint8_t>(((x / 2 + 1) & 0x3F) | (count << 6)));
+void raiseAlert(int x, int y, int enemies, bool squishy, int round) {
+    write(alert_byte, static_cast<std::uint8_t>(((x / 2 + 1) & 0x3F) | (enemies > 1 ? 0x40 : 0) | (squishy ? 0x80 : 0)));
     write(alert_byte + 1, static_cast<std::uint8_t>(((y / 2) & 0x3F) | ((round & 3) << 6)));
 }
 
