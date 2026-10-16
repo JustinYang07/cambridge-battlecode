@@ -92,7 +92,13 @@ inline constexpr float gold_value_opening = 0.2f;  // gems per gold in the openi
 inline constexpr int opening_rounds = 300;
 // Opening gem rush (Sneaky Bush Campers bank their first gems ~r50 and 100 by ~r73; we took ~68 / ~115):
 inline constexpr int early_gold_skip_round = 0;      // before this, gold-only camps are skipped unless right beside us
-inline constexpr bool shop_after_first_tribute = false; // no shop trips before our first tribute
+inline constexpr bool shop_after_first_tribute = false;  // no shop trips before our first tribute
+inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
+// Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
+inline constexpr int gems_only_round = 150;
+inline constexpr int gems_only_lag = 50;             // enemy banked gems minus ours
+inline constexpr float gems_only_factor = 0.05f;
+inline constexpr float gems_only_group_fight = 1.5f;  // fights with 2+ of us near the target (and >= their numbers) while in gems-only mode
 inline constexpr int early_bank_round = 150;         // before this, bank at early_bank_factor of the usual bag
 inline constexpr float early_bank_factor = 1.0f;   // opening gem rush off: -207 +/- 95 vs v1.14 (0.5 tested)
 inline constexpr float opening_gold_bonus = 1.0f;   // gold-only clusters in the opening (A/B: 1.8 cost ~125 gems/game, 3.0 neutral; off)

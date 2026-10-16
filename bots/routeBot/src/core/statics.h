@@ -23,6 +23,7 @@ struct GroupInfo {
     float totalStrength = 0;          // sum of members' base strength (damage per round when awake)
     bool harmless = false;            // only gem/gold clusters
     bool hasMonolith = false;
+    bool reachable = true;            // some tile is connected to our spawn on foot (false: sealed off, e.g. behind holes)
     int campCount = 0;
     int adjacentPairs = 0;            // members within 1 tile of each other (splash value)
     std::string label;                // e.g. "wolf+wolf@(8,2)"

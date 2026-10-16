@@ -53,6 +53,12 @@ void Bot::play_turn() {
     if (first) {
         trace().configure(static_cast<int>(bc::champions(bc::team::ally).size()), w.slot, name(w.type));
         if (w.slot == 0) trace().legend();
+        if (w.slot == 0) {
+            std::string sealed;
+            for (const auto& g : Statics::get().groups)
+                if (!g.reachable) sealed += " " + g.label;
+            w.pendingNotes.push_back("unreachable groups:" + (sealed.empty() ? std::string(" none") : sealed));
+        }
     }
     trace().beginTurn(w.round, w.slot, name(w.type));
     trace().state(w.pos.x, w.pos.y, w.hp, w.maxHp, w.gems, w.gold, w.alive);

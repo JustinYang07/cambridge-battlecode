@@ -110,4 +110,23 @@ void Statics::init() {
         g.label += "@" + fmt(g.tiles.empty() ? bc::vec2{} : g.tiles[0]);
         groups.push_back(std::move(g));
     }
+    // Which groups can be walked to at all: one flood fill from our spawn over the terrain (ambush
+    // has camps in pockets sealed by walls and holes, reachable only by dashing; champions used to
+    // stand still for 1,500 rounds trying to path to one). Runs once, on the first turn's budget.
+    try {
+        bc::distance_field field;
+        bc::bitboard visited;
+        field.compute(terrain, allySpawn, visited);
+        const auto bits = visited.export_linear_buffer();
+        for (auto& g : groups) {
+            bool any = false;
+            for (auto t : g.tiles) {
+                const auto i = static_cast<std::size_t>(t.y * width + t.x);
+                if ((bits[i >> 3] >> (i & 7)) & 1) { any = true; break; }
+            }
+            g.reachable = any;
+        }
+    } catch (const bc::error&) {
+        // Keep every group reachable rather than lose them all.
+    }
 }

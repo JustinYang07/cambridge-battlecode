@@ -329,6 +329,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4)
         o.mul("early: gems first", 0.05f);
+    // Gems-only mode: from the mid game, while the enemy has banked gems_only_lag more than us, the
+    // whole team leaves gold-only camps and heads for gem camps (seen or not: all are known).
+    if (g.gems == 0 && g.gold > 0 && w.gemsOnly())
+        o.mul("behind on gems: gems only", tune::gems_only_factor);
     if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds)
         o.mul("opening gold", w.kit.goldBonus ? tune::opening_gold_bonus * 1.3f : tune::opening_gold_bonus);
     if (mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= 10) o.mul("enemy nearby", tune::contested_camp_factor);
@@ -394,10 +398,15 @@ void farm(World& w, std::vector<Option>& out) {
         if (n >= kMax) break;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         if (g.gems == 0 && g.gold == 0) continue;
+        if (!g.reachable) continue;  // sealed off from our spawn: cannot be walked to
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         // Exact walking distance once its field exists (a tighter bound prunes more groups),
         // otherwise Chebyshev distance, which walking never beats.
         int cheb = fields::toGroup(g.id, w.pos);
+        // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
+        // captured on foot, so it is not a farming option (it used to be scored by straight-line
+        // distance, and champions stood still for 1,500 rounds trying to path to it).
+        if (tune::skip_field_unreachable && cheb >= Navigator::unreachable) continue;
         if (cheb < 0) {
             cheb = 1 << 20;
             for (auto t : g.tiles) cheb = std::min(cheb, dist(w.pos, t));
@@ -439,6 +448,7 @@ void farm(World& w, std::vector<Option>& out) {
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         int travel = Navigator::unreachable;
         if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
+            if (tune::skip_field_unreachable && d >= Navigator::unreachable) return;  // no walking path (see above)
             // Precomputed field: one local read. Aim at the straight-line nearest tile.
             if (d < Navigator::unreachable) travel = std::max(0, d - reach);
             int nearestD = 1 << 20;

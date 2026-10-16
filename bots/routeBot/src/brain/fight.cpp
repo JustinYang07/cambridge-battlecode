@@ -65,6 +65,16 @@ void fight(World& w, std::vector<Option>& out) {
         const float missing = std::clamp(1.0f - e.hp / std::max(e.maxHp, 1.0f), 0.0f, 1.0f);
         if (missing > 0.05f) o.mul("enemy hurt", 1.0f + tune::fight_hurt_bonus * missing);
         if (e.channeling) o.mul("interrupt channel", 1.5f);
+        // Gems-only mode (we are behind): fight harder, but only as a group: 2+ of us near the target
+        // and at least as many of us as of them there. A lone champion's fights are unchanged.
+        if (w.gemsOnly() && tune::gems_only_group_fight != 1.0f) {
+            int us = 1, them = 0;
+            for (const auto& a : w.allies)
+                if (dist(a.pos, e.pos) <= tune::favour_radius) ++us;
+            for (const auto& x : w.enemies)
+                if (x.hp > 0 && dist(x.pos, e.pos) <= tune::favour_radius) ++them;
+            if (us >= 2 && us >= them) o.mul("behind: group fight", tune::gems_only_group_fight);
+        }
         // No chasing: an enemy out of our reach and moving away is leaving; let it go.
         if (tune::no_chase_factor != 1.0f && !e.channeling && dist(w.pos, e.pos) > w.range && w.enemyMovingAway(e.index, e.pos))
             o.mul("it is leaving", tune::no_chase_factor);
