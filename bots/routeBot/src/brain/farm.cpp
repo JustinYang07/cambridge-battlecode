@@ -34,6 +34,13 @@ float goldValue(const World& w) {
     return w.kit.goldBonus ? v * 1.4f : v;  // Vesper Vale earns 20% more from every gold drop
 }
 
+// Behind on tributed gems: every gem is worth more, the further behind the more (capped).
+float gemValue(const World& w) {
+    const float deficit = static_cast<float>(w.enemyGems - w.teamGems);
+    if (deficit <= 0) return 1.0f;
+    return 1.0f + tune::catchup_max_boost * std::min(deficit / tune::catchup_full_deficit, 1.0f);
+}
+
 // ---- the middle of the map
 // On maps with a busy centre (see centreIsBusy), camps toward the geometric centre are worth more than their own reward: the middle is where
 // rotations are short and the map is contested. The bonus scales with the camp's radius from the
@@ -125,7 +132,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         gemsInTime = finish < static_cast<float>(maxRounds);
         if (!gemsInTime) o.c.note << "too late to bank; ";
     }
-    o.add("gems", gemsInTime ? static_cast<float>(g.gems) : 0.0f);
+    o.add("gems", gemsInTime ? static_cast<float>(g.gems) * gemValue(w) : 0.0f);
     o.add("gold", static_cast<float>(g.gold) * goldValue(w));
     // Long walks cost more than their turns: a far camp is often contested or respawned by the
     // time we arrive, and walking past nearer camps leaves them to the enemy (collision: walking
@@ -366,9 +373,10 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
+    const float gemV = gemValue(w);
     for (const auto& g : statics.groups) {
         if (n >= kMax) break;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
@@ -384,7 +392,7 @@ void farm(World& w, std::vector<Option>& out) {
         cheb = std::max(0, cheb - reach);
         const int wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - cheb) : 0;
         if (wait > 60) continue;  // too far in the future to plan around
-        float reward = static_cast<float>(g.gems) + static_cast<float>(g.gold) * gv;
+        float reward = static_cast<float>(g.gems) * gemV + static_cast<float>(g.gold) * gv;
         // Keep the bound honest for the opening-gold bonus (applied per group, not to all).
         if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds) reward *= tune::opening_gold_bonus * 1.3f;
         float minKill = 0;
@@ -409,6 +417,8 @@ void farm(World& w, std::vector<Option>& out) {
     const auto spare = fuelLeft > tune::fuel_for_full_scoring - 10000 ? fuelLeft - (tune::fuel_for_full_scoring - 10000) : 0;
     const int maxScored = std::clamp(static_cast<int>(spare / tune::fuel_per_scored_group), 1, tune::max_scored_groups);
     bool bestNeedsHelp = false;
+    // The nearest camp that is up now (no respawn wait): it gets a bonus once everything is scored.
+    int nearestOut = -1, nearestTravel = 1 << 20;
     // Fully score one candidate (walking distance, fight estimate) and add it to the options.
     auto scoreOne = [&](Candidate c) {
         const auto& g = *c.group;
@@ -436,6 +446,10 @@ void farm(World& w, std::vector<Option>& out) {
         c.travel = travel;
         c.wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - travel) : 0;
         auto o = scoreGroup(w, c);
+        if (c.wait == 0 && mem.status != GroupStatus::respawning && c.travel < nearestTravel) {
+            nearestTravel = c.travel;
+            nearestOut = static_cast<int>(out.size());
+        }
         if (o.score > best) {
             // Waiting on help that has not claimed it: a solo option nearby may be better.
             bestNeedsHelp = o.kind == OptionKind::farm && o.need > 1 + comms::claimsOn(g.id, w.slot);
@@ -444,8 +458,17 @@ void farm(World& w, std::vector<Option>& out) {
         ++scored;
         out.push_back(std::move(o));
     };
+    // The nearest camp that is up is always scored too (it may earn the nearest-camp bonus).
+    int nearestUp = -1;
+    for (int i = 0, bestD = 1 << 20; i < n; ++i) {
+        const auto& pc = pre[static_cast<std::size_t>(i)];
+        if (pc.group && w.groups[static_cast<std::size_t>(pc.group->id)].status != GroupStatus::respawning && pc.travel < bestD) {
+            bestD = pc.travel;
+            nearestUp = pc.group->id;
+        }
+    }
     // The route's and the loop's camps are always scored, whatever their bounds.
-    for (const int forced : {mapplan::routeGroup(), loop::target()})
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
@@ -486,6 +509,11 @@ void farm(World& w, std::vector<Option>& out) {
             pre[static_cast<std::size_t>(pick)].group = nullptr;
             scoreOne(c);
         }
+    if (nearestOut >= 0 && tune::nearest_camp_bonus != 1.0f) {
+        auto& o = out[static_cast<std::size_t>(nearestOut)];
+        o.mul("nearest camp", tune::nearest_camp_bonus);
+        o.finish();
+    }
 }
 
 } // namespace scorers

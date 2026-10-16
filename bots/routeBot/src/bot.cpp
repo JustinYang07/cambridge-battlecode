@@ -54,6 +54,11 @@ void Bot::play_turn() {
     }
     trace().beginTurn(w.round, w.slot, name(w.type));
     trace().state(w.pos.x, w.pos.y, w.hp, w.maxHp, w.gems, w.gold, w.alive);
+    if (!w.pendingNotes.empty()) {
+        for (const auto& n : w.pendingNotes) trace().note(n);
+        w.pendingNotes.clear();
+        trace().forceFull();
+    }
 
     comms::refresh();
     const bool wasRegrouping = regroup::active();

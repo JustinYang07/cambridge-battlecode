@@ -15,5 +15,7 @@ void idle(World& w, std::vector<Option>& out);      // survive.cpp: fallback pos
 void regroupOption(World& w, std::vector<Option>& out);  // survive.cpp: join an ally who sees an enemy
 
 float goldValue(const World& w);
+// Value of one gem: above 1 while the enemy has tributed more than us.
+float gemValue(const World& w);
 
 } // namespace scorers

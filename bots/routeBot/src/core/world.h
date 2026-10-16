@@ -112,6 +112,9 @@ public:
     std::vector<AllySeen> allies;
     std::vector<CampSeen> camps;
     std::vector<EnemyGhost> ghosts;  // enemies seen recently (including this turn)
+    // Team target: the first enemy we saw losing health (an ally or we hit it). Everyone focuses
+    // it while it stays alive and in sight (enemy roster index, -1 none).
+    int teamTarget = -1, teamTargetSeen = -1;
 
     // ---- memory across turns
     std::vector<GroupMemory> groups;
@@ -136,6 +139,7 @@ public:
     // Chaining: the last camp we worked that died, and when (camps near it get a bonus for a while).
     int chainFrom = -1, chainRound = -1000;
     float prevHp = -1;
+    std::vector<std::string> pendingNotes;  // notes from refresh(), traced once the turn's trace starts
 
     void refresh(bool firstTurn);
     float hpFrac() const { return hp / (maxHp > 0 ? maxHp : 1); }
@@ -176,6 +180,8 @@ private:
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
+    std::array<float, 8> enemyHpSeen_{-1, -1, -1, -1, -1, -1, -1, -1};   // health when last seen
+    std::array<int, 8> enemyHpRound_{-1, -1, -1, -1, -1, -1, -1, -1};    // round of that sighting
     std::optional<std::array<cambc::ability, 2>> abilities_;
     std::array<signed char, 2> ready_{-1, -1};  // -1 unknown this turn, else 0/1
 };

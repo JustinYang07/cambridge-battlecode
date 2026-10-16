@@ -49,7 +49,7 @@ void bank(World& w, std::vector<Option>& out) {
     o.at = altars[static_cast<std::size_t>(bestIdx)];
     o.c.target << 'a' << bestIdx;
     const float gems = static_cast<float>(w.gems);
-    o.add("bag", gems);
+    o.add("bag", gems * gemValue(w));
     o.turns("travel", w.walkTurns(static_cast<float>(bestTravel)));
     o.turns("tribute", std::ceil(gems / 10.0f));
     // Alone, a full bag is an invitation: bank at a lower bag size.

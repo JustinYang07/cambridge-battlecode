@@ -1,4 +1,5 @@
 #include "world.h"
+#include "fixed_str.h"
 #include <algorithm>
 #include <variant>
 #include "comms.h"
@@ -170,6 +171,31 @@ void World::refresh(bool firstTurn) {
         }
     }
     std::erase_if(ghosts, [&](const EnemyGhost& g) { return round - g.round > tune::enemy_memory_rounds; });
+
+    // Team target: keep it while it is alive and seen recently; otherwise the first enemy seen
+    // losing health since the last round we saw it (the most hurt one if several at once).
+    if (teamTarget >= 0 && round - teamTargetSeen > tune::team_target_memory) teamTarget = -1;
+    int hurt = -1;
+    float hurtFrac = 2.0f;
+    for (const auto& e : enemies) {
+        if (e.index < 0 || e.index >= static_cast<int>(enemyHpSeen_.size())) continue;
+        const auto k = static_cast<std::size_t>(e.index);
+        if (e.index == teamTarget) {
+            if (e.hp <= 0) teamTarget = -1;
+            else teamTargetSeen = round;
+        }
+        const bool justSeen = enemyHpRound_[k] >= round - 2;
+        if (e.hp > 0 && justSeen && e.hp < enemyHpSeen_[k] - 1.0f && e.hp / std::max(e.maxHp, 1.0f) < hurtFrac) {
+            hurt = e.index;
+            hurtFrac = e.hp / std::max(e.maxHp, 1.0f);
+        }
+        enemyHpSeen_[k] = e.hp;
+        enemyHpRound_[k] = round;
+    }
+    if (teamTarget < 0 && hurt >= 0) {
+        teamTarget = hurt;
+        teamTargetSeen = round;
+    }
     fuel::mark("refresh.champs");
 
     // Camps: presence from camp_tiles against the static camp table.
@@ -220,6 +246,15 @@ void World::loadNearbyCamps() {
     // Live health and handles only matter for camps we could hit or that could hit us soon.
     // Handles come from the static table (vision::camps() costs ~1k per visible camp).
     const auto& statics = Statics::get();
+    // Regeneration guard: a monster's health going up between two of our readings, too soon for a
+    // respawn (groups respawn 40+ rounds after capture), is logged. None seen so far: 342 re-reads
+    // of damaged monsters after 3-39 rounds were all the same or lower.
+    static std::vector<float> lastHp;
+    static std::vector<int> lastRound;
+    if (lastHp.empty()) {
+        lastHp.assign(static_cast<std::size_t>(statics.width * statics.height), -1.0f);
+        lastRound.assign(lastHp.size(), -1000);
+    }
     for (auto& c : camps) {
         if (dist(c.pos, pos) > 5) continue;
         const auto* info = statics.campAt(c.pos);
@@ -228,6 +263,15 @@ void World::loadNearbyCamps() {
             c.hp = info->handle->health();
             c.hpKnown = true;
             c.handle = info->handle;
+            const auto k = static_cast<std::size_t>(c.pos.y * statics.width + c.pos.x);
+            if (lastHp[k] > 0 && c.hp > lastHp[k] + 0.5f && round - lastRound[k] < 30) {
+                FixedStr<64> msg;
+                msg << "camp regen (" << c.pos.x << ',' << c.pos.y << ") " << static_cast<int>(lastHp[k]) << "->"
+                    << static_cast<int>(c.hp) << " in " << (round - lastRound[k]);
+                pendingNotes.push_back(std::string(msg.view()));
+            }
+            lastHp[k] = c.hp;
+            lastRound[k] = round;
         } catch (const bc::error&) {
         }
     }

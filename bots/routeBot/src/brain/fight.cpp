@@ -55,6 +55,7 @@ void fight(World& w, std::vector<Option>& out) {
         o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.02f, 1.5f));
         if (ours.count == 1 && myTurnsToDie < turnsToKill) o.mul("die first", 0.3f);
         if (comms::focusMask(e.index, w.slot) != 0) o.mul("focus fire", tune::focus_fire_bonus);
+        else if (e.index == w.teamTarget) o.mul("team target", tune::team_target_bonus);
         // A hurt enemy is worth chasing beyond the shorter kill time: it is about to recall (and
         // take its bag home), and a kill now removes a body from the next fight.
         const float missing = std::clamp(1.0f - e.hp / std::max(e.maxHp, 1.0f), 0.0f, 1.0f);

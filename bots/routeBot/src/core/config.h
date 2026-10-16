@@ -39,7 +39,7 @@ inline constexpr int wait_farm_radius = 6;         // while waiting, farm gem/go
 inline constexpr int max_party_wait = 10;          // turns to wait for allies before giving up on a group         // largest party we plan around for one camp group
 inline constexpr float party_focus_share = 0.7f;    // in a party, share of monster hits we expect to absorb
 inline constexpr float escape_margin_turns = 1.5f;  // extra turns of incoming damage kept in reserve to walk away
-inline constexpr float respawn_wait_weight = 1.0f;  // turns spent waiting count like travel
+inline constexpr float respawn_wait_weight = 2.0f;  // turns spent waiting for a respawn count double (was 1)
 
 // ---- banking
 inline constexpr float bank_target_gems = 60.0f;    // carrying this many makes banking compelling
@@ -58,7 +58,9 @@ inline constexpr int monster_range = 3;
 inline constexpr int fight_join_radius = 4;        // enemies this close to the target join its side
 inline constexpr int fight_beside_radius = 3;      // allies this close to us fight (and draw fire) with us
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
-inline constexpr float focus_fire_bonus = 2.0f;    // an enemy allies are already attacking
+inline constexpr float focus_fire_bonus = 2.0f;
+inline constexpr int team_target_memory = 3;         // rounds the team target survives out of sight
+inline constexpr float team_target_bonus = 2.0f;     // fight score for the enemy we saw take damage first    // an enemy allies are already attacking
 inline constexpr float contested_capture_factor = 0.05f;  // capture with an enemy on the spawn tiles (progress resets)
 inline constexpr float fight_hurt_bonus = 1.0f;    // fight score x(1 + this * enemy's missing health fraction)
 
@@ -76,8 +78,9 @@ inline constexpr float focus_bonus_per_damage = 0.0f;  // extra commitment per d
 inline constexpr float abandon_factor = 0.7f;  // walking away from a fight we started
 inline constexpr float safe_camp_bonus = 1.4f;      // gem/gold clusters: quick, free, no risk
 inline constexpr int safe_camp_radius = 12;
-inline constexpr float idle_wait_factor = 0.6f;     // standing over a camp that is still respawning
+inline constexpr float idle_wait_factor = 0.4f;     // standing over a camp that is still respawning (was 0.6)
 inline constexpr int idle_wait_turns = 8;
+inline constexpr float nearest_camp_bonus = 1.4f;    // the nearest camp that is up now (no respawn wait)
 inline constexpr float underpowered_factor = 0.65f; // camps needing a party before we have any items
 inline constexpr int underpowered_shards = 5;
 inline constexpr float gold_value_opening = 0.2f;  // gems per gold in the opening (A/B: 0.45 cost ~110 gems/game)
@@ -188,7 +191,12 @@ inline constexpr float raid_own_half_factor = 0.4f;  // ...our half's camps get 
 inline constexpr int regroup_radius = 10;            // allies this close to a sturdy spotter respond...
 inline constexpr int regroup_radius_squishy = 25;    // ...this close to a squishy one (not a tank, or below...
 inline constexpr float squishy_hp = 0.6f;            // ...this health)
-inline constexpr bool combat_call = true;            // a champion fighting enemy champions (anywhere) calls allies too
+// Behind on tributed gems: gems (camps and the bag) are worth up to 1 + catchup_max_boost, reached
+// when the enemy has banked tune::catchup_full_deficit more than us.
+inline constexpr float catchup_max_boost = 0.5f;
+inline constexpr float catchup_full_deficit = 200.0f;
+inline constexpr bool combat_call = true;
+inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywhere) also calls allies            // a champion fighting enemy champions (anywhere) calls allies too
 // Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
 // distance from the draft) are worth more for a while.
 inline constexpr float chain_bonus = 1.5f;

@@ -40,12 +40,19 @@ void update(World& w) {
     // on the map: allies nearby come to us. Sent as a squishy call (the strong pull).
     bool fighting = false;
     if (tune::combat_call && w.alive && seen == 0) {
-        int close = 0;
+        int close = 0, visible = 0;
         for (const auto& e : w.enemies)
-            if (e.hp > 0 && dist(e.pos, w.pos) <= tune::regroup_enemy_radius) ++close;
+            if (e.hp > 0) {
+                ++visible;
+                if (dist(e.pos, w.pos) <= tune::regroup_enemy_radius) ++close;
+            }
         const bool hitByThem = w.beingHit && w.incoming <= 0 && close > 0;  // hurt, and not by monsters
         if (close > 0 && (w.lastOption == static_cast<int>(OptionKind::fight) || hitByThem)) {
             seen = close;
+            fighting = true;
+        } else if (tune::call_on_several && visible >= 2) {
+            // Several enemies in sight, anywhere: a fight may be coming, get the team together.
+            seen = visible;
             fighting = true;
         }
     }

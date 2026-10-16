@@ -58,7 +58,8 @@ EnemySeen* enemyInRange(World& w, int range, const Focus& focus) {
     for (auto& e : w.enemies) {
         if (e.hp <= 0 || dist(e.pos, w.pos) > range) continue;
         const bool chosen = focus.enemy && e.handle == *focus.enemy;
-        const bool allyFocus = comms::focusMask(e.index, w.slot) != 0;
+        // Allies attacking it (claims), or the first enemy we saw take damage (the team target).
+        const bool allyFocus = comms::focusMask(e.index, w.slot) != 0 || (e.index >= 0 && e.index == w.teamTarget);
         const bool wanted = chosen || allyFocus || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling;
         if (!wanted) continue;
         const int rank = chosen ? 2 : allyFocus ? 1 : 0;
