@@ -49,8 +49,59 @@ def _named(indices: list[int], names: list[str]) -> dict[str, int]:
     return {names[i] if i < len(names) else str(i): n for i, n in enumerate(indices) if n}
 
 
+def _num(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _summarise_v1(stats: dict) -> dict:
+    """cambc >= 2.2 statistics (--json, formatVersion 1.0): metrics per champion, names not ids."""
+    teams = []
+    fuel = {}
+    for ev in stats.get("events", []):
+        if ev.get("kind") == "fuelExhausted":
+            owner = ev.get("owner") or {}
+            team = owner.get("team") if isinstance(owner, dict) else owner
+            fuel[team] = fuel.get(team, 0) + max(1, len(ev.get("entries") or []))
+    for side in ("teamA", "teamB"):
+        t = next((x for x in stats.get("teams", []) if x.get("team") == side), {})
+        champs = [c for c in stats.get("champions", []) if c.get("team") == side]
+        m = lambda c, k: _num((c.get("metrics") or {}).get(k))  # noqa: E731
+        teams.append({
+            "gems": int(_num(t.get("submittedGems"))),
+            "draft": [d["champion"] for d in (stats.get("roster") or {}).get("draft", []) if d.get("team") == side],
+            "kills": int(sum(m(c, "kills") for c in champs)),
+            "deaths": int(sum(m(c, "deaths") for c in champs)),
+            "goldEarned": int(sum(m(c, "earnedGold") for c in champs)),
+            "fuelExhausted": fuel.get(side, 0),
+            "champions": [{
+                "name": c.get("name", "?"),
+                "kills": int(m(c, "kills")), "deaths": int(m(c, "deaths")), "assists": int(m(c, "assists")),
+                "submittedGems": int(m(c, "submittedGems")), "collectedGems": int(m(c, "collectedGems")),
+                "earnedGold": int(m(c, "earnedGold")), "spentGold": int(m(c, "spentGold")),
+                "monsterDamageDone": round(m(c, "monsterDamageDone")),
+                "monsterDamageTaken": round(m(c, "monsterDamageTaken")),
+                "championDamageDone": round(m(c, "championDamageDone")),
+                "championDamageTaken": round(m(c, "championDamageTaken")),
+                "healingDone": round(m(c, "healingDone")),
+                "items": {i["item"].lower(): int(_num(i.get("quantity"))) for i in c.get("items", [])},
+                "consumablesBought": {i["consumable"].lower(): int(_num(i.get("quantity"))) for i in c.get("consumablesBought", [])},
+            } for c in champs],
+        })
+    match = stats.get("match") or {}
+    outcome = match.get("outcome", "")
+    faults = (stats.get("diagnostics") or {}).get("botFaults") or {}
+    return {"winner": "A" if outcome == "teamA" else "B" if outcome == "teamB" else None,
+            "rounds": match.get("roundsCompleted"), "faults": [faults.get("teamA", 0), faults.get("teamB", 0)],
+            "teams": teams}
+
+
 def summarise_stats(stats: dict) -> dict:
     """Flatten the engine's statistics JSON into what the UI and reports need."""
+    if "jsonFormatVersion" in stats or "formatVersion" in stats:
+        return _summarise_v1(stats)
     teams = []
     for t in sorted(stats.get("teams", []), key=lambda t: t["team"]):
         champs = [c for c in stats.get("champions", []) if c["team"] == t["team"]]
@@ -86,7 +137,10 @@ def run_match(bot_a: str, bot_b: str, map_name: str, out_dir: Path, rounds: int 
     out_dir.mkdir(parents=True, exist_ok=True)
     stats_path = out_dir / "stats.json"
     cmd = [config.cambc_binary(), "run", bot_a, bot_b, "--map", str(config.map_path(map_name)),
-           "-o", str(out_dir), "--statistics", str(stats_path)]
+           "-o", str(out_dir), "--statistics", str(stats_path), "--json",
+           # cambc >= 2.2 writes binary statistics without --json and caps each team's stdout at
+           # 1 MB, which cut our decision traces short in long games.
+           "--log-limit", str(64 * 1024 * 1024)]
     if rounds:
         cmd += ["--rounds", str(rounds)]
     if fuel:

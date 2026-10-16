@@ -28,8 +28,16 @@ def decode(path: Path) -> dict | None:
     out = CACHE / (path.stem + ".json")
     if out.exists():
         return json.loads(out.read_text())
-    r = subprocess.run(["node", str(DECODER), str(path)], capture_output=True, text=True, timeout=300)
-    if r.returncode != 0 or not r.stdout:
+    # Newest engine first; replays recorded before a cambc upgrade need the older engine.
+    engines = sorted(Path.home().glob("Library/Caches/cambc/assets/*/visualiser/assets/v*_*_*-*.wasm"),
+                     key=lambda p: (p.name.split("-")[0], p.stat().st_mtime), reverse=True)
+    r = None
+    for wasm in engines or [None]:
+        cmd = ["node", str(DECODER), str(path)] + (["--wasm", str(wasm)] if wasm else [])
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if r.returncode == 0 and r.stdout:
+            break
+    if r is None or r.returncode != 0 or not r.stdout:
         return None
     out.write_text(r.stdout)
     return json.loads(r.stdout)

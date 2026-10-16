@@ -1,13 +1,22 @@
 import { api, h, mount, toast } from "../ui.js";
 import { expRow } from "./dashboard.js";
 
+const LAST_AB_KEY = "cambc-lab-last-ab";
+
 export async function render() {
   const [status, experiments] = await Promise.all([api("/api/status"), api("/api/experiments")]);
   const bots = status.bots.filter((b) => b.kind !== "tool");
   const ours = bots.filter((b) => b.kind === "bot");
+  // Start from the last A/B: what this browser last ran, else the newest experiment (any bots that
+  // no longer exist are dropped). Never default to the starter bot.
+  const names = new Set(bots.map((b) => b.name));
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem(LAST_AB_KEY) || "null"); } catch { last = null; }
+  if (!last && experiments.length) last = { candidate: experiments[0].candidate, opponents: experiments[0].opponents };
+  const lastOpponents = (last?.opponents || []).filter((n) => names.has(n));
   const state = {
-    candidate: ours[0]?.name || bots[0]?.name,
-    opponents: new Set(bots.some((b) => b.name === "starter-cpp") ? ["starter-cpp"] : []),
+    candidate: names.has(last?.candidate) ? last.candidate : ours[0]?.name || bots[0]?.name,
+    opponents: new Set(lastOpponents),
     maps: new Set(status.maps),
     bothSides: true,
   };
@@ -28,6 +37,7 @@ export async function render() {
       const exp = await api("/api/experiments", { method: "POST", body: {
         candidate: state.candidate, opponents: [...state.opponents], maps: [...state.maps],
         bothSides: state.bothSides, name: nameInput.value.trim(), notes: notesInput.value.trim() } });
+      try { localStorage.setItem(LAST_AB_KEY, JSON.stringify({ candidate: state.candidate, opponents: [...state.opponents] })); } catch { /* storage off: the newest experiment is the fallback */ }
       toast(`Queued ${exp.games.length} games`);
       location.hash = `#/exp/${exp.id}`;
     } catch (e) {
