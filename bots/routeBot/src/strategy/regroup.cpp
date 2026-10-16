@@ -59,8 +59,16 @@ void update(World& w) {
     // A fragile spotter (not a tank, or hurt) is the one that needs help: it calls harder.
     const bool squishy = fighting || profile(w.type).survivability < 1.0f || w.hpFrac() < tune::squishy_hp;
     const bool mineAlert = alert.fresh && dist(w.pos, bc::vec2{alert.x, alert.y}) <= tune::regroup_arrive;
+    // No support needed: we have been calling for support_check_rounds and are still above
+    // support_hp. Let the call lapse (responders go back to farming); call again if we drop below.
+    static int callStart = -1;
+    if (seen == 0) callStart = -1;
+    else if (callStart < 0) callStart = w.round;
+    const bool holdingFine = tune::support_check_rounds > 0 && seen > 0 && w.round - callStart >= tune::support_check_rounds &&
+                             w.hpFrac() >= tune::support_hp;
+    if (holdingFine && w.round - callStart == tune::support_check_rounds) trace().note("holding fine: no support needed");
     bool spotter = false;
-    if (seen > 0 && (!alert.fresh || mineAlert)) {
+    if (seen > 0 && !holdingFine && (!alert.fresh || mineAlert)) {
         comms::raiseAlert(w.pos.x, w.pos.y, seen, squishy, w.round);
         if (!alert.fresh) trace().note(fighting ? "alert: fighting, calling allies" : "alert: enemy on our half");
         alert = comms::readAlert(w.round);

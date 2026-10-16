@@ -224,6 +224,8 @@ inline constexpr bool wards = false;                  // place a ward on the hal
 inline constexpr int ward_line_width = 1;            // halfway line: |dist to our spawn - dist to theirs| <= this
 inline constexpr bool ward_once = false;             // one ward per champion, then stop trying
 inline constexpr int enemy_react_radius = 0;         // ignore enemies further than this from us (0: react to all we see)
+inline constexpr int support_check_rounds = 3;       // a caller still above support_hp after this many rounds stops calling (0: off)
+inline constexpr float support_hp = 0.67f;
 inline constexpr bool combat_call = true;            // a champion fighting enemy champions (anywhere) calls allies too
 inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywhere) also calls allies
 // Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
