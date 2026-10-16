@@ -220,6 +220,30 @@ std::vector<bc::vec2> nearbyThreats(const World& w) {
     return threats;
 }
 
+// Where to retreat: the nearest ally (seen, or the camp a teammate claims) that is further from
+// the threat than we are and within tune::retreat_ally_radius, so the chaser meets two of us.
+// Spawn (-1,-1) otherwise.
+bc::vec2 retreatTarget(const World& w) {
+    const auto& s = Statics::get();
+    bc::vec2 threat{-1, -1};
+    int threatD = 1 << 20;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) < threatD) { threatD = dist(e.pos, w.pos); threat = e.pos; }
+    if (threat.x < 0) return {-1, -1};
+    bc::vec2 best{-1, -1};
+    int bestD = tune::retreat_ally_radius + 1;
+    auto consider = [&](bc::vec2 p) {
+        const int d = dist(p, w.pos);
+        if (d >= 2 && d < bestD && dist(p, threat) > threatD) { bestD = d; best = p; }
+    };
+    for (const auto& a : w.allies) consider(a.pos);
+    for (int sl = 0; sl < w.allyCount && sl < comms::alert_byte; ++sl) {
+        const int g = sl == w.slot ? -1 : comms::claimOf(sl);
+        if (g >= 0 && g < static_cast<int>(s.groups.size())) consider(s.groups[static_cast<std::size_t>(g)].center);
+    }
+    return best;
+}
+
 void heal(World& w) {
     auto& me = bc::self();
     if (w.atSpawn) {
@@ -240,6 +264,12 @@ void heal(World& w) {
     for (const auto& g : w.ghosts)
         if (w.round - g.round <= 1 && dist(g.pos, w.pos) <= g.range + 5) enemyClose = true;
     if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit)) {
+        // Toward an ally first when one is near and away from the threat: the chaser meets two of us.
+        if (const auto ally = retreatTarget(w); ally.x >= 0 && nav().stepToward(w, ally, 1, true, &avoid)) {
+            trace().note("enemy close: retreating to an ally");
+            combat::act(w, combat::Focus{}, false);
+            return;
+        }
         trace().note("enemy close: walking home around it");
         nav().stepToward(w, Statics::get().allySpawn, true, &avoid, Statics::get().spawnCenter);
         combat::act(w, combat::Focus{}, false);
@@ -270,6 +300,15 @@ void heal(World& w) {
 void flee(World& w) {
     std::vector<bc::vec2> threats;
     for (const auto& e : w.enemies) threats.push_back(e.pos);
+    // Toward an ally away from the threat, around enemy reach; else out of reach, else home.
+    if (const auto ally = retreatTarget(w); ally.x >= 0) {
+        const auto avoid = w.enemyReach();
+        if (nav().stepToward(w, ally, 1, true, &avoid)) {
+            trace().note("fleeing to an ally");
+            combat::act(w, combat::Focus{}, false);
+            return;
+        }
+    }
     if (!nav().stepEscape(w) && !nav().stepAway(w, threats, 6)) nav().stepToward(w, Statics::get().allySpawn, true);
     combat::act(w, combat::Focus{}, false);
 }

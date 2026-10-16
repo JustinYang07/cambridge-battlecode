@@ -17,7 +17,8 @@ void survive(World& w, std::vector<Option>& out) {
     // growing every round the gold sits unspent (items are how we scale), and resets once bought.
     static int affordableSince = -1;
     const auto buy = shop::affordable(w);
-    const bool canShop = tune::shop_trips && (buy.completes || buy.shards >= tune::shop_min_shards);
+    const bool canShop = tune::shop_trips && (buy.completes || buy.shards >= tune::shop_min_shards) &&
+                         (!tune::shop_after_first_tribute || w.hasTributed);
     if (!canShop) affordableSince = -1;
     else if (affordableSince < 0) affordableSince = w.round;
     if (f < 0.999f || canShop) {
@@ -83,6 +84,31 @@ void survive(World& w, std::vector<Option>& out) {
         o.c.note << "die in " << static_cast<int>(turnsToDie);
         o.finish();
         out.push_back(std::move(o));
+    }
+
+    // Predicted retreat: enemy champions near enough to reach us could kill us before we get out
+    // of their reach (plus a margin), and our side here is weaker. Leave now, not at low health.
+    if (tune::predicted_retreat) {
+        const float theirs = w.enemyPressure(w.pos, tune::regroup_enemy_radius);
+        const float ours = w.alliedPower(w.pos, tune::fight_beside_radius + 2);
+        if (theirs > 0 && theirs > ours) {
+            const float beside = static_cast<float>(1 + w.alliesWithin(w.pos, tune::fight_beside_radius));
+            const float toDie = w.hp * beside / theirs;
+            const float escape = static_cast<float>(nav().escapeTurns(w));
+            const float need = escape + tune::retreat_margin_turns;
+            if (toDie < need) {
+                Option o;
+                o.kind = OptionKind::flee;
+                o.c.target << "retreat";
+                const float danger = std::clamp((need - toDie) / need + 0.5f, 0.0f, 1.0f);
+                o.add("predicted death", danger * tune::flee_value);
+                o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
+                o.turns("lost farming", 25.0f);
+                o.c.note << "die in " << static_cast<int>(toDie) << ", escape " << static_cast<int>(escape);
+                o.finish();
+                out.push_back(std::move(o));
+            }
+        }
     }
 }
 

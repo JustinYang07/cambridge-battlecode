@@ -117,7 +117,7 @@ void Trace::note(std::string_view text) {
     notes_.sanitized(text);  // notes can carry engine error messages
 }
 
-void Trace::writeFull(const FullSnapshot& s) {
+bool Trace::writeFull(const FullSnapshot& s) {
     auto& j = buffer();
     const auto left = cambc::fuel_remaining();
     // Intern first: dictionary lines must precede the line that uses them.
@@ -151,10 +151,14 @@ void Trace::writeFull(const FullSnapshot& s) {
     }
     j.endArray().value(s.actions.view()).value(s.notes.view()).endArray();
     const auto t1 = cambc::fuel_remaining();
+    // Output costs ~33 fuel per byte: a write that cannot finish suspends the bot mid-write and
+    // loses the next turn (traced overruns spent 27k on average here). Skip it instead.
+    if (static_cast<unsigned long long>(j.view().size()) * tune::trace_fuel_per_byte + tune::fuel_reserve_trace > t1) return false;
     write(j.view());
     lastFullBuild_ = static_cast<long>(left - t1);
     lastFullWrite_ = static_cast<long>(t1 - cambc::fuel_remaining());
     lastFullBytes_ = static_cast<long>(j.view().size());
+    return true;
 }
 
 void Trace::flush(unsigned long long fuelUsed) {
@@ -166,10 +170,7 @@ void Trace::flush(unsigned long long fuelUsed) {
     auto& j = buffer();
     const char* idleKind = alive_ ? "channel" : "dead";
     const bool room = written_ < budget_ * 8 / 10 && left > tune::fuel_reserve_full_trace;
-    if (hasPending_ && room) {
-        writeFull(pending_);
-        hasPending_ = false;
-    }
+    if (hasPending_ && room && writeFull(pending_)) hasPending_ = false;
     if (full_ && count_ > 0) {
         FullSnapshot now;
         now.round = round_, now.slot = slot_, now.lost = lost_, now.hp = hp_, now.maxHp = maxHp_;
@@ -179,7 +180,10 @@ void Trace::flush(unsigned long long fuelUsed) {
         now.notes << notes_.view();
         if (written_ < budget_ * 8 / 10 && cambc::fuel_remaining() > tune::fuel_reserve_full_trace) {
             sinceFull_ = 0;
-            writeFull(now);
+            if (!writeFull(now) && !hasPending_) {
+                pending_ = now;
+                hasPending_ = true;
+            }
         } else if (!hasPending_) {
             sinceFull_ = 0;
             pending_ = now;

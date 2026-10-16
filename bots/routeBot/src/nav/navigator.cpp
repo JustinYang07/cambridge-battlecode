@@ -121,7 +121,8 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     here.set(w.pos);
     // While a decision is marked stuck (we were bouncing between two tiles), ignore the avoid
     // layer: a safe route and the plain fallback pointing opposite ways caused exactly that.
-    if (avoid && w.stuckTurns == 0) {
+    // Short of fuel: skip the safe-route search (one path search fewer) rather than overrun.
+    if (avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
         // First try a route that never enters the avoided zones. If we are already inside one,
         // free a small bubble around us so the safe route can lead out of it; otherwise every
         // step from in here fell back to the plain route, which pointed back the way we came.

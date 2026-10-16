@@ -121,7 +121,19 @@ void World::refresh(bool firstTurn) {
             if (aliveNow) since = -1;
             else if (since < 0) since = round - (tune::enemy_alive_every - 1);
         }
+        // Our own team too (same cadence): the invasion rule compares the two. Only when it is on:
+        // is_alive costs ~300 fuel per champion.
+        for (std::size_t k = 0; tune::invade_needs_lead && k < allyHandles_.size() && k < allyAlive_.size(); ++k) {
+            if (static_cast<int>(k) == slot) continue;
+            try {
+                allyAlive_[k] = allyHandles_[k].is_alive() ? 1 : 0;
+            } catch (const bc::error&) {
+            }
+        }
     }
+    if (slot >= 0 && slot < static_cast<int>(allyAlive_.size())) allyAlive_[static_cast<std::size_t>(slot)] = alive ? 1 : 0;
+    alliesAlive = 0;
+    for (std::size_t k = 0; k < allyHandles_.size() && k < allyAlive_.size(); ++k) alliesAlive += allyAlive_[k];
     enemiesAlive = 0;
     enemyRespawnAt = -1;
     for (int k = 0; k < enemyBodies; ++k) {
@@ -142,6 +154,8 @@ void World::refresh(bool firstTurn) {
     if (!enemyTiles.is_empty()) {
         for (const auto& c : bc::vision::champions(bc::team::enemy)) {
             EnemySeen e{.handle = c, .pos = c.position()};
+            // Enemies seen only far away (e.g. through a ward) do not drive our decisions.
+            if (tune::enemy_react_radius > 0 && dist(e.pos, pos) > tune::enemy_react_radius) continue;
             for (std::size_t k = 0; k < enemyHandles_.size(); ++k)
                 if (enemyHandles_[k] == c) e.index = static_cast<int>(k);
             e.hp = c.health();
@@ -172,6 +186,15 @@ void World::refresh(bool firstTurn) {
     }
     std::erase_if(ghosts, [&](const EnemyGhost& g) { return round - g.round > tune::enemy_memory_rounds; });
 
+    // Where each enemy stood last turn (for "moving away"): roll the current sightings in after use.
+    for (const auto& e : enemies)
+        if (e.index >= 0 && e.index < static_cast<int>(enemyPrevPos_.size())) {
+            const auto k = static_cast<std::size_t>(e.index);
+            enemyPrevPos_[k] = lastSeenPos_[k];
+            enemyPrevRound_[k] = lastSeenRound_[k];
+            lastSeenPos_[k] = e.pos;
+            lastSeenRound_[k] = round;
+        }
     // Team target: keep it while it is alive and seen recently; otherwise the first enemy seen
     // losing health since the last round we saw it (the most hurt one if several at once).
     if (teamTarget >= 0 && round - teamTargetSeen > tune::team_target_memory) teamTarget = -1;
@@ -466,4 +489,16 @@ bool World::tributeAtRisk(bc::vec2 altar, int bag) const {
         if (walk <= g.range + ticks) burst += g.dps * static_cast<float>(ticks);
     }
     return burst >= hp;
+}
+
+bool World::theirHalf(cambc::vec2 p) const {
+    const auto& s = Statics::get();
+    return dist(p, s.enemySpawnCenter) < dist(p, s.spawnCenter);
+}
+
+bool World::enemyMovingAway(int index, cambc::vec2 now) const {
+    if (index < 0 || index >= static_cast<int>(enemyPrevPos_.size())) return false;
+    const auto k = static_cast<std::size_t>(index);
+    if (enemyPrevRound_[k] < round - 2 || enemyPrevRound_[k] >= round) return false;
+    return dist(now, pos) > dist(enemyPrevPos_[k], pos);
 }

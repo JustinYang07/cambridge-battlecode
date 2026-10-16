@@ -11,6 +11,7 @@
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
 #include "../shop/shop.h"
+#include "../strategy/cohesion.h"
 #include "../strategy/loop.h"
 #include "../strategy/mapplan.h"
 #include "../strategy/plan.h"
@@ -156,7 +157,9 @@ Option scoreGroup(World& w, const Candidate& c) {
     // Allies whose claim outranks ours: nearer to the camp, or as near and an earlier slot. Only they
     // keep us off a solo camp; a claim from across the map no longer does (it blocked the nearest
     // champion in 188 of 513 walk-pasts in the v1 A/B).
-    const unsigned owners = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
+    unsigned owners = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
+    // Cohesion: following the leader onto its camp is the point, not a clash over a solo camp.
+    if (g.id == cohesion::leaderCamp() && cohesion::leader() >= 0) owners &= ~(1u << cohesion::leader());
     if (o.kind == OptionKind::farm) {
         const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
         // Health we must keep to walk out of reach afterwards (monsters do not chase).
@@ -324,6 +327,8 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
+    if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4)
+        o.mul("early: gems first", 0.05f);
     if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds)
         o.mul("opening gold", w.kit.goldBonus ? tune::opening_gold_bonus * 1.3f : tune::opening_gold_bonus);
     if (mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= 10) o.mul("enemy nearby", tune::contested_camp_factor);
@@ -342,6 +347,14 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("committed", tune::engaged_bonus + tune::focus_bonus_per_damage * done);
     }
     if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
+    // No invading without a numbers lead.
+    if (!w.mayInvade() && w.theirHalf(g.center)) o.mul("their half: no lead", tune::no_invade_factor);
+    // Cohesion: farm around the leader (soft pull; banking and healing stay individual).
+    if (const int lc = cohesion::leaderCamp(); lc >= 0 && !raiding) {
+        if (g.id == lc) o.mul("with the leader", tune::cohesion_leader_bonus);
+        else if (mapplan::isNeighbour(lc, g.id)) o.mul("next to the leader", tune::cohesion_near_bonus);
+        else o.mul("away from the leader", tune::cohesion_away_factor);
+    }
     // Chaining: right after taking a camp, its nearest camps (from the draft's walking distances)
     // come first.
     if (w.chainFrom >= 0 && w.chainFrom != g.id && w.round - w.chainRound <= tune::chain_rounds &&
@@ -373,7 +386,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);

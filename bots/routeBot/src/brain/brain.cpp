@@ -12,8 +12,11 @@ std::vector<Option> think(World& w) {
     scorers::farm(w, options);
     fuel::mark("think.farm");
     scorers::bank(w, options);
+    fuel::mark("think.bank");
     scorers::survive(w, options);
+    fuel::mark("think.survive");
     scorers::fight(w, options);
+    fuel::mark("think.fight");
     scorers::idle(w, options);
     scorers::regroupOption(w, options);
     fuel::mark("think.other");

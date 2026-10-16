@@ -58,6 +58,11 @@ inline constexpr int monster_range = 3;
 inline constexpr int fight_join_radius = 4;        // enemies this close to the target join its side
 inline constexpr int fight_beside_radius = 3;      // allies this close to us fight (and draw fire) with us
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
+// Early retreat (ladder losses: retreats began at a median 393 HP, 70% died within 3 turns):
+// flee while the enemies near us would need longer than our escape plus this margin to kill us.
+inline constexpr bool predicted_retreat = false;   // -75 with it (retreats cost more than they saved)
+inline constexpr float retreat_margin_turns = 4.0f;
+inline constexpr int retreat_ally_radius = 0;        // retreat toward an ally this close (away from the threat), else spawn (0: off; -29 +/- 87 at 20)
 inline constexpr float focus_fire_bonus = 2.0f;
 inline constexpr int team_target_memory = 3;         // rounds the team target survives out of sight
 inline constexpr float team_target_bonus = 2.0f;     // fight score for the enemy we saw take damage first    // an enemy allies are already attacking
@@ -85,6 +90,11 @@ inline constexpr float underpowered_factor = 0.65f; // camps needing a party bef
 inline constexpr int underpowered_shards = 5;
 inline constexpr float gold_value_opening = 0.2f;  // gems per gold in the opening (A/B: 0.45 cost ~110 gems/game)
 inline constexpr int opening_rounds = 300;
+// Opening gem rush (Sneaky Bush Campers bank their first gems ~r50 and 100 by ~r73; we took ~68 / ~115):
+inline constexpr int early_gold_skip_round = 0;      // before this, gold-only camps are skipped unless right beside us
+inline constexpr bool shop_after_first_tribute = false; // no shop trips before our first tribute
+inline constexpr int early_bank_round = 150;         // before this, bank at early_bank_factor of the usual bag
+inline constexpr float early_bank_factor = 1.0f;   // opening gem rush off: -207 +/- 95 vs v1.14 (0.5 tested)
 inline constexpr float opening_gold_bonus = 1.0f;   // gold-only clusters in the opening (A/B: 1.8 cost ~125 gems/game, 3.0 neutral; off)
 
 // ---- decision stability
@@ -97,6 +107,7 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
+inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
 inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
@@ -114,12 +125,14 @@ inline constexpr int bag_avoid_gems = 20;           // carrying this many gems, 
 
 // ---- fighting enemy champions
 inline constexpr float kill_gold_value = 50.0f;
+inline constexpr float fight_our_dps_scale = 1.0f;  // our side's damage in fight estimates (measured real/predicted ~0.21)
 inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
 inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
 inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
 inline constexpr int their_half_fight_round = 150;  // from this round, fights against enemies on their half...
 inline constexpr float their_half_fight_factor = 0.25f;  // ...score this (channelling targets and raids exempt)
+inline constexpr float no_chase_factor = 1.0f;     // fights against an enemy out of reach and moving away (1: off)
 inline constexpr int chase_radius = 6;              // enemies further than this are not chased...
 inline constexpr float chase_factor = 0.3f;         // ...their fight score gets this (unless channelling)
 
@@ -128,7 +141,9 @@ inline constexpr int spell_cooldown = 8;
 
 // ---- fuel (100k per turn; overrunning suspends the bot and loses the next turn)
 inline constexpr unsigned long long fuel_reserve_trace = 5000;       // skip all tracing below this
+inline constexpr unsigned long long trace_fuel_per_byte = 36;          // stdout cost, measured ~33
 inline constexpr unsigned long long fuel_reserve_full_trace = 40000; // skip the detailed trace below this
+inline constexpr unsigned long long nav_safe_floor = 0;                // below this fuel, paths skip the avoid-danger search (0: always search)
 inline constexpr unsigned long long think_floor = 60000;                  // keep last turn's plan when less fuel than this is left before thinking (0: off)
 inline constexpr unsigned long long fuel_for_full_scoring = 75000;   // score max_scored_groups only above this
 inline constexpr int bfs_radius = 48;
@@ -197,8 +212,20 @@ inline constexpr float squishy_hp = 0.6f;            // ...this health)
 inline constexpr float catchup_max_boost = 0.5f;
 inline constexpr float catchup_full_deficit = 200.0f;
 inline constexpr float flee_value = 300.0f;           // flee score at full danger (deaths: 180 of 423 right after fleeing)
-inline constexpr bool combat_call = true;
-inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywhere) also calls allies            // a champion fighting enemy champions (anywhere) calls allies too
+// Team cohesion (strategy/cohesion.h): farm around the highest-damage active champion.
+inline constexpr bool cohesion = false;              // off: -88 +/- 99 vs v1.14
+inline constexpr float cohesion_leader_bonus = 1.6f;  // the leader's camp, for followers
+inline constexpr float cohesion_near_bonus = 1.25f;   // camps among its nearest
+inline constexpr float cohesion_away_factor = 0.75f;  // camps elsewhere
+inline constexpr float cohesion_alone_fight = 0.3f;   // fights with less than half the active team near
+inline constexpr bool invade_needs_lead = false;       // farm, fight or bank on their half only with more of us alive
+inline constexpr float no_invade_factor = 0.02f;
+inline constexpr bool wards = false;                  // place a ward on the halfway line when crossing it
+inline constexpr int ward_line_width = 1;            // halfway line: |dist to our spawn - dist to theirs| <= this
+inline constexpr bool ward_once = false;             // one ward per champion, then stop trying
+inline constexpr int enemy_react_radius = 0;         // ignore enemies further than this from us (0: react to all we see)
+inline constexpr bool combat_call = true;            // a champion fighting enemy champions (anywhere) calls allies too
+inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywhere) also calls allies
 // Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
 // distance from the draft) are worth more for a while.
 inline constexpr float chain_bonus = 1.5f;

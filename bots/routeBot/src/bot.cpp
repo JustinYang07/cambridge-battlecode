@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
+#include "strategy/cohesion.h"
 #include "strategy/loop.h"
+#include "strategy/wards.h"
 #include "strategy/mapplan.h"
 #include "strategy/plan.h"
 #include "strategy/regroup.h"
@@ -60,7 +62,11 @@ void Bot::play_turn() {
         trace().forceFull();
     }
 
+    // First tribute done: the bag emptied while we were banking (alive, so not a death).
+    if (w.alive && w.prevGems > 0 && w.gems == 0 && w.lastOption == static_cast<int>(OptionKind::bank)) w.hasTributed = true;
+    w.prevGems = w.gems;
     comms::refresh();
+    cohesion::update(w);
     const bool wasRegrouping = regroup::active();
     regroup::update(w);
     if (regroup::active() != wasRegrouping) w.forceReplan = true;
@@ -142,6 +148,7 @@ void Bot::play_turn() {
             }
             brain::execute(w, pick);
             brain::noteMovement(w);
+            wards::update(w);
         }
         fuel::mark("execute");
 
