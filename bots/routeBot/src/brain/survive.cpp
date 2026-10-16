@@ -77,7 +77,7 @@ void survive(World& w, std::vector<Option>& out) {
         Option o;
         o.kind = OptionKind::flee;
         o.c.target << "flee";
-        o.add("danger", danger * 150.0f);
+        o.add("danger", danger * tune::flee_value);
         o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
         o.turns("lost farming", 25.0f);
         o.c.note << "die in " << static_cast<int>(turnsToDie);

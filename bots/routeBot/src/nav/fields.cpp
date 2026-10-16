@@ -1,4 +1,5 @@
 #include "fields.h"
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 #include "../core/statics.h"
@@ -48,8 +49,11 @@ void step(unsigned long long reserve) {
         altars_.resize(s.altars.size());
     }
     const std::size_t total = groups_.size() + altars_.size();
-    // One field costs ~3-12k (BFS plus export, by map size): stop well before the reserve.
-    while (next_ < total && bc::fuel_remaining() > reserve) {
+    // One field costs ~3-12k on small maps and more on big ones: only start one when the most a
+    // field has cost so far still fits above the reserve (an overrun loses the next turn).
+    static unsigned long long maxCost = 15000;
+    while (next_ < total && bc::fuel_remaining() > reserve + maxCost) {
+        const auto before = bc::fuel_remaining();
         if (next_ < groups_.size()) {
             compute(groups_[next_], s.groups[next_].tileMask);
         } else {
@@ -60,6 +64,7 @@ void step(unsigned long long reserve) {
             compute(altars_[next_ - groups_.size()], ring & ~s.terrain);
         }
         ++next_;
+        maxCost = std::max(maxCost, before - bc::fuel_remaining());
     }
 }
 

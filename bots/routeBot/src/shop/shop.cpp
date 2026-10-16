@@ -45,7 +45,7 @@ std::vector<Step> plan(bc::champion_type type) {
         if (p.roles.caster >= 0.5f) main = Stat::focus;
     }
     // Variant 11 (the ladder's top teams): casters build focus, their spell stat.
-    if (tune::build_variant == 11 && p.roles.caster >= 0.5f) main = Stat::focus;
+    if ((tune::build_variant == 11 || tune::build_variant == 12) && p.roles.caster >= 0.5f) main = Stat::focus;
     using F = Family;
     std::vector<Step> steps;
     auto add = [&](F f, Stat s) { steps.push_back({f, s}); };
@@ -82,6 +82,9 @@ std::vector<Step> plan(bc::champion_type type) {
         break;
     case 11:  // like Mite: safe farming, raw stats, then survival; no treasure
         add(F::jungle, main); add(F::power, main); add(F::durability, main);
+        break;
+    case 12:  // Mite's order from its games: jungle, durability, a bruiser emblem of health, then power
+        add(F::jungle, main); add(F::durability, main); add(F::bruiser, Stat::health);
         break;
     case 10:  // camp damage first, then treasure
         add(F::monster, main); add(F::treasure, main); add(F::jungle, main); add(F::home, Stat::health);

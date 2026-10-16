@@ -81,6 +81,7 @@ void Bot::play_turn() {
             strategy::step(w);
             if (strategy::plan().ready) trace().forceFull();
         }
+        fuel::mark("strategy");
         const int routeBefore = mapplan::routeGroup();
         mapplan::follow(w);
         if (mapplan::routeGroup() != routeBefore) w.forceReplan = true;
@@ -91,7 +92,13 @@ void Bot::play_turn() {
         // fuel, so only replan when something relevant changed.
         std::vector<Option> options;
         int chosen = -1;
-        if (needsReplan(w)) {
+        fuel::mark("route");
+        // Short of fuel already (a crowded fight, a big map): keep last turn's plan instead of
+        // rescoring everything, unless we are in real danger. A turn that overruns loses the next.
+        const bool tight = tune::think_floor > 0 && plan_ && bc::fuel_remaining() < tune::think_floor &&
+                           w.hpFrac() >= tune::lock_emergency_hp;
+        if (tight) trace().note("fuel tight: kept plan");
+        if (!tight && needsReplan(w)) {
             w.forceReplan = false;
             options = brain::think(w);
             // Vision changed (an enemy appeared or vanished, e.g. walking out of bushes): record the
@@ -182,7 +189,7 @@ void Bot::play_turn() {
     const auto beforeFlush = bc::fuel_remaining();
     prevFullTrace_ = trace().willWriteFull();
     trace().flush(fuel::split() ? 0 : fuel::used());
-    fuel::keep();
+    fuel::mark("flush");
     prevFlushAt_ = beforeFlush;
     prevFlushCost_ = beforeFlush - bc::fuel_remaining();
     prevBuild_ = trace().lastFullBuild_;
@@ -190,4 +197,7 @@ void Bot::play_turn() {
     prevBytes_ = trace().lastFullBytes_;
     // Spare fuel at the end of the turn builds the static distance fields scoring reads.
     if (!fuel::split()) fields::step(tune::fuel_reserve_fields);
+    fuel::mark("fields");
+    // Kept after everything, so a turn that overran shows its whole split next turn.
+    fuel::keep();
 }

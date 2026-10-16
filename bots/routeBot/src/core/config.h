@@ -97,7 +97,7 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
-inline constexpr int build_variant = 11;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
+inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
                                                  // 10 monster>treasure, 11 jungle>power>durability (casters focus)
@@ -129,12 +129,13 @@ inline constexpr int spell_cooldown = 8;
 // ---- fuel (100k per turn; overrunning suspends the bot and loses the next turn)
 inline constexpr unsigned long long fuel_reserve_trace = 5000;       // skip all tracing below this
 inline constexpr unsigned long long fuel_reserve_full_trace = 40000; // skip the detailed trace below this
-inline constexpr unsigned long long fuel_for_full_scoring = 60000;   // score max_scored_groups only above this
+inline constexpr unsigned long long think_floor = 60000;                  // keep last turn's plan when less fuel than this is left before thinking (0: off)
+inline constexpr unsigned long long fuel_for_full_scoring = 75000;   // score max_scored_groups only above this
 inline constexpr int bfs_radius = 48;
 inline constexpr int replan_every = 8;                               // rescore at least this often
 inline constexpr unsigned long long fuel_for_planning = 50000;      // advance the team plan only with this much left
-inline constexpr float home_region_bonus = 1.15f;                     // camps in our squad's region
-inline constexpr float other_region_factor = 0.85f;                   // camps in another squad's region
+inline constexpr float home_region_bonus = 1.0f;                     // camps in our squad's region
+inline constexpr float other_region_factor = 1.0f;                   // camps in another squad's region
 inline constexpr unsigned long long fuel_per_scored_group = 6000;
 inline constexpr unsigned long long fuel_reserve_fields = 30000;     // build distance fields only above this (one costs <=12k)    // farm scoring cost per group
 inline constexpr unsigned long long fresh_turn_fuel = 90000;         // a fresh turn starts with ~96.8k                                // distance-from-us search cut-off
@@ -195,6 +196,7 @@ inline constexpr float squishy_hp = 0.6f;            // ...this health)
 // when the enemy has banked tune::catchup_full_deficit more than us.
 inline constexpr float catchup_max_boost = 0.5f;
 inline constexpr float catchup_full_deficit = 200.0f;
+inline constexpr float flee_value = 300.0f;           // flee score at full danger (deaths: 180 of 423 right after fleeing)
 inline constexpr bool combat_call = true;
 inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywhere) also calls allies            // a champion fighting enemy champions (anywhere) calls allies too
 // Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
