@@ -95,6 +95,12 @@ inline constexpr int early_gold_skip_round = 0;      // before this, gold-only c
 inline constexpr bool shop_after_first_tribute = false;  // no shop trips before our first tribute
 inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
 // Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
+inline constexpr int still_hold_turns = 80;   // ...holding for a party (a gem rally may be on its way)
+inline constexpr int still_turns = 25;        // still this long while idle/holding: drop that camp and hunt
+inline constexpr int stuck_cooloff = 120;     // the camp we were stuck on is avoided this long
+inline constexpr int hunt_turns = 60;         // then go after enemies (last seen, else their spawn) this long
+inline constexpr float hunt_value = 5.0f;     // hunt option score: beats idling and dropped camps, not real farming
+inline constexpr float gem_rally_bonus = 2.0f;  // ally claims a gem party camp: join it (1: off)
 inline constexpr int gems_only_round = 150;
 inline constexpr int gems_only_lag = 50;             // enemy banked gems minus ours
 inline constexpr float gems_only_factor = 0.05f;

@@ -32,6 +32,7 @@ struct GroupInfo {
 struct Statics {
     int width = 0, height = 0;
     cambc::bitboard terrain;          // walls | holes | altars | enemy spawn: never walkable
+    cambc::bitboard reach;            // tiles walkable from our spawn (all set if the fill failed)
     cambc::bitboard allySpawn, enemySpawn;
     cambc::vec2 spawnCenter;
     cambc::vec2 enemySpawnCenter;

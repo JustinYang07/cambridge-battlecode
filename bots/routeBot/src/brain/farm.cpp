@@ -205,7 +205,14 @@ Option scoreGroup(World& w, const Candidate& c) {
         // stood inside a sleeping camp's range made the verdict flip with every step in and out
         // (Varg alternated farm / heal-first on collision for 50+ rounds).
         const float escapeCost = engaged ? static_cast<float>(nav().escapeTurns(w)) * solo.hitting : 0.0f;
-        if (fight.damage > budget) {
+        // Gem rally: an ally claims a gem camp that needs a party. Judge it with a full party and
+        // pull towards it (stampede's only gems sit in one elk camp: one champion held it alone for
+        // 750 turns while the rest farmed gold, each judging it too strong for two).
+        const bool gemRally = tune::gem_rally_bonus != 1.0f && g.gems > 0 && claims > 0 && need > 1;
+        bool tooStrong = fight.damage > budget;
+        if (tooStrong && gemRally) tooStrong = combat::campFight(w, g, left, tune::max_team_per_camp, share).damage > budget;
+        if (gemRally && !tooStrong) o.mul("rally: ally holds gems", tune::gem_rally_bonus);
+        if (tooStrong) {
             o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
         } else if (fight.damage + reserve + escapeCost > w.hp) {
@@ -326,13 +333,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     const bool waiting = c.wait > 0;
     if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
+    if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4)
         o.mul("early: gems first", 0.05f);
-    // Gems-only mode: from the mid game, while the enemy has banked gems_only_lag more than us, the
-    // whole team leaves gold-only camps and heads for gem camps (seen or not: all are known).
-    if (g.gems == 0 && g.gold > 0 && w.gemsOnly())
-        o.mul("behind on gems: gems only", tune::gems_only_factor);
     if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds)
         o.mul("opening gold", w.kit.goldBonus ? tune::opening_gold_bonus * 1.3f : tune::opening_gold_bonus);
     if (mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= 10) o.mul("enemy nearby", tune::contested_camp_factor);
@@ -431,6 +435,7 @@ void farm(World& w, std::vector<Option>& out) {
     }
     fuel::mark("farm.pre");
 
+    const std::size_t first = out.size();  // this scorer's options start here
     float best = 0;
     int scored = 0;
     // Degrade gracefully when the turn is already expensive (big maps, crowded fights).
@@ -491,7 +496,12 @@ void farm(World& w, std::vector<Option>& out) {
         }
     }
     // The route's and the loop's camps are always scored, whatever their bounds.
-    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp})
+    // A gem camp an ally claims (it may be holding there for a party) is always scored too.
+    int rallyGroup = -1;
+    if (tune::gem_rally_bonus != 1.0f)
+        for (int i = 0; i < n && rallyGroup < 0; ++i)
+            if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
@@ -532,6 +542,25 @@ void farm(World& w, std::vector<Option>& out) {
             pre[static_cast<std::size_t>(pick)].group = nullptr;
             scoreOne(c);
         }
+    // Gems-only mode: from the mid game, while the enemy has banked gems_only_lag more than us, the
+    // whole team leaves gold-only camps for gem camps. Only when some gem camp is worth going to:
+    // otherwise gold scored below idling and all six stood at spawn for 1,700 rounds (lanes), never
+    // banking, so the mode never ended.
+    if (w.gemsOnly() && !w.hunting()) {
+        float bestGem = 0;
+        const auto isCamp = [&](const Option& o) { return o.kind == OptionKind::farm || o.kind == OptionKind::capture; };
+        for (std::size_t i = first; i < out.size(); ++i)
+            if (isCamp(out[i]) && statics.groups[static_cast<std::size_t>(out[i].target)].gems > 0) bestGem = std::max(bestGem, out[i].score);
+        if (bestGem >= tune::idle_rescue_score)
+            for (std::size_t i = first; i < out.size(); ++i) {
+                if (!isCamp(out[i])) continue;
+                const auto& g = statics.groups[static_cast<std::size_t>(out[i].target)];
+                if (g.gems == 0 && g.gold > 0) {
+                    out[i].mul("behind on gems: gems only", tune::gems_only_factor);
+                    out[i].finish();
+                }
+            }
+    }
     if (nearestOut >= 0 && tune::nearest_camp_bonus != 1.0f) {
         auto& o = out[static_cast<std::size_t>(nearestOut)];
         o.mul("nearest camp", tune::nearest_camp_bonus);

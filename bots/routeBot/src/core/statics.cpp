@@ -113,10 +113,12 @@ void Statics::init() {
     // Which groups can be walked to at all: one flood fill from our spawn over the terrain (ambush
     // has camps in pockets sealed by walls and holes, reachable only by dashing; champions used to
     // stand still for 1,500 rounds trying to path to one). Runs once, on the first turn's budget.
+    reach = ~terrain;
     try {
         bc::distance_field field;
         bc::bitboard visited;
         field.compute(terrain, allySpawn, visited);
+        reach = visited;
         const auto bits = visited.export_linear_buffer();
         for (auto& g : groups) {
             bool any = false;

@@ -133,6 +133,12 @@ public:
     int lastTarget = -1;           // group/altar id of last turn's choice
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
+    // Stuck watchdog: turns standing on one tile while idle or holding for a party; when it trips,
+    // the camp we held is dropped until stuckUntil and we hunt enemies until huntUntil.
+    cambc::vec2 stillPos{-1, -1};
+    int stillTurns = 0;
+    int stuckGroup = -1, stuckUntil = -1, huntUntil = -1;
+    bool hunting() const { return round < huntUntil; }
     int captureTurns = 0;          // consecutive turns standing on the current capture
     bool hasTributed = false;      // we have banked at least once this game (opening shop rule)
     int prevGems = 0;

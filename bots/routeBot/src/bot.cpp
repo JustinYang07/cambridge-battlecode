@@ -71,6 +71,28 @@ void Bot::play_turn() {
     // First tribute done: the bag emptied while we were banking (alive, so not a death).
     if (w.alive && w.prevGems > 0 && w.gems == 0 && w.lastOption == static_cast<int>(OptionKind::bank)) w.hasTributed = true;
     w.prevGems = w.gems;
+    // Stuck watchdog: standing still while idle or holding for help (lanes: all six idle at spawn
+    // for 1,700 rounds; stampede: one champion held an elk camp alone for 750).
+    if (w.alive && !me.is_recalling() && !me.is_submitting_gems() && !me.is_teleporting()) {
+        // Not stuck while there is something to hit, or while banking or healing.
+        bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal);
+        for (const auto& c : w.camps) busy = busy || (c.hp > 0 && dist(c.pos, w.pos) <= w.range);
+        for (const auto& e : w.enemies) busy = busy || (e.hp > 0 && dist(e.pos, w.pos) <= w.range + 1);
+        if (!busy && w.pos.x == w.stillPos.x && w.pos.y == w.stillPos.y) {
+            if (++w.stillTurns >= (w.waitingTurns > 0 ? tune::still_hold_turns : tune::still_turns)) {
+                if (w.lastOption == static_cast<int>(OptionKind::farm) || w.lastOption == static_cast<int>(OptionKind::capture))
+                    w.stuckGroup = w.lastTarget;
+                w.stuckUntil = w.round + tune::stuck_cooloff;
+                w.huntUntil = w.round + tune::hunt_turns;
+                w.stillTurns = 0;
+                w.forceReplan = true;
+                w.pendingNotes.push_back("stuck: dropping camp, hunting");
+            }
+        } else {
+            w.stillTurns = 0;
+            w.stillPos = w.pos;
+        }
+    }
     comms::refresh();
     cohesion::update(w);
     const bool wasRegrouping = regroup::active();

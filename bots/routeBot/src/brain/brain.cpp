@@ -19,6 +19,7 @@ std::vector<Option> think(World& w) {
     fuel::mark("think.fight");
     scorers::idle(w, options);
     scorers::regroupOption(w, options);
+    scorers::hunt(w, options);
     fuel::mark("think.other");
     return options;
 }

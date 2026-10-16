@@ -45,7 +45,7 @@ bool farmWhileWaiting(World& w, const GroupInfo& g) {
     const GroupInfo* best = nullptr;
     int bestDist = 1 << 20;
     for (const auto& other : statics.groups) {
-        if (!other.harmless || dist(other.center, g.center) > tune::wait_farm_radius) continue;
+        if (!other.harmless || !other.reachable || dist(other.center, g.center) > tune::wait_farm_radius) continue;
         const auto& mem = w.groups[static_cast<std::size_t>(other.id)];
         if (mem.status == GroupStatus::respawning) continue;
         if ((other.tileMask & w.dangerExcept(g.id)).is_empty() == false) continue;
@@ -125,6 +125,9 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             for (auto t : g.tiles) goals |= nav().standTiles(w, t, 1);
         // Never stand on a spawn tile unless capturing: an occupied tile stops the whole group respawning.
         goals = goals & ~g.tileMask;
+        // Only tiles we can walk to: a camp sealed in a pocket made every goal unreachable and the
+        // whole team stood still for 800 turns (ambush).
+        if (const auto open = goals & Statics::get().reach; !open.is_empty()) goals = open;
         // Monsters hit the nearest champion: ranged allies stand at full range so whoever is
         // closer (ideally the tank) soaks the hits.
         if (w.ranged) {
@@ -345,6 +348,7 @@ void execute(World& w, const Option& o) {
     case OptionKind::fight: fight(w, o); break;
     case OptionKind::wait:
         if (o.target == 2) nav().stepToward(w, o.at, tune::regroup_arrive - 1, true, &w.danger);  // regroup
+        else if (o.target == 3) nav().stepToward(w, o.at, 5, true);                             // hunt (their spawn is not walkable)
         else if (!w.atSpawn) nav().stepToward(w, statics.allySpawn, false, nullptr, statics.spawnCenter);
         combat::act(w, combat::Focus{}, false);
         break;

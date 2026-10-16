@@ -130,6 +130,25 @@ void regroupOption(World& w, std::vector<Option>& out) {
     out.push_back(std::move(o));
 }
 
+void hunt(World& w, std::vector<Option>& out) {
+    if (!w.hunting()) return;
+    // The most recently seen enemy, else their spawn.
+    cambc::vec2 at = Statics::get().enemySpawnCenter;
+    int seen = -1;
+    for (const auto& g : w.ghosts)
+        if (g.round > seen && w.round - g.round <= tune::hunt_turns) { seen = g.round; at = g.pos; }
+    Option o;
+    o.kind = OptionKind::wait;
+    o.target = 3;  // hunt (idle is -1, regroup 2)
+    o.at = at;
+    o.c.target << "hunt";
+    o.add("stuck: go hunt", tune::hunt_value);
+    o.turns("turn", 100.0f);
+    o.c.note << (seen >= 0 ? "last seen enemy" : "their spawn");
+    o.finish();
+    out.push_back(std::move(o));
+}
+
 void idle(World& w, std::vector<Option>& out) {
     // Always available so the brain never stalls: fall back toward spawn.
     Option o;
