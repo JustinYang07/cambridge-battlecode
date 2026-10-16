@@ -151,6 +151,7 @@ inline constexpr int tank_party_radius = 25;         // a party camp this close 
 inline constexpr int claimed_party_scored = 0;       // always score up to this many party camps allies claim
 inline constexpr int tank_party_helpers = 2;         // the tank's opening camp gets at most this many helpers
 inline constexpr float tank_party_kill_turns = 12;   // helpers join until the party kills the camp this fast
+inline constexpr float party_vs_solo = 1.0f;         // the opening party must earn this x its members' best solo routes
 inline constexpr bool setup_only_first_turn = false;  // round 1 builds statics only (no scoring, no move)
 inline constexpr int route_lookahead = 3;            // candidate camps per lookahead step
 inline constexpr float altar_time_weight = 1.0f;     // farm scores: walk to the altar, amortised over a bag

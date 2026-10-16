@@ -508,14 +508,35 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
             }
         }
     }
-    std::vector<int> order;  // champions in assignment order
+    // The party must beat what its members would farm alone: expanse has gem clusters next to
+    // spawn, and three champions on one 22-gem wolf lost the farming race to one cluster each.
+    // Then everyone (the tank too) takes a solo route; the tank only stays off routes when no
+    // party can take the camp that needs one (rows).
+    bool partyWorthIt = false;
     if (partyCamp >= 0) {
+        std::vector<float> bestSolo(champs.size(), 0.0f);
+        for (const auto& pr : pairs)
+            bestSolo[static_cast<std::size_t>(pr.c)] = std::max(bestSolo[static_cast<std::size_t>(pr.c)], pr.score);
+        float solo = 0;
+        for (int c : partyOf) solo += bestSolo[static_cast<std::size_t>(c)];
+        const auto& grp = Statics::get().groups[static_cast<std::size_t>(partyCamp)];
+        const float members = static_cast<float>(partyOf.size());
+        float dps = 0;
+        for (int c : partyOf) dps += champs[static_cast<std::size_t>(c)].dps;
+        const float kill = grp.totalHealth / std::max(dps, 1.0f);
+        const float perMember = value(grp) / (static_cast<float>(A.dOur[static_cast<std::size_t>(partyCamp)]) + kill +
+                                              tune::capture_turns) / members;
+        partyWorthIt = perMember * members >= solo * tune::party_vs_solo;
+        if (!partyWorthIt) partyOf.clear();
+    }
+    std::vector<int> order;  // champions in assignment order
+    if (partyWorthIt) {
         used[static_cast<std::size_t>(partyCamp)] = 1;
         for (int c : partyOf) first[static_cast<std::size_t>(c)] = partyCamp;
     }
     for (const auto& pr : pairs) {
         if (first[static_cast<std::size_t>(pr.c)] >= 0 || used[static_cast<std::size_t>(pr.g)]) continue;
-        if (partyNearSpawn && partyCamp < 0 && isTank(champs[static_cast<std::size_t>(pr.c)].type)) continue;
+        if (partyNearSpawn && partyCamp < 0 && isTank(champs[static_cast<std::size_t>(pr.c)].type)) continue;  // no party can take it
         // A first camp across the map spends the opening walking.
         if (A.dOur[static_cast<std::size_t>(pr.g)] > tune::route_max_first_travel) continue;
         first[static_cast<std::size_t>(pr.c)] = pr.g;
