@@ -17,7 +17,9 @@ def champion_tiles(team: Optional[Team] = None) -> Bitboard:
         team: Team to include, or None for both teams.
     """
     if team is None:
-        return _bc.ally_occupancy() | _bc.enemy_occupancy()
+        out = _bc.ally_occupancy()
+        out |= _bc.enemy_occupancy()
+        return out
     if team == Team.ALLY:
         return _bc.ally_occupancy()
     if team == Team.ENEMY:
@@ -64,7 +66,9 @@ def ward_tiles(team: Optional[Team] = None) -> Bitboard:
         team: Team to include, or None for both teams.
     """
     if team is None:
-        return _bc.ally_ward_occupancy() | _bc.enemy_ward_occupancy()
+        out = _bc.ally_ward_occupancy()
+        out |= _bc.enemy_ward_occupancy()
+        return out
     _absolute_team(team)
     return _bc.ally_ward_occupancy() if team == Team.ALLY else _bc.enemy_ward_occupancy()
 
@@ -177,7 +181,9 @@ def altar_lock_tiles(team: Optional[Team] = None) -> Bitboard:
         team: Team to include, or None for both teams.
     """
     if team is None:
-        return _bc.ally_altar_lock_occupancy() | _bc.enemy_altar_lock_occupancy()
+        out = _bc.ally_altar_lock_occupancy()
+        out |= _bc.enemy_altar_lock_occupancy()
+        return out
     _absolute_team(team)
     return _bc.ally_altar_lock_occupancy() if team == Team.ALLY else _bc.enemy_altar_lock_occupancy()
 
@@ -230,10 +236,7 @@ def camp_at(position: Vec2) -> Camp:
     Args:
         position: Tile to query.
     """
-    camp = _map._camp_index()[2].get(_bc.camp_at(position.x, position.y))
-    if camp is None:
-        raise IndexError("invalid camp handle")
-    return camp
+    return _map._camp(_bc.camp_at(position.x, position.y))
 
 
 def champion_at(position: Vec2) -> Champion:
@@ -274,7 +277,7 @@ def champions(team: Optional[Team] = None) -> list[Champion]:
 
 def camps() -> list[Camp]:
     """Return the visible camps."""
-    return _bc.camps_in(camp_tiles(), _map._camp_index()[2])
+    return [camp_at(position) for position in camp_tiles().positions()]
 
 
 def camp_groups() -> list[_map.CampGroup]:

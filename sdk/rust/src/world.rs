@@ -25,7 +25,7 @@ thread_local! {
         std::cell::RefCell::new(OnceLock::new())
     };
 }
-/// Read the initialized cache without lazy initialization or host calls.
+/// Read the initialised cache without lazy initialisation or host calls.
 fn initialized() -> Option<&'static State> {
     #[cfg(not(test))]
     {
@@ -36,23 +36,24 @@ fn initialized() -> Option<&'static State> {
         STATE.with(|state| state.borrow().get().copied())
     }
 }
-/// Read the initialized cache or return an explicit init precondition error.
+/// Read the initialised cache or return an explicit init precondition error.
 fn state() -> Result<&'static State> {
     initialized().ok_or_else(|| {
         Error::invalid_argument("SDK initialization failed; call cambc::init() for the error")
     })
 }
-/// Reset the thread-local test cache; leaked fixture states preserve existing static borrows.
+/// Reset the thread-local test caches; leaked fixture states preserve existing static borrows.
 #[cfg(test)]
 pub(crate) fn reset_for_tests() {
     STATE.with(|state| {
         state.borrow_mut().take();
     });
+    crate::board::reset_layout_for_tests();
 }
-/// Initialize immutable SDK data. A static constructor runs this before `main` on the first
-/// turn's fuel, so calling it is only needed to retry or inspect a failed initialization.
+/// Initialise immutable SDK data. A static constructor runs this before `main` on the first
+/// turn's fuel, so calling it is only needed to retry or inspect a failed initialisation.
 /// Successful repeat calls do nothing; failures publish nothing and can be retried.
-/// No map layout is cached.
+/// The map layout is cached after the first successful query.
 pub fn init() -> Result<()> {
     if initialized().is_some() {
         return Ok(());
@@ -155,7 +156,7 @@ fn load_state() -> Result<Box<State>> {
 /// Borrow immutable game constants loaded by [`cambc::init`](crate::init), without host calls.
 ///
 /// # Panics
-/// Panics if SDK initialization failed.
+/// Panics if SDK initialisation failed.
 ///
 /// # Examples
 /// ```no_run
@@ -168,7 +169,7 @@ pub fn constants() -> &'static Constants {
         .expect("SDK initialization failed; call cambc::init() for the error")
         .constants
 }
-/// Borrow self's initialized wrapper, or `None` in draft; errors if SDK initialization failed.
+/// Borrow self's initialised wrapper, or `None` in draft; errors if SDK initialisation failed.
 pub fn self_champion() -> Result<Option<&'static Champion>> {
     Ok(state()?.self_champion.as_ref())
 }
@@ -177,15 +178,15 @@ pub fn self_champion() -> Result<Option<&'static Champion>> {
 pub fn is_draft() -> bool {
     unsafe { sys::my_champion() < 0 }
 }
-/// Borrow all initialized champion designs, with no live cooldown/visibility queries.
+/// Borrow all initialised champion designs, with no live cooldown/visibility queries.
 pub fn champion_designs() -> Result<&'static [Champion; 12]> {
     Ok(&state()?.champion_designs)
 }
-/// Borrow this team's shared-memory interface, initialized by [`cambc::init`](crate::init).
-/// The accessor never queries the host or initializes the cache.
+/// Borrow this team's shared-memory interface, initialised by [`cambc::init`](crate::init).
+/// The accessor never queries the host or initialises the cache.
 ///
 /// # Panics
-/// Panics if SDK initialization failed.
+/// Panics if SDK initialisation failed.
 ///
 /// # Examples
 /// ```no_run
@@ -204,10 +205,10 @@ pub fn shared_memory() -> &'static SharedMemory {
         .expect("SDK initialization failed; call cambc::init() for the error")
         .0
 }
-/// Borrow the initialized draft-memory interface; submission never changes its snapshot.
+/// Borrow the initialised draft-memory interface; submission never changes its snapshot.
 ///
 /// # Panics
-/// Panics if SDK initialization failed.
+/// Panics if SDK initialisation failed.
 #[must_use]
 pub fn draft_memory() -> &'static DraftMemory {
     &initialized()
@@ -330,7 +331,7 @@ impl CampGroup {
     }
     /// Build the camp-spawn tiles; computed on every call.
     pub fn spawn_tiles(&self) -> Result<Bitboard> {
-        let mut mask = Bitboard::new()?;
+        let mut mask = Bitboard::uninit()?;
         self.spawn_tiles_into(&mut mask)?;
         Ok(mask)
     }
@@ -386,15 +387,15 @@ impl<'a> IntoIterator for &'a CampGroup {
     }
 }
 
-/// Read initialized map width without querying or initializing the host cache.
+/// Read initialised map width without querying or initialising the host cache.
 pub fn width() -> Result<i32> {
     Ok(state()?.terrain[0].width())
 }
-/// Read initialized map height without querying or initializing the host cache.
+/// Read initialised map height without querying or initialising the host cache.
 pub fn height() -> Result<i32> {
     Ok(state()?.terrain[0].height())
 }
-/// Check a position against initialized map dimensions; errors if SDK initialization failed.
+/// Check a position against initialised map dimensions; errors if SDK initialisation failed.
 ///
 /// # Arguments
 /// * `p` - Position to check.
@@ -402,7 +403,7 @@ pub fn is_in_bounds(p: Vec2) -> Result<bool> {
     let board = &state()?.terrain[0];
     Ok(p.x >= 0 && p.y >= 0 && p.x < board.width() && p.y < board.height())
 }
-/// Read the initialized map symmetry without a host query.
+/// Read the initialised map symmetry without a host query.
 pub fn symmetry() -> Result<Symmetry> {
     Ok(state()?.symmetry)
 }
@@ -444,57 +445,78 @@ pub fn rotate_180(position: Vec2) -> Result<Vec2> {
     })?;
     Ok(result)
 }
-/// Borrow the initialized wall mask; errors if SDK initialization failed.
+/// Borrow the initialised wall mask; errors if SDK initialisation failed.
 pub fn walls() -> Result<&'static Bitboard> {
     Ok(&state()?.terrain[0])
 }
-/// Borrow the initialized bush mask; errors if SDK initialization failed.
+/// Borrow the initialised bush mask; errors if SDK initialisation failed.
 pub fn bushes() -> Result<&'static Bitboard> {
     Ok(&state()?.terrain[1])
 }
-/// Borrow the initialized hole mask; errors if SDK initialization failed.
+/// Borrow the initialised hole mask; errors if SDK initialisation failed.
 pub fn holes() -> Result<&'static Bitboard> {
     Ok(&state()?.terrain[2])
 }
-/// Borrow the initialized altar mask; errors if SDK initialization failed.
+/// Borrow the initialised altar mask; errors if SDK initialisation failed.
 pub fn altars() -> Result<&'static Bitboard> {
     Ok(&state()?.terrain[3])
 }
-/// Borrow the initialized spawn-region mask for the relative team.
+/// Borrow the initialised spawn-region mask for the relative team.
 ///
 /// # Arguments
 /// * `team` - Team whose spawn region to return.
 pub fn spawn_region(team: Team) -> Result<&'static Bitboard> {
     Ok(&state()?.spawns[if team == Team::Ally { 0 } else { 1 }])
 }
-/// Query engine groups on every call, including merged symmetry-seam clusters; unavailable in draft.
+/// Query engine groups on every call, including merged symmetry-seam clusters; also available in draft.
 pub fn camp_groups() -> Result<Vec<CampGroup>> {
-    gameplay_perspective()?;
+    state()?;
     load_camp_groups()
 }
 /// Query one group's rewards and membership from the host.
 pub(crate) fn camp_group(handle: CampGroupHandle) -> Result<CampGroup> {
-    gameplay_perspective()?;
+    state()?;
     load_camp_group(handle.0)
-}
-fn gameplay_perspective() -> Result<()> {
-    if state()?.self_champion.is_none() {
-        return Err(Error::local(
-            ErrorCode::ApiInvalidPerspective,
-            "camp groups are unavailable in draft",
-        ));
-    }
-    Ok(())
 }
 /// Load authoritative host group membership, including merged symmetry-seam groups.
 fn load_camp_groups() -> Result<Vec<CampGroup>> {
-    let count = query(|p| unsafe { sys::map_num_camp_groups(p) })?;
-    crate::counted_list(count, |p, n, out| unsafe {
-        sys::map_camp_groups(p, n, out)
-    })?
-    .into_iter()
-    .map(load_camp_group)
-    .collect()
+    let mut words = vec![0u32; 256];
+    let mut count = 0u32;
+    crate::check(unsafe { sys::map_camp_layout(words.as_mut_ptr(), words.len() as u32, &mut count) })?;
+    if count as usize > words.len() {
+        words.resize(count as usize, 0);
+        crate::check(unsafe { sys::map_camp_layout(words.as_mut_ptr(), count, &mut count) })?;
+    }
+    words.truncate(count as usize);
+    let malformed = || Error::local(ErrorCode::InvalidArgument, "malformed camp layout");
+    let mut groups = Vec::new();
+    let mut rest = &words[..];
+    while let [h, gold, gems, respawn, n, tail @ ..] = rest {
+        let members = tail.get(..*n as usize * 4).ok_or_else(malformed)?;
+        let camps = members
+            .chunks_exact(4)
+            .map(|c| {
+                Ok(Camp::new(
+                    CampHandle(c[0]),
+                    CampGroupHandle(*h),
+                    CampType::try_from(c[1] as i32)?,
+                    Vec2::new(c[2] as i32, c[3] as i32),
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        groups.push(CampGroup {
+            handle: CampGroupHandle(*h),
+            gold: *gold,
+            gems: *gems,
+            respawn: *respawn as i32,
+            camps,
+        });
+        rest = &tail[members.len()..];
+    }
+    if !rest.is_empty() {
+        return Err(malformed());
+    }
+    Ok(groups)
 }
 fn load_camp_group(h: u32) -> Result<CampGroup> {
     let rewards = query(|p| unsafe { sys::map_camp_group(h, p) })?;
@@ -526,14 +548,18 @@ fn load_camp_group(h: u32) -> Result<CampGroup> {
 /// # Arguments
 /// * `position` - Spawn tile of the camp.
 pub fn camp(position: Vec2) -> Result<Camp> {
-    for g in camp_groups()? {
-        for c in g.camps() {
-            if c.spawn_position() == position {
-                return Ok(c.clone());
-            }
-        }
-    }
-    Err(Error::local(ErrorCode::ApiNotFound, "no camp spawn here"))
+    state()?;
+    load_camp(query(|p| unsafe { sys::map_camp_at(position.x, position.y, p) })?)
+}
+fn load_camp(h: u32) -> Result<Camp> {
+    let info = query(|p| unsafe { sys::map_camp_info(h, p) })?;
+    let group = query(|p| unsafe { sys::map_camp_group_of(h, p) })?;
+    Ok(Camp::new(
+        CampHandle(h),
+        CampGroupHandle(group),
+        CampType::try_from(info.kind)?,
+        Vec2::new(info.x, info.y),
+    ))
 }
 /// An immutable snapshot of a visible ordinary ward.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -618,6 +644,15 @@ pub struct Teleport {
     remaining_time: i32,
 }
 impl Teleport {
+    fn decode(i: sys::TeleportInfo) -> Result<Self> {
+        Ok(Self {
+            champion: ChampionHandle(i.champion),
+            kind: ChampionType::try_from(i.kind)?,
+            team: Team::from_absolute(i.team as i32)?,
+            destination: i.destination,
+            remaining_time: i.timer,
+        })
+    }
     /// Construct a live wrapper for the teleport caster, preserving host visibility errors.
     pub fn champion(&self) -> Result<Champion> {
         Champion::new(self.champion)
@@ -919,15 +954,7 @@ pub fn has_teleport(position: Vec2) -> Result<bool> {
 pub fn teleports() -> Result<Vec<Teleport>> {
     crate::list(|p, n, out| unsafe { sys::teleports(p, n, out) })?
         .into_iter()
-        .map(|i| {
-            Ok(Teleport {
-                champion: ChampionHandle(i.champion),
-                kind: ChampionType::try_from(i.kind)?,
-                team: Team::from_absolute(i.team as i32)?,
-                destination: i.destination,
-                remaining_time: i.timer,
-            })
-        })
+        .map(Teleport::decode)
         .collect()
 }
 /// Return the visible teleport reservation at `position`.
@@ -935,15 +962,22 @@ pub fn teleports() -> Result<Vec<Teleport>> {
 /// # Arguments
 /// * `position` - Tile to query.
 pub fn teleport_at(position: Vec2) -> Result<Teleport> {
-    if has_teleport(position)? {
-        if let Some(t) = teleports()?.into_iter().find(|t| t.position() == position) {
-            return Ok(t);
+    let info = query(|p| unsafe { sys::teleport_at(position.x, position.y, p) });
+    match info {
+        Ok(i) => Teleport::decode(i),
+        Err(e)
+            if matches!(
+                e.code(),
+                Some(ErrorCode::ApiNotFound | ErrorCode::ApiNotInVision)
+            ) =>
+        {
+            Err(Error::local(
+                ErrorCode::ApiNotFound,
+                "no visible teleport at position",
+            ))
         }
+        Err(e) => Err(e),
     }
-    Err(Error::local(
-        ErrorCode::ApiNotFound,
-        "no visible teleport at position",
-    ))
 }
 /// Return an owning visible altar lock at `position`, preferring ally then enemy.
 ///
@@ -987,24 +1021,13 @@ pub fn altar_locks(team: Option<Team>) -> Result<Vec<AltarLock>> {
         .filter(|i| team.is_none_or(|t| t == i.team))
         .collect())
 }
-/// Look up a visible camp at its current position and borrow initialized metadata.
-/// Absence and hidden tiles are errors; unknown handles and uninitialized caches remain errors.
+/// Look up a visible camp at its current position and borrow initialised metadata.
+/// Absence and hidden tiles are errors; unknown handles and uninitialised caches remain errors.
 ///
 /// # Arguments
 /// * `position` - Current tile of the camp.
 pub fn camp_at(position: Vec2) -> Result<Camp> {
-    let h = query(|p| unsafe { sys::camp_at(position.x, position.y, p) })?;
-    for group in camp_groups()? {
-        for c in group.camps() {
-            if c.handle().0 == h {
-                return Ok(c.clone());
-            }
-        }
-    }
-    Err(Error::local(
-        ErrorCode::InvalidHandle,
-        "invalid camp handle",
-    ))
+    load_camp(query(|p| unsafe { sys::camp_at(position.x, position.y, p) })?)
 }
 /// Return a live wrapper for the visible champion at `position`; absence and hidden tiles are errors.
 ///
@@ -1047,7 +1070,7 @@ pub fn vision_champions(team: Option<Team>) -> Result<Vec<Champion>> {
     }
     Ok(v)
 }
-/// Return owning wrappers for currently visible camps, using initialized map metadata.
+/// Return owning wrappers for currently visible camps, using initialised map metadata.
 pub fn vision_camps() -> Result<Vec<Camp>> {
     let positions = camp_tiles()?.positions()?;
     let mut v = Vec::with_capacity(positions.len());
@@ -1145,7 +1168,7 @@ impl SharedMemory {
         self.read(offset, bytemuck::cast_slice_mut(values))
     }
     /// Write a typed slice at a byte offset using native layout and byte order, like C++ spans.
-    /// Values must have no uninitialized padding bytes.
+    /// Values must have no uninitialised padding bytes.
     ///
     /// # Arguments
     /// * `offset` - Byte offset into shared memory.
@@ -1234,7 +1257,7 @@ pub fn global_submitted_gems(team: Team) -> Result<u32> {
 pub fn draft_pick(kind: ChampionDraft) -> Result<()> {
     check(unsafe { sys::draft_champion(kind as i32) })
 }
-/// Draw a replay debug dot at `position` using packed RGB color.
+/// Draw a replay debug dot at `position` using packed RGB colour.
 ///
 /// # Arguments
 /// * `position` - Tile to mark.
@@ -1242,7 +1265,7 @@ pub fn draft_pick(kind: ChampionDraft) -> Result<()> {
 pub fn debug_draw_dot(position: Vec2, rgb: u32) -> Result<()> {
     check(unsafe { sys::debug_dot(position.x, position.y, rgb) })
 }
-/// Draw a replay debug line from `from` to `to` using packed RGB color.
+/// Draw a replay debug line from `from` to `to` using packed RGB colour.
 ///
 /// # Arguments
 /// * `from` - Start tile.

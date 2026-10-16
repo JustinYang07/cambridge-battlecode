@@ -12,6 +12,9 @@ file(TO_CMAKE_PATH "${BOT_DIR}" BOT_DIR)
 file(TO_CMAKE_PATH "${BC_SDK}" BC_SDK)
 file(GLOB_RECURSE BOT_SOURCES CONFIGURE_DEPENDS "${BOT_DIR}/src/*.cpp")
 add_executable(bot ${BOT_SOURCES})
+if(CAMBC_DEBUG)
+  target_compile_definitions(bot PRIVATE CAMBC_DEBUG)
+endif()
 target_include_directories(bot PRIVATE "${BC_SDK}/cpp")
 # Make the SDK's exception-enabled libc++ layout visible to clangd versions
 # whose built-in driver predates this WASI SDK (without --query-driver setup).
@@ -21,9 +24,13 @@ target_include_directories(bot SYSTEM PRIVATE
 # Wasm exceptions (exnref): the runner's Wasmtime supports only that
 # proposal, and wasi-sdk's `eh` sysroot variant (libc++abi/libunwind built
 # with try_table/throw_ref) must be linked for C++ exceptions.
-target_compile_options(bot PRIVATE -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false)
+# Lower memory intrinsics to Wasm memory.fill/memory.copy where profitable.
+target_compile_options(bot PRIVATE -msimd128 -mbulk-memory -mbulk-memory-opt -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false)
+# Clang otherwise runs any wasm-opt found on PATH after linking. Older Binaryen
+# cannot parse this SDK's output; keep builds independent of host-installed tools.
+# The -mllvm exception option above is compile-only (no LTO at the link step).
 target_link_options(
-  bot PRIVATE -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false
+  bot PRIVATE -fwasm-exceptions --no-wasm-opt
   -L${WASI_SDK_PREFIX}/share/wasi-sysroot/lib/wasm32-wasip1/eh
   -lunwind
 )

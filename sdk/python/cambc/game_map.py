@@ -137,7 +137,7 @@ class CampGroup:
     _gems: int
     _respawn: int
     _camps: tuple[Camp, ...]
-    _mask: Bitboard
+    _mask: Bitboard | None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, CampGroup):
@@ -151,14 +151,14 @@ class CampGroup:
         raise TypeError("CampGroup cannot be constructed directly")
 
     @classmethod
-    def _new(cls, handle: _CampGroupHandle, gold: int, gems: int, respawn: int, camps: tuple[Camp, ...], mask: Bitboard) -> CampGroup:
+    def _new(cls, handle: _CampGroupHandle, gold: int, gems: int, respawn: int, camps: tuple[Camp, ...]) -> CampGroup:
         self = cls.__new__(cls)
         self._handle = handle
         self._gold = gold
         self._gems = gems
         self._respawn = respawn
         self._camps = camps
-        self._mask = mask
+        self._mask = None
         return self
 
     def __index__(self) -> int:
@@ -174,7 +174,8 @@ class CampGroup:
 
     def state(self) -> CampGroupState:
         """Return the group's current state."""
-        if (_bc.vision() & self._mask).is_empty():
+        vision = _bc.vision()
+        if not any(vision.is_set(camp.spawn_position()) for camp in self._camps):
             raise Error(ErrorCode.API_NOT_IN_VISION, "camp group is not in vision")
         state = _bc.camp_group_state(self._handle)
         if state == 1:
@@ -203,6 +204,11 @@ class CampGroup:
 
     def spawn_tiles(self) -> Bitboard:
         """Return the spawn tiles of the group's camps."""
+        if self._mask is None:
+            mask = Bitboard()
+            for camp in self._camps:
+                mask.set(camp.spawn_position())
+            self._mask = mask
         return self._mask
 
     def spawn_tiles_into(self, out: Bitboard) -> None:
@@ -212,21 +218,13 @@ class CampGroup:
             out: Destination Bitboard; its previous contents are overwritten.
         """
         out.clear()
-        out |= self._mask
-
-
-def _camp_index() -> tuple[tuple[CampGroup, ...], dict[Vec2, Camp], dict[int, Camp], dict[int, CampGroup]]:
-    """Camp groups and lookup tables, built fresh from the host on every call."""
-    if _cache.my_champion == -1:
-        return (), {}, {}, {}
-    return _bc.camp_groups(Camp._new, CampGroup._new)
+        out |= self.spawn_tiles()
 
 
 def camp_groups() -> tuple[CampGroup, ...]:
-    """Camp groups (empty during the draft)."""
-    if _cache.my_champion == -1:
-        _bc.map_num_camp_groups()
-    return _camp_index()[0]
+    """Camp groups, also available during the draft."""
+    groups: tuple[CampGroup, ...] = _bc.camp_groups(Camp._new, CampGroup._new)
+    return groups
 
 
 def camp(position: Vec2) -> Camp:
@@ -235,14 +233,17 @@ def camp(position: Vec2) -> Camp:
     Args:
         position: Spawn tile of the camp.
     """
-    camp = _camp_index()[1].get(position)
-    if camp is None:
+    handle = _bc.map_camp_at(position.x, position.y)
+    if handle is None:
         raise IndexError("no camp on tile")
+    return _camp(handle)
+
+
+def _camp(handle: int) -> Camp:
+    camp: Camp = _bc.camp(handle, Camp._new)
     return camp
 
 
 def _camp_group(handle: _CampGroupHandle) -> CampGroup:
-    group = _camp_index()[3].get(handle)
-    if group is None:
-        raise IndexError("invalid camp group")
+    group: CampGroup = _bc.camp_group(handle, Camp._new, CampGroup._new)
     return group

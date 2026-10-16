@@ -37,7 +37,7 @@ const _: () = {
     assert!(core::mem::offset_of!(GameItemInfo, passive_magnitude) == 24);
     assert!(core::mem::offset_of!(GameItemInfo, combine_cost) == 36);
 };
-/// Exact chunked map/storage layout returned by the host; queried without a global cache.
+/// Exact chunked map/storage layout returned by the host; validated then cached by the board module.
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct Metadata {
@@ -330,6 +330,25 @@ pub(crate) struct TeleportInfo {
     /// Channel type: 4 for teleport crystal; 3 is the retired scroll.
     pub channel_type: u32,
 }
+/// Debug-mode `debug_block` fuel window, linked only by a debug-built bot.
+#[cfg(all(cambc_debug, not(test)))]
+#[link(wasm_import_module = "env")]
+unsafe extern "C" {
+    /// Pause fuel accounting: the following code runs in a free window.
+    #[link_name = "fuel_pause"]
+    pub(crate) fn fuel_pause() -> i32;
+    /// Resume fuel accounting after a `fuel_pause` window.
+    #[link_name = "fuel_resume"]
+    pub(crate) fn fuel_resume();
+}
+#[cfg(all(cambc_debug, test))]
+pub(crate) unsafe fn fuel_pause() -> i32 {
+    crate::fake::call("fuel_pause", &[]) as i32
+}
+#[cfg(all(cambc_debug, test))]
+pub(crate) unsafe fn fuel_resume() {
+    let _ = crate::fake::call("fuel_resume", &[]);
+}
 #[cfg(not(test))]
 #[link(wasm_import_module = "env")]
 unsafe extern "C" {
@@ -412,6 +431,8 @@ unsafe extern "C" {
         capacity: u32,
         out_count: *mut u32,
     ) -> i32;
+    #[link_name = "teleport_at"]
+    pub(crate) fn teleport_at(x: i32, y: i32, out_teleport: *mut TeleportInfo) -> i32;
     #[link_name = "board_ward_vision_mask"]
     pub(crate) fn ward_vision(x: i32, y: i32, out_board: *mut u64) -> i32;
     #[link_name = "board_ally_altar_lock_occupancy"]
@@ -529,12 +550,6 @@ unsafe extern "C" {
     /// Exact C-ABI `bc_map_symmetry` host operation; pointer buffers obey the module safety contract.
     #[link_name = "bc_map_symmetry"]
     pub(crate) fn bc_map_symmetry(out_symmetry: *mut i32) -> i32;
-    /// Exact C-ABI `map_num_camp_groups` host operation; pointer buffers obey the module safety contract.
-    #[link_name = "map_num_camp_groups"]
-    pub(crate) fn map_num_camp_groups(out_count: *mut u32) -> i32;
-    /// Exact C-ABI `map_camp_groups` host operation; pointer buffers obey the module safety contract.
-    #[link_name = "map_camp_groups"]
-    pub(crate) fn map_camp_groups(groups: *mut u32, capacity: u32, out_count: *mut u32) -> i32;
     /// Exact C-ABI `map_camp_group_num_camps` host operation; pointer buffers obey the module safety contract.
     #[link_name = "map_camp_group_num_camps"]
     pub(crate) fn map_camp_group_num_camps(group: u32, out_count: *mut u32) -> i32;
@@ -552,6 +567,15 @@ unsafe extern "C" {
     /// Exact C-ABI `map_camp_info` host operation; pointer buffers obey the module safety contract.
     #[link_name = "map_camp_info"]
     pub(crate) fn map_camp_info(camp: u32, out_info: *mut CampInfo) -> i32;
+    /// Exact C-ABI `map_camp_layout` host operation; pointer buffers obey the module safety contract.
+    #[link_name = "map_camp_layout"]
+    pub(crate) fn map_camp_layout(out_words: *mut u32, capacity: u32, out_count: *mut u32) -> i32;
+    /// Exact C-ABI `map_camp_group_of` host operation; pointer buffers obey the module safety contract.
+    #[link_name = "map_camp_group_of"]
+    pub(crate) fn map_camp_group_of(camp: u32, out_group: *mut u32) -> i32;
+    /// Exact C-ABI `map_camp_at` host operation; pointer buffers obey the module safety contract.
+    #[link_name = "map_camp_at"]
+    pub(crate) fn map_camp_at(x: i32, y: i32, out_camp: *mut u32) -> i32;
     /// Exact C-ABI `camp_group_cooldown` host operation; pointer buffers obey the module safety contract.
     #[link_name = "camp_group_cooldown"]
     pub(crate) fn camp_group_cooldown(group: u32, out_cooldown: *mut i32) -> i32;
@@ -572,6 +596,9 @@ unsafe extern "C" {
     /// Exact C-ABI `camp` host operation; pointer buffers obey the module safety contract.
     #[link_name = "camp"]
     pub(crate) fn camp(camp: u32, out_state: *mut CampState) -> i32;
+    /// Query the individual camp lifecycle state through its current perspective.
+    #[link_name = "camp_state"]
+    pub(crate) fn camp_state(camp: u32, out_state: *mut u32) -> i32;
     /// Exact C-ABI `camp_design` host operation; pointer buffers obey the module safety contract.
     #[link_name = "camp_design"]
     pub(crate) fn camp_design(kind: i32, out_design: *mut CampDesign) -> i32;
@@ -1083,6 +1110,11 @@ pub(crate) unsafe fn teleports(
         &[teleports as usize, capacity as usize, out_count as usize],
     ) as i32
 }
+/// Exact C-ABI `teleport_at` host operation; pointer buffers obey the module safety contract.
+#[cfg(test)]
+pub(crate) unsafe fn teleport_at(x: i32, y: i32, out_teleport: *mut TeleportInfo) -> i32 {
+    crate::fake::call("teleport_at", &[x as usize, y as usize, out_teleport as usize]) as i32
+}
 /// Exact C-ABI `ward_vision` host operation; pointer buffers obey the module safety contract.
 #[cfg(test)]
 pub(crate) unsafe fn ward_vision(x: i32, y: i32, out_board: *mut u64) -> i32 {
@@ -1420,19 +1452,6 @@ pub(crate) unsafe fn bc_map_mask(feature: i32, out_board: *mut u64) -> i32 {
 pub(crate) unsafe fn bc_map_symmetry(out_symmetry: *mut i32) -> i32 {
     crate::fake::call("bc_map_symmetry", &[out_symmetry as usize]) as i32
 }
-/// Exact C-ABI `map_num_camp_groups` host operation; pointer buffers obey the module safety contract.
-#[cfg(test)]
-pub(crate) unsafe fn map_num_camp_groups(out_count: *mut u32) -> i32 {
-    crate::fake::call("map_num_camp_groups", &[out_count as usize]) as i32
-}
-/// Exact C-ABI `map_camp_groups` host operation; pointer buffers obey the module safety contract.
-#[cfg(test)]
-pub(crate) unsafe fn map_camp_groups(groups: *mut u32, capacity: u32, out_count: *mut u32) -> i32 {
-    crate::fake::call(
-        "map_camp_groups",
-        &[groups as usize, capacity as usize, out_count as usize],
-    ) as i32
-}
 /// Exact C-ABI `map_camp_group_num_camps` host operation; pointer buffers obey the module safety contract.
 #[cfg(test)]
 pub(crate) unsafe fn map_camp_group_num_camps(group: u32, out_count: *mut u32) -> i32 {
@@ -1468,6 +1487,21 @@ pub(crate) unsafe fn map_camp_group(group: u32, out_info: *mut CampGroupInfo) ->
 #[cfg(test)]
 pub(crate) unsafe fn map_camp_info(camp: u32, out_info: *mut CampInfo) -> i32 {
     crate::fake::call("map_camp_info", &[camp as usize, out_info as usize]) as i32
+}
+/// Exact C-ABI `map_camp_layout` host operation; pointer buffers obey the module safety contract.
+#[cfg(test)]
+pub(crate) unsafe fn map_camp_layout(out_words: *mut u32, capacity: u32, out_count: *mut u32) -> i32 {
+    crate::fake::call("map_camp_layout", &[out_words as usize, capacity as usize, out_count as usize]) as i32
+}
+/// Exact C-ABI `map_camp_group_of` host operation; pointer buffers obey the module safety contract.
+#[cfg(test)]
+pub(crate) unsafe fn map_camp_group_of(camp: u32, out_group: *mut u32) -> i32 {
+    crate::fake::call("map_camp_group_of", &[camp as usize, out_group as usize]) as i32
+}
+/// Exact C-ABI `map_camp_at` host operation; pointer buffers obey the module safety contract.
+#[cfg(test)]
+pub(crate) unsafe fn map_camp_at(x: i32, y: i32, out_camp: *mut u32) -> i32 {
+    crate::fake::call("map_camp_at", &[x as usize, y as usize, out_camp as usize]) as i32
 }
 /// Exact C-ABI `camp_group_cooldown` host operation; pointer buffers obey the module safety contract.
 #[cfg(test)]
@@ -1512,6 +1546,11 @@ pub(crate) unsafe fn bc_camp_group_max_respawn(group: u32, out_timer: *mut i32) 
 #[cfg(test)]
 pub(crate) unsafe fn camp(camp: u32, out_state: *mut CampState) -> i32 {
     crate::fake::call("camp", &[camp as usize, out_state as usize]) as i32
+}
+/// Query the individual camp lifecycle state through the fake host.
+#[cfg(test)]
+pub(crate) unsafe fn camp_state(camp: u32, out_state: *mut u32) -> i32 {
+    crate::fake::call("camp_state", &[camp as usize, out_state as usize]) as i32
 }
 /// Exact C-ABI `camp_design` host operation; pointer buffers obey the module safety contract.
 #[cfg(test)]

@@ -71,7 +71,7 @@ pub enum Error {
     Engine {
         /// Original numeric engine error code, including unknown values.
         raw_code: i32,
-        /// Recognized code, or `None` for unknown numeric values.
+        /// Recognised code, or `None` for unknown numeric values.
         code: Option<ErrorCode>,
         /// Owned engine diagnostic or local validation message.
         message: String,
@@ -98,7 +98,7 @@ impl Error {
             message: message.into(),
         }
     }
-    /// Return the recognized engine error code, or `None` for unknown/SDK-only errors.
+    /// Return the recognised engine error code, or `None` for unknown/SDK-only errors.
     #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
@@ -147,7 +147,7 @@ pub(crate) fn check(raw_code: i32) -> Result<()> {
         message: String::from_utf8_lossy(&bytes).into_owned(),
     })
 }
-/// Initialize output storage, call the host, and return it only after checking success.
+/// Initialise output storage, call the host, and return it only after checking success.
 pub(crate) fn query<T: Default>(f: impl FnOnce(*mut T) -> i32) -> Result<T> {
     let mut value = T::default();
     check(f(&mut value))?;
@@ -198,4 +198,60 @@ pub(crate) fn require_self(handle: ChampionHandle) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(cambc_debug)]
+    pub struct DebugGuard;
+    #[cfg(cambc_debug)]
+    impl DebugGuard {
+        pub fn pause() -> Self {
+            unsafe { crate::sys::fuel_pause() };
+            DebugGuard
+        }
+    }
+    #[cfg(cambc_debug)]
+    impl Drop for DebugGuard {
+        fn drop(&mut self) {
+            unsafe { crate::sys::fuel_resume() }
+        }
+    }
+}
+
+/// Run the statements without spending fuel when the bot is built in debug
+/// mode (`cambc run`, the default); skipped entirely in release mode
+/// (`--release`, and always on the platform). The free budget per block is
+/// 1000 turns, beyond which the rest is charged; ending the turn inside
+/// closes the free window.
+///
+/// A macro: `debug_block! { statements }` runs the body inline, so `return`
+/// and `?` leave the enclosing function (fuel resumes on the way out). In
+/// release mode the body is type-checked but never evaluated.
+#[cfg(cambc_debug)]
+#[macro_export]
+macro_rules! debug_block {
+    ($($body:tt)*) => {{
+        let _guard = $crate::__private::DebugGuard::pause();
+        $($body)* ;
+    }};
+}
+
+/// Run the statements without spending fuel when the bot is built in debug
+/// mode (`cambc run`, the default); skipped entirely in release mode
+/// (`--release`, and always on the platform). The free budget per block is
+/// 1000 turns, beyond which the rest is charged; ending the turn inside
+/// closes the free window.
+///
+/// A macro: `debug_block! { statements }` runs the body inline, so `return`
+/// and `?` leave the enclosing function (fuel resumes on the way out). In
+/// release mode the body is type-checked but never evaluated.
+#[cfg(not(cambc_debug))]
+#[macro_export]
+macro_rules! debug_block {
+    ($($body:tt)*) => {
+        if false {
+            $($body)* ;
+        }
+    };
 }

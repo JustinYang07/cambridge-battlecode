@@ -490,10 +490,7 @@ fn design_champions_are_draft_safe_but_not_live() {
         vec![ChampionDraft::Ryth, ChampionDraft::VesperVale]
     );
     assert_eq!(crate::draft_memory().bytes(), b"rust");
-    assert_eq!(
-        crate::map::camp_groups().unwrap_err().code(),
-        Some(ErrorCode::ApiInvalidPerspective)
-    );
+    assert!(crate::map::camp_groups().is_ok());
     crate::draft_memory().submit(b"data").unwrap();
     assert_eq!(crate::draft_memory().bytes(), b"rust");
     crate::draft::pick(ChampionDraft::Tavi).unwrap();
@@ -1080,6 +1077,39 @@ fn camp_identity_is_handle_only_and_private_type_drives_live_queries() {
 }
 
 #[test]
+fn camp_state_is_live_and_preserves_visibility_errors() {
+    setup();
+    let camp = Camp::new(CampHandle(9), CampGroupHandle(2), CampType::Wolf, Vec2::new(2, 3));
+    for (raw, expected) in [(2, CampState::Asleep), (1, CampState::Alive), (0, CampState::Dead)] {
+        fake::hook(move |name, args| {
+            if name != "camp_state" { return None; }
+            assert_eq!(args[0], 9);
+            unsafe { (args[1] as *mut u32).write(raw); }
+            Some(0)
+        });
+        assert_eq!(camp.state().unwrap(), expected);
+        let state = camp.state().unwrap();
+        assert_eq!((state.is_dead(), state.is_alive(), state.is_awake(), state.is_asleep()),
+            (raw == 0, raw != 0, raw == 1, raw == 2));
+        assert_eq!((camp.is_dead().unwrap(), camp.is_alive().unwrap(), camp.is_awake().unwrap(), camp.is_asleep().unwrap()),
+            (raw == 0, raw != 0, raw == 1, raw == 2));
+    }
+    for code in [ErrorCode::ApiNotInVision, ErrorCode::ApiInvalidCamp] {
+        fake::hook(move |name, _| (name == "camp_state").then_some(code as i64));
+        assert_eq!(camp.state().unwrap_err().code(), Some(code));
+        for result in [camp.is_dead(), camp.is_alive(), camp.is_awake(), camp.is_asleep()] {
+            assert_eq!(result.unwrap_err().code(), Some(code));
+        }
+    }
+    fake::hook(|name, args| {
+        if name != "camp_state" { return None; }
+        unsafe { (args[1] as *mut u32).write(99); }
+        Some(0)
+    });
+    assert!(camp.state().is_err());
+}
+
+#[test]
 fn champion_state_masks_preserve_engine_bits_and_unknown_values() {
     setup();
     let champion = Champion::new(ChampionHandle(0)).unwrap();
@@ -1505,22 +1535,8 @@ fn init_populates_all_caches_and_accessors_never_query_or_initialize() {
 }
 
 #[test]
-fn board_and_field_constructors_query_layout_without_caching_it() {
-    setup();
-    crate::init().unwrap();
-    let board = Bitboard::new().unwrap();
-    assert_eq!(board.complement().unwrap().count().unwrap(), 64);
-    assert_eq!(board.xor(&board).unwrap().count().unwrap(), 0);
-    assert_eq!(board.export_raw_buffer().unwrap().len(), 16);
-    assert_eq!(
-        DistanceField::new()
-            .unwrap()
-            .export_raw_buffer()
-            .unwrap()
-            .len(),
-        128
-    );
-    fake::hook(|name, args| {
+fn board_and_field_constructors_cache_the_validated_layout() {
+    fn wide_layout(name: &str, args: &[usize]) -> Option<i64> {
         if name != "bc_metadata" {
             return None;
         }
@@ -1536,15 +1552,40 @@ fn board_and_field_constructors_query_layout_without_caching_it() {
             });
         }
         Some(0)
-    });
+    }
+    setup();
+    crate::init().unwrap();
+    let board = Bitboard::new().unwrap();
+    assert_eq!(board.complement().unwrap().count().unwrap(), 64);
+    assert_eq!(board.xor(&board).unwrap().count().unwrap(), 0);
+    assert_eq!(board.export_raw_buffer().unwrap().len(), 16);
+    assert_eq!(
+        DistanceField::new()
+            .unwrap()
+            .export_raw_buffer()
+            .unwrap()
+            .len(),
+        128
+    );
+    // The cached layout ignores changed host responses and host failures.
+    fake::hook(wide_layout);
+    assert_eq!(Bitboard::new().unwrap().width(), 8);
+    fake::hook(|name, _| (name == "bc_metadata").then_some(12_345));
+    assert!(Bitboard::new().is_ok());
+    // Resetting the fake host clears the cache; failures are not cached and can be retried.
+    setup();
+    fake::hook(|name, _| (name == "bc_metadata").then_some(12_345));
+    assert_eq!(Bitboard::new().unwrap_err().raw_code(), Some(12_345));
+    assert_eq!(DistanceField::new().unwrap_err().raw_code(), Some(12_345));
+    fake::hook(|_, _| None);
+    assert_eq!(Bitboard::new().unwrap().width(), 8);
+    // After a reset, constructors pick up a different host layout.
+    setup();
+    fake::hook(wide_layout);
     let board = Bitboard::new().unwrap();
     assert_eq!(board.width(), 16);
     assert_eq!(board.height(), 8);
     assert_eq!(DistanceField::new().unwrap().raw_buffer_size(), 256);
-    fake::hook(|name, _| (name == "bc_metadata").then_some(12_345));
-    assert_eq!(Bitboard::new().unwrap_err().raw_code(), Some(12_345));
-    assert_eq!(DistanceField::new().unwrap_err().raw_code(), Some(12_345));
-    crate::init().unwrap();
 }
 
 #[test]
@@ -2122,4 +2163,18 @@ fn destination_actions_distinguish_success_hidden_blocking_and_errors() {
         assert!(action().is_err());
         fake::hook(|_, _| None);
     }
+}
+
+#[test]
+fn debug_block_runs_only_in_debug_mode() {
+    setup();
+    let mut ran = false;
+    crate::debug_block! {
+        ran = true;
+        let _ = 1 + 1;
+    };
+    #[cfg(cambc_debug)]
+    assert!(ran);
+    #[cfg(not(cambc_debug))]
+    assert!(!ran);
 }

@@ -1,12 +1,26 @@
-//! Aligned owning spatial buffers. Layout is queried and validated for each direct constructor.
+//! Aligned owning spatial buffers. Layout is queried, validated and cached on first use.
 //! Host primitives validate coordinates and buffer sizes; mutable operations require exclusive access.
 use crate::{check, query, sys, Error, Result, Symmetry, Vec2};
-/// Query and validate current map/storage metadata without populating any global cache.
+thread_local! {
+    /// Validated map/storage metadata; the layout is immutable for the match.
+    static LAYOUT: std::cell::Cell<Option<sys::Metadata>> = const { std::cell::Cell::new(None) };
+}
+/// Return the validated map/storage metadata, caching it after the first successful query.
+/// Host or validation failures are not cached, so a later call retries.
 pub(crate) fn layout() -> Result<sys::Metadata> {
+    if let Some(value) = LAYOUT.get() {
+        return Ok(value);
+    }
     // SAFETY: the host writes all seven metadata fields on success.
     let value = unsafe { crate::query_init(|p| sys::bc_metadata(p)) }?;
     validate_metadata(&value)?;
+    LAYOUT.set(Some(value));
     Ok(value)
+}
+/// Clear the cached layout so fake-host tests can use different map dimensions.
+#[cfg(test)]
+pub(crate) fn reset_layout_for_tests() {
+    LAYOUT.set(None);
 }
 /// Reject inconsistent dimensions, chunk counts, strides and storage sizes before allocation.
 pub(crate) fn validate_metadata(m: &sys::Metadata) -> Result<()> {
@@ -45,10 +59,16 @@ impl PartialEq for Bitboard {
 }
 impl Eq for Bitboard {}
 impl Bitboard {
-    /// Allocate an empty aligned owning mask from a freshly queried, validated layout.
-    /// No global initialization or cached layout is required.
+    /// Allocate an empty aligned owning mask from the cached, validated layout.
+    /// No global initialisation is required; the first call queries and caches the layout.
     pub fn new() -> Result<Self> {
         Self::from_layout(&layout()?)
+    }
+    /// Allocate uninitialised aligned storage for a path that writes every chunk before any read.
+    pub(crate) fn uninit() -> Result<Self> {
+        let m = layout()?;
+        // SAFETY: the caller guarantees every chunk is overwritten before the board is read.
+        unsafe { Self::from_host(m.board_bytes as usize / 16, m.width, m.height, |_| 0) }
     }
     /// Allocate owned aligned storage from already validated engine metadata, cleared by the host.
     pub(crate) fn from_layout(m: &sys::Metadata) -> Result<Self> {
@@ -59,10 +79,10 @@ impl Bitboard {
             })
         }
     }
-    /// Allocate uninitialized storage and expose it only after `fill` succeeds.
+    /// Allocate uninitialised storage and expose it only after `fill` succeeds.
     ///
     /// # Safety
-    /// On success, `fill` must initialize all `len` chunks.
+    /// On success, `fill` must initialise all `len` chunks.
     pub(crate) unsafe fn from_host(
         len: usize,
         width: i32,
@@ -150,27 +170,30 @@ impl Bitboard {
     /// Return an owning list of all set tile coordinates; oversized host lists are rejected.
     pub fn positions(&self) -> Result<Vec<Vec2>> {
         let count = self.count()?;
-        let mut values = vec![Vec2::default(); count];
+        let mut values = Vec::with_capacity(count);
         let written = query(|out| unsafe {
-            sys::Bitboard_GetSetBits(self.ptr(), values.as_mut_ptr().cast(), values.len(), out)
+            sys::Bitboard_GetSetBits(self.ptr(), values.spare_capacity_mut().as_mut_ptr().cast(), count, out)
         })?;
         let written = usize::try_from(written)
             .map_err(|_| Error::invalid_argument("host returned invalid position count"))?;
         if written > count {
             return Err(Error::invalid_argument("host returned oversized positions"));
         }
-        values.truncate(written);
+        // SAFETY: the host initialised `written` Vec2 elements within capacity.
+        unsafe { values.set_len(written) };
         Ok(values)
     }
     /// Print the stored board/field through the host debug primitive.
     pub fn print(&self) -> Result<()> {
         check(unsafe { sys::Bitboard_Print(self.ptr()) })
     }
-    /// Initialize output storage, call the host, and return it only after checking success.
+    /// Allocate uninitialised output storage, call the host, and return it only after success.
+    ///
+    /// Every host import routed here writes all chunks on success.
     pub(crate) fn query(f: impl FnOnce(*mut u64) -> i32) -> Result<Self> {
-        let mut b = Self::new()?;
-        check(f(b.ptr_mut()))?;
-        Ok(b)
+        let m = layout()?;
+        // SAFETY: every host import passed through `query` writes every chunk on success.
+        unsafe { Self::from_host(m.board_bytes as usize / 16, m.width, m.height, f) }
     }
     /// Allocate zeroed output with this mask's layout, without another metadata query.
     fn empty_like(&self) -> Result<Self> {
@@ -182,10 +205,11 @@ impl Bitboard {
         }
     }
     /// Return independent same-layout output only after the host operation succeeds.
+    ///
+    /// Every host primitive routed here writes all chunks on success.
     fn query_like(&self, f: impl FnOnce(*mut u64) -> i32) -> Result<Self> {
-        let mut b = self.empty_like()?;
-        check(f(b.ptr_mut()))?;
-        Ok(b)
+        // SAFETY: every host primitive passed through `query_like` writes every chunk on success.
+        unsafe { Self::from_host(self.storage.len(), self.width, self.height, f) }
     }
     /// Return an owning mask with valid map tiles complemented.
     pub fn complement(&self) -> Result<Self> {
@@ -311,7 +335,7 @@ impl Bitboard {
     pub fn shift_up(&self, count: i32) -> Result<Self> {
         self.query_like(|p| unsafe { sys::Bitboard_ShiftUp(self.ptr(), p, count) })
     }
-    /// Add tiles within a Euclidean circle centered at `center`; host validates the radius.
+    /// Add tiles within a Euclidean circle centred at `center`; host validates the radius.
     ///
     /// # Arguments
     /// * `center` - Centre tile.
@@ -519,8 +543,8 @@ const DIRECTIONS: [Vec2; 8] = [
 ];
 
 impl DistanceField {
-    /// Allocate aligned owning distance storage from a freshly queried, validated layout.
-    /// No global initialization or cached layout is required; compute or set values before use.
+    /// Allocate aligned owning distance storage from the cached, validated layout.
+    /// No global initialisation is required; compute or set values before use.
     pub fn new() -> Result<Self> {
         Ok(Self::from_layout(&layout()?))
     }
@@ -590,7 +614,7 @@ impl DistanceField {
     pub fn get(&self, p: Vec2) -> Result<u16> {
         query(|out| unsafe { sys::DistanceField_Get(self.ptr(), p.x, p.y, out) })
     }
-    /// First optimal step from `from` toward a root, as a direction delta in compass order from north.
+    /// First optimal step from `from` towards a root, as a direction delta in compass order from north.
     /// Returns `None` at a root or unreached tile; an out-of-map `from` propagates an engine error.
     ///
     /// # Arguments
@@ -603,7 +627,7 @@ impl DistanceField {
             .find(|&(_, d)| best != Self::UNREACHABLE && d == best)
             .map(|(m, _)| m))
     }
-    /// Every optimal step from `from` toward a root, as direction deltas in compass order from north.
+    /// Every optimal step from `from` towards a root, as direction deltas in compass order from north.
     ///
     /// # Arguments
     /// * `from` - Tile to step from.

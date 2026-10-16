@@ -8,6 +8,7 @@ module U = Game_unit
 (* Per-champion state survives between turns. Pick one stat and keep buying it. *)
 type bot = {
   mutable chosen_stat : int option;
+  mutable camp_layout : (B.t * (Camp_group.t * B.t) list) option;
 }
 
 let distance = Vec2.chebyshev_distance
@@ -54,28 +55,40 @@ let buy_items bot me =
   let count = C.gold_count me / Item_info.cost item in
   if count > 0 && C.can_buy ~count me item then C.buy ~count me item
 
-let attack_if_in_range (target : U.t) =
-  (* Make one basic attack if the target is already in attack range. *)
+let attack_first_in_range targets =
+  (* Compute the attack mask once, rather than once per visible target. *)
   let me = self_champion () in
-  if C.can_attack me && U.is_visible target && U.health target > 0.
-     && B.is_set (C.attack_tiles me) (U.position target) then begin
-    C.attack me (target :> [ `Champion of champion | `Camp of camp | `Altar_lock of Altar_lock.t ]);
-    true
-  end else false
+  if targets = [] || not (C.can_attack me) then false
+  else
+    let attack_tiles = C.attack_tiles me in
+    List.exists (fun (target : U.t) ->
+      if U.is_visible target && B.is_set attack_tiles (U.position target) && U.health target > 0. then begin
+        C.attack me (target :> [ `Champion of champion | `Camp of camp | `Altar_lock of Altar_lock.t ]);
+        true
+      end else false) targets
 
-let farm_camps () =
+let farm_camps bot =
   (* Attack a camp already in range, otherwise move toward the nearest camp tiles. *)
-  if List.exists (fun camp -> attack_if_in_range (`Camp camp)) (Vision.camps ()) then ()
+  if attack_first_in_range (List.map (fun camp -> `Camp camp) (Vision.camps ())) then ()
   else begin
+    (* Cache fixed spawn locations; only visible respawn state changes each turn. *)
+    let spawns, groups = match bot.camp_layout with
+      | Some layout -> layout
+      | None ->
+          let groups = List.map (fun group -> group, Camp_group.spawn_tiles group) (M.camp_groups ()) in
+          let tiles = List.fold_left (fun tiles (_, spawns) -> B.union tiles spawns) (B.create ()) groups in
+          let layout = tiles, groups in
+          bot.camp_layout <- Some layout;
+          layout in
     let visible = Vision.visible_tiles () in
-    let goals = List.fold_left (fun goals group ->
-      let respawning = not (B.is_empty (B.intersect (Camp_group.spawn_tiles group) visible))
-        && (match Camp_group.state group with Camp_group.Respawning _ -> true | _ -> false) in
-      if respawning then goals else B.union goals (Camp_group.spawn_tiles group))
-      (B.create ()) (M.camp_groups ()) in
+    let goals = List.fold_left (fun goals (group, tiles) ->
+      if not (B.is_empty (B.intersect tiles visible))
+         && (match Camp_group.state group with Camp_group.Respawning _ -> true | _ -> false)
+      then B.intersect goals (B.complement tiles)
+      else goals) (B.copy spawns) groups in
 
     if move_towards_closest goals then
-      ignore (List.exists (fun camp -> attack_if_in_range (`Camp camp)) (Vision.camps ()))
+      ignore (attack_first_in_range (List.map (fun camp -> `Camp camp) (Vision.camps ())))
   end
 
 let bank_gems me =
@@ -107,11 +120,11 @@ let play_turn bot =
     let at_spawn = B.is_set (M.spawn_region Team.Ally) (C.position me) in
     if at_spawn then buy_items bot me;
     if not at_spawn && C.health me < C.max_health me *. 0.35 then C.recall me
-    else if List.exists (fun enemy -> attack_if_in_range (`Champion enemy))
-      (Vision.champions ~team:Team.Enemy ()) then ()
+    else if attack_first_in_range (List.map (fun enemy -> `Champion enemy)
+      (Vision.champions ~team:Team.Enemy ())) then ()
     else if C.gem_count me > 0 then bank_gems me
     else begin
-      farm_camps ();
+      farm_camps bot;
       C.set_priority me (1 + Random.int 100)
     end
   end

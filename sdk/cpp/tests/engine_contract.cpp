@@ -18,6 +18,12 @@
  static_assert(offsetof(sdk, field) == offsetof(engine, member), "SDK offset drift: " #sdk "::" #field); \
  static_assert(sizeof(((sdk*)nullptr)->field) == sizeof(((engine*)nullptr)->member), "SDK field size drift: " #sdk "::" #field)
 
+BC_ENUM(cambc::camp_state::dead, e_Game_CampState_dead);
+BC_ENUM(cambc::camp_state::alive, e_Game_CampState_alive);
+BC_ENUM(cambc::camp_state::asleep, e_Game_CampState_asleep);
+static_assert(std::is_same_v<decltype(&cambc::detail::sdk_camp_state),
+ std::int32_t(*)(std::uint32_t, std::uint32_t*)>);
+
 static_assert(std::is_same_v<decltype(&cambc::detail::sdk_has_teleport),
  std::int32_t(*)(std::int32_t, std::int32_t, cbool*)>);
 static_assert(std::is_same_v<decltype(&cambc::detail::sdk_ally_ward_at),

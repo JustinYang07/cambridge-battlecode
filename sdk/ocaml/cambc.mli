@@ -562,7 +562,7 @@ module Constants : sig
     val varg_splash_radius : float
     (** Extra gold Vesper Vale gains, in percent. *)
     val vesper_vale_bonus_gold_percent : int
-    (** Strength Ryth gains per point of maximum health. *)
+    (** Strength Ryth gains per point of bonus health. *)
     val ryth_health_strength_ratio : float
     (** Fraction of focus Ren deals back as retaliation damage. *)
     val ren_retaliation_focus_ratio : float
@@ -941,19 +941,25 @@ module Distance_field : sig
     t -> walls:Bitboard.t -> roots:Bitboard.t -> visited:Bitboard.t -> max_distance:int -> unit
   (** BFS from [roots]; with [?destinations] stops once all are reached. *)
 
+  (** Like [compute], but returns the number of expansion steps.
+      @param destinations Optional target tiles; stop once all are reached.
+      @param walls Impassable tiles.
+      @param roots Tiles at distance zero.
+      @param visited Receives the tiles the search reached.
+      @param max_distance Tiles farther than this are left unreached. *)
   val compute_with_expansion_count :
     ?destinations:Bitboard.t ->
     t -> walls:Bitboard.t -> roots:Bitboard.t -> visited:Bitboard.t -> max_distance:int -> int
 
-  (** [next_move_from d p] is the first optimal step toward a root as a direction delta, or [None] at a root or unreached tile.
+  (** [next_move_from d p] is the first optimal step towards a root as a direction delta, or [None] at a root or unreached tile.
       @param d Distance field.
       @param p Tile to step from. *)
   val next_move_from : t -> Vec2.t -> Vec2.t option
-  (** First optimal step from a tile toward a root, as a direction delta in compass order from
+  (** First optimal step from a tile towards a root, as a direction delta in compass order from
       north; [None] at a root or unreached tile. *)
 
   val next_moves_from : t -> Vec2.t -> Vec2.t list
-  (** Every optimal step from a tile toward a root, as direction deltas in compass order. *)
+  (** Every optimal step from a tile towards a root, as direction deltas in compass order. *)
 end
 
 module Buff : sig
@@ -1392,7 +1398,7 @@ module Champion : sig
       @param c The bot's own champion.
       @param target Map tile to approach. *)
   val move_towards : t -> Vec2.t -> bool
-  (** [recall c] starts channeling a recall to the team spawn.
+  (** [recall c] starts channelling a recall to the team spawn.
       @param c The bot's own champion. *)
   val recall : t -> unit
   (** [cancel_recall c] cancels the current recall.
@@ -1454,8 +1460,38 @@ module Camp_group : sig
   val state : t -> state
 end
 
+module Camp_state : sig
+  (** An individual camp's captured lifecycle; states are mutually exclusive, not flags. *)
+  type t = Dead | Alive | Asleep
+  (** Check whether the captured state is dead. *)
+  val is_dead : t -> bool
+  (** Check whether the captured state is living, including asleep camps. *)
+  val is_alive : t -> bool
+  (** Check whether the captured state is awake (the [Alive] enum value). *)
+  val is_awake : t -> bool
+  (** Check whether the captured state is living but dormant. *)
+  val is_asleep : t -> bool
+end
+
 module Camp : sig
   type t = camp
+  (** Individual camp lifecycle. [Alive] means awake; [Asleep] means living but dormant. *)
+  type state = Camp_state.t = Dead | Alive | Asleep
+
+  (** Query [Dead], [Alive] (awake), or [Asleep]. The current tile, or last occupied tile
+      when dead, must be in vision; hidden camps raise [Api_not_in_vision].
+      This is separate from the camp-group state.
+      @param c Camp to inspect. *)
+  val state : t -> state
+
+  (** Query whether this camp is dead; uses the same visibility checks as [state]. *)
+  val is_dead : t -> bool
+  (** Query whether this camp is living (awake or asleep); uses the visibility checks of [state]. *)
+  val is_alive : t -> bool
+  (** Query whether this camp is awake; uses the same visibility checks as [state]. *)
+  val is_awake : t -> bool
+  (** Query whether this camp is living but dormant; uses the visibility checks of [state]. *)
+  val is_asleep : t -> bool
 
   type base_stats = {
     vision_radius : float;
@@ -1591,8 +1627,8 @@ module Game_map : sig
   (** [rotate_180 p] rotates [p] 180 degrees within the map.
       @param p Map position. *)
   val rotate_180 : Vec2.t -> Vec2.t
-  (** Terrain and spawn boards are shared cached values: copy before mutating. *)
 
+  (** Wall tiles. Terrain and spawn boards are shared cached values: copy before mutating. *)
   val walls : unit -> Bitboard.t
   (** Bush tiles, which hide champions from outside vision. *)
   val bushes : unit -> Bitboard.t
@@ -1603,7 +1639,7 @@ module Game_map : sig
   (** [spawn_region team] is the team's spawn region.
       @param team Team whose spawn region to return. *)
   val spawn_region : Team.t -> Bitboard.t
-  (** Every camp group on the map. *)
+  (** Every camp group on the map, also available in draft. *)
   val camp_groups : unit -> Camp_group.t list
   (** [camp_at p] is the camp that spawns at [p]; raises if none does.
       @param p Spawn tile. *)
@@ -1818,6 +1854,14 @@ val round_number : unit -> int
 val global_submitted_gems : Team.t -> int
 (** Fuel left in the current turn. *)
 val fuel_remaining : unit -> int
+(** [debug_block f] runs [f] without spending fuel when the bot is built in
+    debug mode ([cambc run], the default); skipped entirely in release mode
+    ([--release], and always on the platform). The free budget per block is
+    1000 turns, beyond which the rest is charged; ending the turn inside
+    closes the free window.
+    Usage: [debug_block (fun () -> expensive_debug_operation ())].
+    @param f Runs in debug mode only; never called in release mode. *)
+val debug_block : (unit -> unit) -> unit
 (** End the current turn. *)
 val end_turn : unit -> unit
 (** Resign the game for the bot's team. *)

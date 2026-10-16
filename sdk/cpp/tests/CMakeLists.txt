@@ -24,8 +24,10 @@ target_compile_options(check_cpp_sdk PRIVATE -msimd128)
 add_executable(typed_api "${BC_SDK}/cpp/tests/typed_api.cpp")
 target_include_directories(typed_api PRIVATE "${BC_SDK}/cpp")
 target_compile_options(typed_api PRIVATE -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false)
+# Match bot linking: do not run an unpinned wasm-opt from PATH, and keep the
+# compile-only -mllvm option out of this non-LTO link step.
 target_link_options(
-  typed_api PRIVATE -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false
+  typed_api PRIVATE -fwasm-exceptions --no-wasm-opt
   -L${WASI_SDK_PREFIX}/share/wasi-sysroot/lib/wasm32-wasip1/eh
   -lunwind
 )

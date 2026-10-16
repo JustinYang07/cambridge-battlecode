@@ -314,6 +314,7 @@ extern "C"
 	BC_IMPORT("board_teleport_occupancy") std::int32_t sdk_teleport_occupancy(std::uint64_t*);
 	BC_IMPORT("is_occupied_by_teleport") std::int32_t sdk_has_teleport(std::int32_t, std::int32_t, std::int32_t*);
 	BC_IMPORT("teleports") std::int32_t sdk_teleports(teleport_info*, std::uint32_t, std::uint32_t*);
+	BC_IMPORT("teleport_at") std::int32_t sdk_teleport_at(std::int32_t, std::int32_t, teleport_info*);
 	BC_IMPORT("board_ward_vision_mask") std::int32_t sdk_ward_vision(std::int32_t, std::int32_t, std::uint64_t*);
 	BC_IMPORT("board_ally_altar_lock_occupancy") std::int32_t sdk_ally_altar_lock_occupancy(std::uint64_t*);
 	BC_IMPORT("board_enemy_altar_lock_occupancy") std::int32_t sdk_enemy_altar_lock_occupancy(std::uint64_t*);
@@ -377,11 +378,15 @@ extern "C"
 	BC_IMPORT("map_camp_group_camps") std::int32_t sdk_map_camp_group_camps(std::uint32_t, std::uint32_t*, std::uint32_t, std::uint32_t*);
 	BC_IMPORT("map_camp_group") std::int32_t sdk_map_camp_group(std::uint32_t, camp_group_info*);
 	BC_IMPORT("map_camp_info") std::int32_t sdk_map_camp_info(std::uint32_t, camp_info*);
+	BC_IMPORT("map_camp_layout") std::int32_t sdk_map_camp_layout(std::uint32_t*, std::uint32_t, std::uint32_t*);
+	BC_IMPORT("map_camp_group_of") std::int32_t sdk_map_camp_group_of(std::uint32_t, std::uint32_t*);
+	BC_IMPORT("map_camp_at") std::int32_t sdk_map_camp_at(std::int32_t, std::int32_t, std::uint32_t*);
 	BC_IMPORT("camp_group_cooldown") std::int32_t sdk_camp_group_cooldown(std::uint32_t, std::int32_t*);
 	BC_IMPORT("camp_group_state") std::int32_t sdk_camp_group_state(std::uint32_t, std::uint32_t*);
 	BC_IMPORT("camp_buffs") std::int32_t sdk_camp_buffs(std::uint32_t, camp_buff_data*, std::uint32_t, std::uint32_t*);
 	BC_IMPORT("bc_camp_group_max_respawn") std::int32_t sdk_bc_camp_group_max_respawn(std::uint32_t, std::int32_t*);
 	BC_IMPORT("camp") std::int32_t sdk_camp(std::uint32_t, camp_state*);
+	BC_IMPORT("camp_state") std::int32_t sdk_camp_state(std::uint32_t, std::uint32_t*);
 	BC_IMPORT("camp_design") std::int32_t sdk_camp_design(std::int32_t, camp_design*);
 	BC_IMPORT("camp_at") std::int32_t sdk_camp_at(std::int32_t, std::int32_t, std::uint32_t*);
 	BC_IMPORT("champion_at") std::int32_t sdk_champion_at(std::int32_t, std::int32_t, std::uint32_t*);
@@ -406,7 +411,15 @@ extern "C"
 	/// Get the fuel remaining in the current turn.
 	BC_IMPORT("fuel_remaining") std::int64_t sdk_fuel_remaining();
 
-	/// Initialize engine-chunked bitboard storage.
+#ifdef CAMBC_DEBUG
+	/// Pause fuel accounting: the following code runs in a free window.
+	BC_IMPORT("fuel_pause") int sdk_fuel_pause();
+
+	/// Resume fuel accounting after a `fuel_pause` window.
+	BC_IMPORT("fuel_resume") void sdk_fuel_resume();
+#endif
+
+	/// Initialise engine-chunked bitboard storage.
 	BC_IMPORT("bc_Bitboard_Zero") std::int32_t sdk_Bitboard_Zero(std::uint64_t* buffer);
 	BC_IMPORT("bc_Bitboard_One") std::int32_t sdk_Bitboard_One(std::uint64_t* buffer);
 
@@ -528,7 +541,7 @@ inline const std::uint32_t shared_memory_capacity = []
 	return result;
 }();
 
-/// Map dimensions and buffer layout captured during dynamic initialization for this bot.
+/// Map dimensions and buffer layout captured during dynamic initialisation for this bot.
 inline const metadata cached_metadata = []
 {
 	metadata result{};

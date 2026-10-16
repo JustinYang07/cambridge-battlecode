@@ -425,7 +425,7 @@ impl Ability {
     /// Build a fresh Chebyshev targeting-range mask around the live owner.
     /// Unused/unavailable slots and attack resets return errors; this is not a legality mask.
     pub fn valid_tiles(&self) -> Result<Bitboard> {
-        let mut mask = Bitboard::new()?;
+        let mut mask = Bitboard::uninit()?;
         self.mask_into(&mut mask)?;
         Ok(mask)
     }

@@ -51,42 +51,49 @@ def move_towards_closest(goals):
     return step != origin and me.move_absolute(step)
 
 
-def attack_if_in_range(target):
-    # Make one basic attack if the target is already in attack range.
+def attack_first_in_range(targets):
+    # Compute the attack mask once, rather than once per visible target.
     me = cambc.me()
-    if (not me.can_attack() or not target.is_visible() or target.health() <= 0
-            or not me.attack_tiles().is_set(target.position())):
+    if not targets or not me.can_attack():
         return False
-    me.attack(target)
-    return True
+    attack_tiles = me.attack_tiles()
+    for target in targets:
+        if target.is_visible() and attack_tiles.is_set(target.position()) and target.health() > 0:
+            me.attack(target)
+            return True
+    return False
 
 
-def farm_camps():
+def farm_camps(bot):
     # Attack a camp already in range, otherwise move toward the nearest camp tiles.
-    for camp in cambc.vision.camps():
-        if attack_if_in_range(camp):
-            return
+    if attack_first_in_range(cambc.vision.camps()):
+        return
 
-    # Union every group's spawn tiles except visibly respawning groups.
-    goals = cambc.Bitboard()
+    # Spawn locations never change. Cache their union, then remove only groups
+    # we can currently see respawning. Keep unseen camps as exploration goals.
+    if bot.camp_layout is None:
+        spawns = cambc.Bitboard()
+        groups = [(group, group.spawn_tiles()) for group in game_map.camp_groups()]
+        for _, tiles in groups:
+            spawns |= tiles
+        bot.camp_layout = spawns, groups
+    spawns, groups = bot.camp_layout
+    goals = spawns.copy()
     visible = cambc.vision.visible_tiles()
-    for group in game_map.camp_groups():
-        if (not (group.spawn_tiles() & visible).is_empty()
-                and isinstance(group.state(), game_map.CampGroupRespawning)):
-            continue
-        goals |= group.spawn_tiles()
+    for group, tiles in groups:
+        if not (tiles & visible).is_empty() and isinstance(group.state(), game_map.CampGroupRespawning):
+            goals &= ~tiles
 
     # Fresh vision after movement may reveal a camp already in range.
     if move_towards_closest(goals):
-        for camp in cambc.vision.camps():
-            if attack_if_in_range(camp):
-                return
+        attack_first_in_range(cambc.vision.camps())
 
 
 class Bot:
     def __init__(self):
         # Per-champion state survives between turns. Pick one stat and keep buying it.
         self.chosen_stat = None
+        self.camp_layout = None
 
     def buy_items(self):
         # Spend only on power shards of the randomly chosen stat.
@@ -128,9 +135,8 @@ class Bot:
             return
 
         # Attack the first enemy champion already in range.
-        for enemy in cambc.vision.champions(Team.ENEMY):
-            if attack_if_in_range(enemy):
-                return
+        if attack_first_in_range(cambc.vision.champions(Team.ENEMY)):
+            return
 
         # Bank any carried gems before farming.
         if me.gem_count() > 0:
@@ -146,7 +152,7 @@ class Bot:
             move_towards_closest(goals)
             return
 
-        farm_camps()
+        farm_camps(self)
 
         me.set_priority(1 + below(100))
 

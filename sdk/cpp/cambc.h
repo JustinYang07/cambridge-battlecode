@@ -1,5 +1,5 @@
 /// @file
-/// Bot-facing C++ API with immutable metadata initialized before the bot entry point.
+/// Bot-facing C++ API with immutable metadata initialised before the bot entry point.
 /// Live queries return fresh values and propagate engine failures as cambc::error.
 #pragma once
 
@@ -67,7 +67,7 @@ extern "C" std::int32_t sdk_get_settings(game_settings*);
 /// Throw cambc::error for a nonzero engine status; zero means success.
 inline void check(std::int32_t code);
 
-/// Engine settings captured during dynamic initialization for this bot instance.
+/// Engine settings captured during dynamic initialisation for this bot instance.
 inline const game_settings cached_game_settings = []
 {
 	game_settings result{};
@@ -222,7 +222,7 @@ enum class symmetry : std::int32_t
 /// Physical camp types.
 enum class camp_type : std::int32_t
 {
-	/// Wolf camp: 1,350 health, 30 strength; drops gold and gems.
+	/// Wolf camp: 1,350 health, 20 strength; drops gold and gems.
 	wolf,
 	/// Elk camp: 2,400 health, 60 strength; drops more gold and gems than a wolf.
 	elk,
@@ -321,7 +321,7 @@ enum class error_code : std::int32_t
 	draft_invalid_round = 15,
 	/// Draft information is unavailable in the current phase.
 	draft_unavailable = 16,
-	/// The object has already been initialized.
+	/// The object has already been initialised.
 	already_initialized = 17,
 	/// The action is not allowed.
 	invalid_action = 18,
@@ -477,7 +477,7 @@ enum class error_code : std::int32_t
 	api_invalid_team = 93,
 	/// The query is not allowed from this bot's perspective.
 	api_invalid_perspective = 94,
-	/// The API is not initialized.
+	/// The API is not initialised.
 	api_not_initialized = 95,
 	/// The position is outside the map.
 	api_bad_position = 96,
@@ -517,7 +517,7 @@ enum class error_code : std::int32_t
 	invalid_action_recall_already_used = 113,
 	/// A tribute has already been started this turn.
 	invalid_action_submit_gems_already_used = 114,
-	/// The champion is not channeling.
+	/// The champion is not channelling.
 	invalid_action_cancel_channel_not_channeling = 115,
 	/// A channel has already been cancelled this turn.
 	invalid_action_cancel_channel_already_used = 116,
@@ -639,7 +639,7 @@ public:
 		return *this;
 	}
 
-	/// Divide both components in place, truncating toward zero.
+	/// Divide both components in place, truncating towards zero.
 	/// Throws std::invalid_argument when n is zero.
 	constexpr vec2& operator/=(std::int32_t n)
 	{
@@ -662,7 +662,7 @@ public:
 	/// Scale a vector by an integer.
 	friend constexpr vec2 operator*(std::int32_t n, vec2 a) { return a *= n; }
 
-	/// Divide both components, truncating toward zero.
+	/// Divide both components, truncating towards zero.
 	/// Throws std::invalid_argument when n is zero.
 	friend constexpr vec2 operator/(vec2 a, std::int32_t n) { return a /= n; }
 
@@ -837,6 +837,15 @@ public:
 		detail::check(detail::sdk_Bitboard_GetSetBits(ptr(), positions.data(), positions.size(), &count));
 		positions.resize(count);
 		return positions;
+	}
+
+	/// Write the positions of set map tiles into `out` and return how many were written.
+	/// @param out Destination buffer; at most `out.size()` positions are written.
+	[[nodiscard]] std::uint32_t positions_into(std::span<vec2> out) const
+	{
+		std::uint32_t count{};
+		detail::check(detail::sdk_Bitboard_GetSetBits(ptr(), out.data(), out.size(), &count));
+		return count;
 	}
 
 	/// Print the buffer through the engine.
@@ -1299,7 +1308,7 @@ public:
 		compute_to_with_expansion_count(walls, roots, destinations, visited, max_distance);
 	}
 
-	/// Compute toward destinations and return the number of expansion steps.
+	/// Compute towards destinations and return the number of expansion steps.
 	/// @param walls Impassable tiles.
 	/// @param roots Tiles at distance zero.
 	/// @param destinations The search stops once these tiles are reached.
@@ -1318,7 +1327,7 @@ public:
 	/// Distance assigned to tiles not reached by the search.
 	static constexpr std::uint16_t unreachable = std::numeric_limits<std::uint16_t>::max();
 
-	/// First optimal step from `from` toward a root, as a direction delta in compass order from north.
+	/// First optimal step from `from` towards a root, as a direction delta in compass order from north.
 	/// Returns nullopt at a root or unreached tile; throws if `from` is outside the map.
 	/// @param from Tile to step from.
 	[[nodiscard]] std::optional<vec2> next_move_from(vec2 from) const
@@ -1331,7 +1340,7 @@ public:
 		return std::nullopt;
 	}
 
-	/// Every optimal step from `from` toward a root, as direction deltas in compass order from north.
+	/// Every optimal step from `from` towards a root, as direction deltas in compass order from north.
 	/// @param from Tile to step from.
 	[[nodiscard]] std::vector<vec2> next_moves_from(vec2 from) const
 	{
@@ -1769,7 +1778,7 @@ inline constexpr consumable_type consumable_type::tp_crystal{ enum_type::tp_crys
 inline constexpr consumable_type consumable_type::altar_lock{ enum_type::altar_lock };
 inline constexpr consumable_type consumable_type::count{ enum_type::count };
 
-/// Contiguous, zero-initialized values indexed by an enum or enum wrapper with a count sentinel.
+/// Contiguous, zero-initialised values indexed by an enum or enum wrapper with a count sentinel.
 template <class T, class Value = std::uint32_t>
 	requires (std::is_enum_v<T> || requires { typename T::enum_type; requires std::is_enum_v<typename T::enum_type>; })
 class enum_map
@@ -2405,9 +2414,9 @@ private:
 
 /// The champion is alive.
 inline constexpr champion_state champion_state::alive{ std::uint32_t{ 1 } << 0 };
-/// The champion is channeling a recall.
+/// The champion is channelling a recall.
 inline constexpr champion_state champion_state::recalling{ std::uint32_t{ 1 } << 1 };
-/// The champion is channeling a tribute.
+/// The champion is channelling a tribute.
 inline constexpr champion_state champion_state::submitting_gems{ std::uint32_t{ 1 } << 2 };
 /// The champion can still move this turn.
 inline constexpr champion_state champion_state::can_move{ std::uint32_t{ 1 } << 3 };
@@ -2425,7 +2434,7 @@ inline constexpr champion_state champion_state::recall_cancelled{ std::uint32_t{
 inline constexpr champion_state champion_state::submit_gems_cancelled{ std::uint32_t{ 1 } << 9 };
 /// The champion can still cast an ability this turn.
 inline constexpr champion_state champion_state::can_cast{ std::uint32_t{ 1 } << 11 };
-/// The champion is channeling a teleport crystal.
+/// The champion is channelling a teleport crystal.
 inline constexpr champion_state champion_state::teleporting{ std::uint32_t{ 1 } << 12 };
 
 /// Camp monsters.
@@ -2969,6 +2978,41 @@ namespace map
 class camp_group;
 } // namespace map
 
+/// An individual camp's captured lifecycle. States are mutually exclusive, not flags.
+class camp_state
+{
+public:
+	/// Underlying mutually exclusive engine values; alive means awake.
+	enum class enum_type : std::uint32_t { dead = 0, alive = 1, asleep = 2 };
+	static const camp_state dead;
+	static const camp_state alive;
+	static const camp_state asleep;
+	/// Construct the dead state.
+	constexpr camp_state() noexcept = default;
+	/// Wrap an underlying enum value without changing its identity.
+	constexpr camp_state(enum_type state) noexcept : value_{ state } {}
+	/// Convert to the underlying engine enum.
+	[[nodiscard]] constexpr operator enum_type() const noexcept { return value_; }
+	/// Explicit integer conversion for host ABI values.
+	template <class T> requires std::is_integral_v<T>
+	[[nodiscard]] constexpr explicit operator T() const noexcept { return static_cast<T>(value_); }
+	/// Check whether the captured state is dead.
+	[[nodiscard]] constexpr bool is_dead() const noexcept { return value_ == enum_type::dead; }
+	/// Check whether the captured state is living, including asleep camps.
+	[[nodiscard]] constexpr bool is_alive() const noexcept { return value_ != enum_type::dead; }
+	/// Check whether the captured state is awake (the alive enum value).
+	[[nodiscard]] constexpr bool is_awake() const noexcept { return value_ == enum_type::alive; }
+	/// Check whether the captured state is living but dormant.
+	[[nodiscard]] constexpr bool is_asleep() const noexcept { return value_ == enum_type::asleep; }
+
+private:
+	enum_type value_{};
+};
+
+inline constexpr camp_state camp_state::dead{ enum_type::dead };
+inline constexpr camp_state camp_state::alive{ enum_type::alive };
+inline constexpr camp_state camp_state::asleep{ enum_type::asleep };
+
 /// A runtime camp, with public spawn metadata and visibility-checked combat queries.
 class camp : public unit
 {
@@ -3000,6 +3044,28 @@ public:
 	[[nodiscard]] vec2 spawn_position() const noexcept { return spawn_position_; }
 	/// Query this camp's group from the engine on every call; invalid identities throw.
 	[[nodiscard]] map::camp_group camp_group() const;
+	/// Query dead, alive (awake), or asleep. The current tile, or last occupied tile when dead,
+	/// must be in vision; hidden camps throw api_not_in_vision. This is separate from the camp-group state.
+	[[nodiscard]] camp_state state() const
+	{
+		std::uint32_t value{};
+		detail::check(detail::sdk_camp_state(static_cast<std::uint32_t>(handle_), &value));
+		switch (value)
+		{
+		case 0: return camp_state::dead;
+		case 1: return camp_state::alive;
+		case 2: return camp_state::asleep;
+		default: throw error{ error_code::api_value_out_of_range, "unknown engine camp state" };
+		}
+	}
+	/// Query whether this camp is dead; uses the same visibility checks as state().
+	[[nodiscard]] bool is_dead() const { return state().is_dead(); }
+	/// Query whether this camp is living (awake or asleep); uses the same visibility checks as state().
+	[[nodiscard]] bool is_alive() const { return state().is_alive(); }
+	/// Query whether this camp is awake; uses the same visibility checks as state().
+	[[nodiscard]] bool is_awake() const { return state().is_awake(); }
+	/// Query whether this camp is living but dormant; uses the same visibility checks as state().
+	[[nodiscard]] bool is_asleep() const { return state().is_asleep(); }
 	/// Query current health; live state requires a visible runtime identity.
 	[[nodiscard]] float health() const override { return info().health; }
 	/// Query current maximum health; live state requires a visible runtime identity.
@@ -3083,19 +3149,15 @@ class ability
 	ability(handle_champion_t owner, std::uint32_t slot) : owner_{ static_cast<std::uint32_t>(owner) }, slot_{ slot }
 	{
 		detail::ability_props props{};
-		try
+		const auto code = detail::sdk_champion_ability_props(owner_, slot_, &props);
+		if (code == static_cast<std::int32_t>(error_code::api_not_in_vision))
 		{
-			detail::check(detail::sdk_champion_ability_props(owner_, slot_, &props));
-			if (props.kind == 0)
-				return;
-		}
-		catch (const error& failure)
-		{
-			if (failure.code() != error_code::api_not_in_vision)
-				throw;
-			info_error_ = failure;
+			info_error_ = error{ code };
 			return;
 		}
+		detail::check(code);
+		if (props.kind == 0)
+			return;
 		initialize(props);
 	}
 
@@ -3911,7 +3973,7 @@ public:
 		return *this = std::span<const std::byte>{ other.data(), other.size() };
 	}
 
-	/// Submit byte initializer lists; an empty list submits no data.
+	/// Submit byte initialiser lists; an empty list submits no data.
 	draft_memory_buffer& operator=(std::initializer_list<std::byte> bytes)
 	{
 		return *this = std::span<const std::byte>{ bytes.begin(), bytes.size() };
@@ -3948,7 +4010,7 @@ inline draft_memory_buffer draft_memory{};
 
 namespace detail
 {
-/// Authenticated champion view initialized at startup; absent in draft perspectives.
+/// Authenticated champion view initialised at startup; absent in draft perspectives.
 inline std::optional<champion> cached_self = []() -> std::optional<champion>
 {
 	const auto handle = detail::sdk_my_champion();
@@ -4192,7 +4254,7 @@ namespace map
 	return position.x >= 0 && position.y >= 0 && position.x < width() && position.y < height();
 }
 
-/// Engine map symmetry captured during dynamic initialization.
+/// Engine map symmetry captured during dynamic initialisation.
 inline const symmetry cached_symmetry = []
 {
 	std::int32_t result{};
@@ -4233,7 +4295,7 @@ inline const symmetry cached_symmetry = []
 	return result;
 }
 
-/// Immutable terrain masks captured during dynamic initialization.
+/// Immutable terrain masks captured during dynamic initialisation.
 inline const bitboard cached_walls = detail::map_mask(0);
 /// Immutable bush occupancy for this map.
 inline const bitboard cached_bushes = detail::map_mask(1);
@@ -4266,7 +4328,7 @@ inline const bitboard cached_altars = detail::map_mask(3);
 	return cached_altars;
 }
 
-/// Both relative-team spawn masks, captured from the engine during dynamic initialization.
+/// Both relative-team spawn masks, captured from the engine during dynamic initialisation.
 inline const std::array<bitboard, 2> cached_spawn_regions = []
 {
 	std::array<bitboard, 2> result;
@@ -4416,34 +4478,66 @@ namespace detail
 	}
 	return handle_access::make_camp_group(static_cast<handle_camp_group_t>(group), info.gold, info.gems, respawn, std::move(camps));
 }
+
+/// Query every static camp group from the engine in one batched call.
+[[nodiscard]] inline std::vector<map::camp_group> load_camp_groups()
+{
+	std::vector<std::uint32_t> words(256);
+	std::uint32_t count{};
+	check(sdk_map_camp_layout(words.data(), static_cast<std::uint32_t>(words.size()), &count));
+	if (count > words.size())
+	{
+		words.resize(count);
+		check(sdk_map_camp_layout(words.data(), count, &count));
+	}
+	std::vector<map::camp_group> result;
+	for (std::size_t i = 0; i + 5 <= count;)
+	{
+		const auto group = words[i];
+		const auto gold = words[i + 1], gems = words[i + 2];
+		const auto respawn = static_cast<std::int32_t>(words[i + 3]);
+		const auto size = words[i + 4];
+		i += 5;
+		std::vector<cambc::camp> camps;
+		camps.reserve(size);
+		for (std::uint32_t m = 0; m < size && i + 4 <= count; ++m, i += 4)
+			camps.push_back(handle_access::make_camp(static_cast<handle_camp_t>(words[i]), static_cast<handle_camp_group_t>(group),
+				static_cast<camp_type>(words[i + 1]), vec2{ static_cast<std::int32_t>(words[i + 2]), static_cast<std::int32_t>(words[i + 3]) }));
+		result.push_back(handle_access::make_camp_group(static_cast<handle_camp_group_t>(group), gold, gems, respawn, std::move(camps)));
+	}
+	return result;
+}
+
+/// Query one physical camp's spawn info and group from the engine.
+[[nodiscard]] inline cambc::camp load_camp(std::uint32_t handle)
+{
+	camp_info spec{};
+	check(sdk_map_camp_info(handle, &spec));
+	std::uint32_t group{};
+	check(sdk_map_camp_group_of(handle, &group));
+	return handle_access::make_camp(static_cast<handle_camp_t>(handle), static_cast<handle_camp_group_t>(group),
+		static_cast<camp_type>(spec.type), vec2{ spec.x, spec.y });
+}
 } // namespace detail
 
 namespace map
 {
 
-/// Query physical camp groups from the engine on every call; throws in draft.
+/// Query physical camp groups from the engine on every call; also available in draft.
 [[nodiscard]] inline std::vector<camp_group> camp_groups()
 {
-	std::uint32_t count{};
-	detail::check(detail::sdk_map_num_camp_groups(&count));
-	std::vector<std::uint32_t> handles(count);
-	detail::check(detail::sdk_map_camp_groups(handles.data(), count, &count));
-	std::vector<camp_group> result;
-	result.reserve(count);
-	for (std::uint32_t i = 0; i < count; ++i)
-		result.push_back(detail::load_camp_group(handles[i]));
-	return result;
+	return detail::load_camp_groups();
 }
 
 /// Find a camp by spawn tile, querying the engine on every call; throws if there is no camp.
 /// @param position Spawn tile of the camp.
 [[nodiscard]] inline cambc::camp camp(vec2 position)
 {
-	for (const auto& group : camp_groups())
-		for (const auto& member : group)
-			if (member.spawn_position() == position)
-				return member;
-	throw std::out_of_range("no camp on tile");
+	std::uint32_t handle{};
+	const auto code = detail::sdk_map_camp_at(position.x, position.y, &handle);
+	if (code == static_cast<std::int32_t>(error_code::api_not_found)) throw std::out_of_range("no camp on tile");
+	detail::check(code);
+	return detail::load_camp(handle);
 }
 } // namespace map
 
@@ -4630,11 +4724,13 @@ inline void visible_tiles_into(bitboard& out)
 /// @param position Tile to query.
 [[nodiscard]] inline teleport teleport_at(vec2 position)
 {
-	if (has_teleport(position))
-		for (const auto& value : teleports())
-			if (value.position() == position)
-				return value;
-	throw error{ error_code::api_not_found, "no visible teleport at position" };
+	detail::teleport_info value{};
+	const auto code = detail::sdk_teleport_at(position.x, position.y, &value);
+	if (code == static_cast<std::int32_t>(error_code::api_not_in_vision) ||
+		code == static_cast<std::int32_t>(error_code::api_not_found))
+		throw error{ error_code::api_not_found, "no visible teleport at position" };
+	detail::check(code);
+	return teleport{ value };
 }
 
 /// Like `altar_lock_tiles`, but writes into `out` instead of returning a new board.
@@ -4732,11 +4828,7 @@ inline void altar_lock_tiles_into(bitboard& out)
 {
 	std::uint32_t handle{};
 	detail::check(detail::sdk_camp_at(position.x, position.y, &handle));
-	for (const auto& group : map::camp_groups())
-		for (const auto& member : group)
-			if (static_cast<handle_camp_t>(member) == static_cast<handle_camp_t>(handle))
-				return member;
-	throw std::out_of_range("invalid camp handle");
+	return detail::load_camp(handle);
 }
 
 /// Create a fresh view of the currently visible champion at a position.
@@ -4966,7 +5058,7 @@ inline void pick(champion_draft pick)
 
 namespace debug
 {
-/// Emit a debug dot on a tile using a packed 0xRRGGBB color.
+/// Emit a debug dot on a tile using a packed 0xRRGGBB colour.
 /// @param position Tile to mark.
 /// @param rgb Packed `0xRRGGBB` colour.
 inline void draw_dot(vec2 position, std::uint32_t rgb)
@@ -4974,7 +5066,7 @@ inline void draw_dot(vec2 position, std::uint32_t rgb)
 	detail::check(detail::sdk_debug_dot(position.x, position.y, rgb));
 }
 
-/// Emit a debug line between tiles using a packed 0xRRGGBB color.
+/// Emit a debug line between tiles using a packed 0xRRGGBB colour.
 /// @param from Start tile.
 /// @param to End tile.
 /// @param rgb Packed `0xRRGGBB` colour.
@@ -5037,6 +5129,36 @@ inline bool champion::move_towards(vec2 target) const
 }
 
 } // namespace cambc
+
+namespace cambc::detail
+{
+#ifdef CAMBC_DEBUG
+/// Fuel pause/resume guard behind the `debug_block` macro.
+struct DebugGuard
+{
+	DebugGuard() { sdk_fuel_pause(); }
+	~DebugGuard() { sdk_fuel_resume(); }
+	DebugGuard(const DebugGuard&) = delete;
+	DebugGuard& operator=(const DebugGuard&) = delete;
+};
+#endif
+} // namespace cambc::detail
+
+/// Run the statements without spending fuel when the bot is built in debug
+/// mode (`cambc run`, the default); skipped entirely in release mode
+/// (`--release`, and always on the platform). The free budget per block is
+/// 1000 turns, beyond which the rest of the block is charged; ending the
+/// turn inside a block closes the free window.
+/// A macro: the code runs inline — `break`/`continue` apply to the enclosing
+/// loop, `return` leaves the enclosing function and fuel resumes on the way
+/// out. In release mode the code is type-checked but never evaluated. Call
+/// it unqualified (`debug_block({ ... });`), not as `cambc::debug_block`,
+/// and use no preprocessor directives inside.
+#ifdef CAMBC_DEBUG
+#define debug_block(...) if (::cambc::detail::DebugGuard _cambc_debug_guard{}; true) { __VA_ARGS__ } else (void)0
+#else
+#define debug_block(...) if (false) { __VA_ARGS__ } else (void)0
+#endif
 
 /// Hashes both coordinates; consistent with vec2 equality.
 template <>

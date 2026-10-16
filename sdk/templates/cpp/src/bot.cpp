@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <span>
 #include <variant>
+#include <utility>
+#include <vector>
 
 using cambc::vec2;
 using cambc::team;
@@ -67,40 +69,47 @@ void Bot::buy_items() {
     if (count && me.can_buy(item, count)) me.buy(item, count);
 }
 
-// Make one basic attack if the target is already in attack range.
-template<class Target>
-bool attack_if_in_range(const Target& target) {
+// Compute the attack mask once, rather than once per visible target.
+template<class Targets>
+bool attack_first_in_range(const Targets& targets) {
     auto& me = cambc::self();
-    if (!me.can_attack() || !target.is_visible() || target.health() <= 0
-        || !me.attack_tiles().is_set(target.position())) {
-        return false;
+    if (targets.empty() || !me.can_attack()) return false;
+    const auto attack_tiles = me.attack_tiles();
+    for (const auto& target : targets) {
+        if (target.is_visible() && attack_tiles.is_set(target.position()) && target.health() > 0) {
+            me.attack(target);
+            return true;
+        }
     }
-    me.attack(target);
-    return true;
+    return false;
 }
 
 // Attack a camp already in range, otherwise move toward the nearest camp tiles.
 void farm_camps() {
-    for (const auto& camp : cambc::vision::camps())
-        if (attack_if_in_range(camp))
-            return;
+    if (attack_first_in_range(cambc::vision::camps())) return;
 
-    // Union every group's spawn tiles except visibly respawning groups.
-    cambc::bitboard goals;
-    goals.clear();
+    // Cache fixed spawn locations; only visible respawn state changes each turn.
+    static const auto camp_groups = [] {
+        std::vector<std::pair<cambc::map::camp_group, cambc::bitboard>> groups;
+        for (const auto& group : cambc::map::camp_groups()) groups.emplace_back(group, group.spawn_tiles());
+        return groups;
+    }();
+    static const auto camp_spawns = [] {
+        cambc::bitboard tiles;
+        tiles.clear();
+        for (const auto& [group, spawns] : camp_groups) tiles |= spawns;
+        return tiles;
+    }();
+    auto goals = camp_spawns;
     const auto visible = cambc::vision::visible_tiles();
-    for (const auto& group : cambc::map::camp_groups()) {
-        const bool group_visible = !(group.spawn_tiles() & visible).is_empty();
-        if (group_visible && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
-            continue;
-        goals |= group.spawn_tiles();
-    }
+    for (const auto& [group, spawns] : camp_groups)
+        if (!(spawns & visible).is_empty()
+            && std::holds_alternative<cambc::map::camp_group_respawning>(group.state()))
+            goals &= ~spawns;
 
     // Fresh vision after movement may reveal a camp already in range.
     if (move_towards_closest(goals))
-        for (const auto& camp : cambc::vision::camps())
-            if (attack_if_in_range(camp))
-                return;
+        attack_first_in_range(cambc::vision::camps());
 }
 
 void Bot::play_turn() {
@@ -136,9 +145,7 @@ void Bot::play_turn() {
     }
 
     // Attack the first enemy champion already in range.
-    for (const auto& enemy : cambc::vision::champions(team::enemy))
-        if (attack_if_in_range(enemy))
-            return;
+    if (attack_first_in_range(cambc::vision::champions(team::enemy))) return;
 
     // Bank any carried gems before farming.
     if (me.gem_count() > 0) {

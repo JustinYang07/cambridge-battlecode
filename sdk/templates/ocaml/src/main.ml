@@ -6,7 +6,7 @@ let () =
   let spawn = List.hd (Bitboard.positions (Game_map.spawn_region Team.Ally)) in
   let start = Option.to_list (Option.map Champion.position (self_champion_opt ())) in
   Random.full_init (Array.of_list (List.concat_map (fun p -> [p.Vec2.x; p.Vec2.y]) (spawn :: start)));
-  let bot = Bot.{ chosen_stat = None } in
+  let bot = Bot.{ chosen_stat = None; camp_layout = None } in
   while true do
     (try
       if is_draft () then Starter_draft.play ()

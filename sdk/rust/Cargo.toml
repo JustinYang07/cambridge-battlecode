@@ -7,4 +7,7 @@ edition = "2021"
 bitflags = "=2.9.4"
 bytemuck = "=1.23.2"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cambc_debug)'] }
+
 [workspace]

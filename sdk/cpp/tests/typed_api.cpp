@@ -1,7 +1,7 @@
 // Standalone SDK test with deterministic host responses; no live game is required.
+#include <unordered_set>
 #if defined(__wasm__)
 #undef __wasm__
-#include <unordered_set>
 #include <cambc.h>
 #define __wasm__ 1
 #else
@@ -171,6 +171,7 @@ cambc::vec2 mock_position{ 5, 6 };
 cambc::vec2 cast_position{};
 std::uint64_t visible_tiles{};
 bool camps_alive = true;
+bool camps_awake = false;
 std::int32_t mock_champion_team = 0, mock_my_team = 0;
 std::int32_t mock_ward_timer = 9;
 std::uint8_t mock_ward_disabled = 1;
@@ -347,6 +348,11 @@ extern "C"
 		*count = teleports_active && (visible_tiles & tile_bit({6, 1})) ? 1 : 0;
 		if (capacity && *count) out[0] = {0, 2, 1, {6, 1}, 5}; return 0;
 	}
+	std::int32_t sdk_teleport_at(std::int32_t x, std::int32_t y, teleport_info* out) {
+		std::int32_t has{}; if (const auto code = sdk_has_teleport(x, y, &has)) return code;
+		if (!has) return static_cast<int>(error_code::api_not_found);
+		*out = {0, 2, 1, {6, 1}, 5}; return 0;
+	}
 	std::int32_t sdk_ally_altar_lock_occupancy(std::uint64_t* out) { *out = visible_tiles & tile_bit({1, 1}); return 0; }
 	std::int32_t sdk_enemy_altar_lock_occupancy(std::uint64_t* out) { *out = visible_tiles & tile_bit({1, 1}); return 0; }
 	std::int32_t sdk_num_allies(std::uint32_t* out) { *out = 1; return 0; }
@@ -426,6 +432,29 @@ extern "C"
 		for (std::size_t i = 0; i < camp_handles.size(); ++i) if (handle == camp_handles[i]) { *out = camp_specs[i]; return 0; }
 		return static_cast<int>(error_code::api_invalid_camp_info);
 	}
+	std::int32_t sdk_map_camp_layout(std::uint32_t* out, std::uint32_t capacity, std::uint32_t* count) {
+		if (sdk_my_champion() == -1) return static_cast<int>(error_code::api_not_initialized);
+		std::vector<std::uint32_t> words;
+		for (const auto group : {21u, 7u}) {
+			words.insert(words.end(), {group, group * 10, group, 30, group == 21 ? 2u : 1u});
+			for (std::size_t i = group == 21 ? 0 : 2; i < (group == 21 ? 2 : 3); ++i)
+				words.insert(words.end(), {camp_handles[i], static_cast<std::uint32_t>(camp_specs[i].type),
+					static_cast<std::uint32_t>(camp_specs[i].x), static_cast<std::uint32_t>(camp_specs[i].y)});
+		}
+		*count = static_cast<std::uint32_t>(words.size());
+		std::copy_n(words.begin(), std::min(capacity, *count), out); return 0;
+	}
+	std::int32_t sdk_map_camp_group_of(std::uint32_t handle, std::uint32_t* out) {
+		for (std::size_t i = 0; i < camp_handles.size(); ++i)
+			if (handle == camp_handles[i]) { *out = i < 2 ? 21 : 7; return 0; }
+		return static_cast<int>(error_code::api_invalid_camp_info);
+	}
+	std::int32_t sdk_map_camp_at(std::int32_t x, std::int32_t y, std::uint32_t* out) {
+		if (x < 0 || y < 0 || x >= 8 || y >= 8) return static_cast<int>(error_code::api_bad_position);
+		for (std::size_t i = 0; i < camp_specs.size(); ++i)
+			if (camp_specs[i].x == x && camp_specs[i].y == y) { *out = camp_handles[i]; return 0; }
+		return static_cast<int>(error_code::api_not_found);
+	}
 	std::int32_t sdk_bc_camp_group_max_respawn(std::uint32_t, std::int32_t* out) { *out = 30; return 0; }
 	std::int32_t sdk_camp_group_cooldown(std::uint32_t, std::int32_t* out) {
 		if (!camp_timer) return static_cast<int>(error_code::api_camp_group_not_waiting_to_respawn);
@@ -446,6 +475,13 @@ extern "C"
 		if (const auto error = position_error({spec.x, spec.y})) return error;
 		if (!camps_alive) return static_cast<int>(error_code::api_not_found);
 		*out = {spec.x, spec.y, 25, 50, 12, 3, {1, 2}};
+		return 0;
+	}
+	std::int32_t sdk_camp_state(std::uint32_t handle, std::uint32_t* out) {
+		camp_info spec{}; const auto code = sdk_map_camp_info(handle, &spec);
+		if (code) return code;
+		if (const auto error = position_error({spec.x, spec.y})) return error;
+		*out = !camps_alive ? 0 : camps_awake ? 1 : 2;
 		return 0;
 	}
 	std::int32_t sdk_camp_design(std::int32_t, camp_design* out) {
@@ -710,17 +746,30 @@ void test_camp_vision()
 		throws<cambc::error>([&] { (void)cambc::vision::has_champion(position); });
 	}
 	assert(std::holds_alternative<cambc::map::camp_group_alive>(groups[0].state()));
+	assert(camp.state() == cambc::camp_state::asleep);
+	const auto sleeping_state = camp.state();
+	assert(sleeping_state.is_alive() && sleeping_state.is_asleep());
+	assert(!sleeping_state.is_dead() && !sleeping_state.is_awake());
+	assert(camp.is_alive() && camp.is_asleep() && !camp.is_awake() && !camp.is_dead());
+	camps_awake = true;
+	assert(camp.state() == cambc::camp_state::alive);
+	assert(camp.is_alive() && camp.is_awake() && !camp.is_asleep() && !camp.is_dead());
+	assert(sleeping_state.is_asleep()); // Predicates on a captured state never query the host.
+	camps_awake = false;
 	camp_timer = 7;
 	assert(std::get<cambc::map::camp_group_respawning>(groups[0].state()).timer == 7);
 	camp_timer = 0;
 	assert(std::get<cambc::map::camp_group_respawning>(groups[0].state()).timer == 0);
 	camps_alive = false;
+	assert(camp.state() == cambc::camp_state::dead);
+	assert(camp.is_dead() && !camp.is_alive() && !camp.is_awake() && !camp.is_asleep());
 	camp_timer.reset();
 	assert(std::holds_alternative<cambc::map::camp_group_reward_available>(groups[0].state()));
 	assert(!camp.is_visible() && cambc::vision::camps().empty() && !cambc::vision::has_camp({1, 1}));
 	assert(cambc::vision::camp_groups().size() == 1);
 	visible_tiles = 0;
 	assert(!camp.is_visible() && cambc::vision::camps().empty() && cambc::vision::champions().empty());
+	throws<cambc::error>([&] { (void)camp.state(); });
 	assert(cambc::vision::camp_groups().empty());
 	assert(champions.size() == 1 && camps.size() == 1 && visible_groups.size() == 1);
 	assert(static_cast<cambc::handle_champion_t>(champions[0]) == static_cast<cambc::handle_champion_t>(champion));

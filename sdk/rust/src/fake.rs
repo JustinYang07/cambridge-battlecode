@@ -311,6 +311,22 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                 }
                 "wards" => write_list(a, &s.wards),
                 "teleports" => write_list(a, &s.teleports),
+                "teleport_at" => {
+                    if a[0] >= 8 || a[1] >= 8 {
+                        return 96;
+                    }
+                    match s
+                        .teleports
+                        .iter()
+                        .find(|t| t.destination.x == a[0] as i32 && t.destination.y == a[1] as i32)
+                    {
+                        Some(t) => {
+                            put(a[2], *t);
+                            0
+                        }
+                        None => 98,
+                    }
+                }
                 "altar_locks" => write_list(a, &s.locks),
                 "ward_at" | "ally_ward_at" | "enemy_ward_at" | "camp_at" | "champion_at" => {
                     if a[0] >= 8 || a[1] >= 8 {
@@ -396,18 +412,10 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                     0
                 }
                 "map_num_camp_groups" => {
-                    if s.draft {
-                        return 94;
-                    }
                     put(a[0], 1u32);
                     0
                 }
-                "map_camp_groups" => {
-                    if s.draft {
-                        return 94;
-                    }
-                    write_truncated(a, &[5u32])
-                }
+                "map_camp_groups" => write_truncated(a, &[5u32]),
                 "map_camp_group" => {
                     put(a[1], sys::CampGroupInfo { gems: 4, gold: 10 });
                     0
@@ -432,6 +440,18 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                     );
                     0
                 }
+                "map_camp_layout" => write_truncated(a, &[5u32, 10, 4, 30, 2, 10, 2, 3, 3, 11, 2, 4, 3]),
+                "map_camp_group_of" => {
+                    put(a[1], 5u32);
+                    0
+                }
+                "map_camp_at" => match (a[0], a[1]) {
+                    (3, 3) | (4, 3) => {
+                        put(a[2], if a[0] == 3 { 10u32 } else { 11 });
+                        0
+                    }
+                    _ => 98,
+                },
                 "camp_group_state" => {
                     put(a[1], s.group_state);
                     0
@@ -540,6 +560,8 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                 | "debug_dot"
                 | "debug_line"
                 | "resign"
+                | "fuel_pause"
+                | "fuel_resume"
                 | "yield" => 0,
                 "bc_Bitboard_One" => {
                     put(a[0], u64::MAX);

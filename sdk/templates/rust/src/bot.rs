@@ -1,8 +1,9 @@
 // Champion decisions. main.rs dispatches here after the draft.
 use cambc::{
-    Bitboard, Champion,
+    Bitboard, CampGroup, Champion,
     DistanceField, ItemType as Item, Result, Team, Unit, Vec2,
 };
+use std::ops::Deref;
 
 fn me() -> Result<&'static Champion> {
     Ok(cambc::self_champion()?.expect("play starts after the draft"))
@@ -52,35 +53,47 @@ fn move_towards_closest(mut goals: Bitboard) -> Result<bool> {
     if step == origin { Ok(false) } else { me.move_absolute(step) }
 }
 
-// Make one basic attack if the target is already in attack range.
-fn attack_if_in_range(target: &Unit) -> Result<bool> {
+// Compute the attack mask once, rather than once per visible target.
+fn attack_first_in_range<T: Deref<Target = Unit>>(targets: &[T]) -> Result<bool> {
     let me = me()?;
-    if !me.can_attack()? || !target.is_visible()? || target.health()? <= 0.0
-        || !me.attack_tiles()?.is_set(target.position()?)? {
-        return Ok(false);
+    if targets.is_empty() || !me.can_attack()? { return Ok(false); }
+    let attack_tiles = me.attack_tiles()?;
+    for target in targets {
+        if target.is_visible()? && attack_tiles.is_set(target.position()?)? && target.health()? > 0.0 {
+            me.attack(target.deref())?;
+            return Ok(true);
+        }
     }
-    me.attack(target)?;
-    Ok(true)
+    Ok(false)
 }
 
-fn farm_camps() -> Result<()> {
+fn farm_camps(bot: &mut Bot) -> Result<()> {
     // Attack a camp already in range, otherwise move toward the nearest camp tiles.
-    for camp in cambc::vision::camps()? {
-        if attack_if_in_range(&camp)? { return Ok(()); }
-    }
+    if attack_first_in_range(&cambc::vision::camps()?)? { return Ok(()); }
 
-    let mut goals = Bitboard::new()?;
+    // Cache fixed spawn locations; only visible respawn state changes each turn.
+    if bot.camp_layout.is_none() {
+        let mut tiles = Bitboard::new()?;
+        let mut groups = Vec::new();
+        for group in cambc::map::camp_groups()? {
+            let spawns = group.spawn_tiles()?;
+            tiles.union_assign(&spawns)?;
+            groups.push((group, spawns));
+        }
+        bot.camp_layout = Some((tiles, groups));
+    }
+    let (spawns, groups) = bot.camp_layout.as_ref().unwrap();
+    let mut goals = spawns.clone();
     let visible = cambc::vision::visible_tiles()?;
-    for group in cambc::map::camp_groups()? {
-        if !group.spawn_tiles()?.intersect(&visible)?.is_empty()?
-            && matches!(group.state()?, cambc::CampGroupState::Respawning(_)) { continue; }
-        goals.union_assign(&group.spawn_tiles()?)?;
+    for (group, tiles) in groups {
+        if !tiles.intersect(&visible)?.is_empty()?
+            && matches!(group.state()?, cambc::CampGroupState::Respawning(_)) {
+            goals.intersect_assign(&tiles.complement()?)?;
+        }
     }
 
     if move_towards_closest(goals)? {
-        for camp in cambc::vision::camps()? {
-            if attack_if_in_range(&camp)? { return Ok(()); }
-        }
+        attack_first_in_range(&cambc::vision::camps()?)?;
     }
     Ok(())
 }
@@ -89,6 +102,7 @@ fn farm_camps() -> Result<()> {
 #[derive(Default)]
 pub struct Bot {
     chosen_stat: Option<usize>,
+    camp_layout: Option<(Bitboard, Vec<(CampGroup, Bitboard)>)>,
 }
 
 impl Bot {
@@ -125,9 +139,7 @@ impl Bot {
             return Ok(());
         }
 
-        for enemy in cambc::vision::champions(Some(Team::Enemy))? {
-            if attack_if_in_range(&enemy)? { return Ok(()); }
-        }
+        if attack_first_in_range(&cambc::vision::champions(Some(Team::Enemy))?)? { return Ok(()); }
 
         if me.gem_count()? > 0 {
             // Union all altar approach tiles: the field chooses the nearest reachable altar.
@@ -142,7 +154,7 @@ impl Bot {
             return Ok(());
         }
 
-        farm_camps()?;
+        farm_camps(self)?;
 
         cambc::self_champion()?.expect("gameplay champion").set_priority(1 + crate::random_number(100) as i32)
     }
