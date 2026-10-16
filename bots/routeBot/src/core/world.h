@@ -133,6 +133,8 @@ public:
     // Party rotation: allies (bit per slot) who worked the party camp we are on, and that camp.
     unsigned partyMates = 0;
     int partyCamp = -1;
+    // Chaining: the last camp we worked that died, and when (camps near it get a bonus for a while).
+    int chainFrom = -1, chainRound = -1000;
     float prevHp = -1;
 
     void refresh(bool firstTurn);

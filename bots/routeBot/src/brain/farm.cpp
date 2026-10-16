@@ -5,11 +5,13 @@
 #include "../combat/combat.h"
 #include "../core/comms.h"
 #include "../core/config.h"
+#include "../core/profile.h"
 #include "../core/trace.h"
 #include "../core/fuel.h"
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
 #include "../shop/shop.h"
+#include "../strategy/loop.h"
 #include "../strategy/mapplan.h"
 #include "../strategy/plan.h"
 #include "../strategy/regroup.h"
@@ -77,6 +79,21 @@ float centreBonus(const World& w, const GroupInfo& g) {
 }
 
 namespace {
+
+// Capture hand-off: of the allies at this dead camp (claiming it from within 6 tiles), the weakest
+// damage dealer holds the capture and takes the reward; the others move on to the next camp. With
+// enemies about, everyone holds it together.
+bool holdsCapture(const World& w, int groupId) {
+    if (!tune::capture_handoff) return true;
+    if (w.enemyPressure(Statics::get().groups[static_cast<std::size_t>(groupId)].center, tune::route_enemy_radius) > 0) return true;
+    const float mine = profile(w.type).farmPower;
+    for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
+        if (sl == w.slot || comms::claimOf(sl) != groupId || comms::claimBracket(sl) != 0) continue;
+        const float theirs = profile(w.allyTypes[static_cast<std::size_t>(sl)]).farmPower;
+        if (theirs < mine || (theirs == mine && sl > w.slot)) return false;
+    }
+    return true;
+}
 
 struct Candidate {
     const GroupInfo* group;
@@ -180,6 +197,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         const float escapeCost = engaged ? static_cast<float>(nav().escapeTurns(w)) * solo.hitting : 0.0f;
         if (fight.damage > budget) {
             o.mul("too strong", 0.05f);
+            if (g.id == loop::target()) loop::tooStrong(w, g.id);
         } else if (fight.damage + reserve + escapeCost > w.hp) {
             if (engaged) o.mul("would not survive", 0.02f);  // disengage now; heal will win
             else {
@@ -193,7 +211,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         // (lowest slot) moves on first; mates follow when a mate already claims the new camp. While
         // rotating, the party is on its way, so we are not "awaiting help".
         bool rotating = false;
-        if (tune::party_rotation && need > 1 && g.id != w.lastTarget && w.partyMates != 0) {
+        if (tune::party_rotation && loop::target() < 0 && need > 1 && g.id != w.lastTarget && w.partyMates != 0) {
             if (comms::claimersMask(g.id, w.slot) & w.partyMates) {
                 rotating = true;
                 o.mul("follow the party", tune::rotate_bonus);
@@ -212,11 +230,16 @@ Option scoreGroup(World& w, const Candidate& c) {
         // Once a fight has started, waiting for help is no longer an option: finish or leave.
         awaiting = need > 1 + claims && !engaged && !rotating;
         if (awaiting) {
-            o.mul("awaiting help", 0.7f);
-            o.turns("gather", 8.0f);
+            // On the loop the party is on its way (members follow each other's claims).
+            if (g.id != loop::target()) {
+                o.mul("awaiting help", 0.7f);
+                o.turns("gather", 8.0f);
+            }
             // Help that never arrives: stop camping this group.
-            if (w.lastTarget == g.id && w.waitingTurns > (claims > 0 ? tune::max_party_wait_claimed : tune::max_party_wait))
+            if (w.lastTarget == g.id && w.waitingTurns > (claims > 0 ? tune::max_party_wait_claimed : tune::max_party_wait)) {
                 o.mul("help not coming", 0.3f);
+                if (g.id == loop::target()) loop::tooStrong(w, g.id);
+            }
         }
         if (need > 1 && claims > 0) o.mul("join ally", 1.3f);
         // Under-levelled: build strength on wolves and clusters before taking elks.
@@ -227,6 +250,8 @@ Option scoreGroup(World& w, const Candidate& c) {
     } else {
         o.turns("capture", tune::capture_turns);
         if (owners) o.mul("nearer ally capturing", tune::ally_claim_factor);
+        // Capture hand-off: a loop mate stays for this one, we walk on to the next camp.
+        if (!holdsCapture(w, g.id)) o.mul("ally holds capture", tune::handoff_factor);
         // An enemy on the spawn tiles contests the capture: progress resets every round, so the
         // reward is not 5 turns away (both teams' Vargs sat on packs' cluster trading hits for 14
         // turns, scoring capture 2109 until one died). Winning the fight is the way to the reward.
@@ -248,7 +273,9 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("route", tune::route_bonus);
         o.c.note << "route";
     }
-    if (home >= 0 && region >= 0) {
+    bool raiding = false;
+    // Squad regions spread the team out; a farming loop already says where each party goes.
+    if (home >= 0 && region >= 0 && loop::target() < 0) {
         if (region == home) o.mul("home region", tune::home_region_bonus);
         else o.mul("other squad's region", tune::other_region_factor);
     }
@@ -263,6 +290,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (finish <= static_cast<float>(w.enemyRespawnAt) && bold > 0) {
             const float full = g.harmless ? tune::raid_cluster_factor : tune::raid_camp_factor;
             o.mul("raid: their team is down", 1.0f + (full - 1.0f) * bold);
+            raiding = true;
         }
     }
     // Their whole team is dead with time left to use it: take their nearest camps first. Ours will
@@ -270,7 +298,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (w.enemyBodies >= 2 && w.enemiesAlive == 0 && w.enemyRespawnAt - w.round >= tune::raid_min_window &&
         dist(g.center, statics.enemySpawnCenter) >= dist(g.center, statics.spawnCenter)) {
         const float bold = std::clamp((w.hpFrac() - 0.5f) / 0.5f, 0.0f, 1.0f);
-        if (bold > 0) o.mul("their team is dead: theirs first", 1.0f - (1.0f - tune::raid_own_half_factor) * bold);
+        if (bold > 0) {
+            o.mul("their team is dead: theirs first", 1.0f - (1.0f - tune::raid_own_half_factor) * bold);
+            raiding = true;
+        }
     }
     // Regrouping: stay with the spotter. Camps beside it are fine, the rest wait for the fight.
     if (regroup::active() && dist(g.center, regroup::at()) > tune::regroup_leash) o.mul("regrouping", tune::regroup_farm_factor);
@@ -304,6 +335,20 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("committed", tune::engaged_bonus + tune::focus_bonus_per_damage * done);
     }
     if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
+    // Chaining: right after taking a camp, its nearest camps (from the draft's walking distances)
+    // come first.
+    if (w.chainFrom >= 0 && w.chainFrom != g.id && w.round - w.chainRound <= tune::chain_rounds &&
+        mapplan::isNeighbour(w.chainFrom, g.id))
+        o.mul("next to the last camp", tune::chain_bonus);
+    // Farming loop: its current camp first, camps elsewhere only when clearly better (raids aside).
+    if (const int lt = loop::target(); lt >= 0) {
+        if (g.id == lt) {
+            o.mul("loop", tune::loop_bonus);
+            o.c.note << "loop";
+        } else if (!raiding && !loop::onLoop(g.id)) {
+            o.mul("off loop", tune::loop_off_factor);
+        }
+    }
     o.finish();
     return o;
 }
@@ -321,7 +366,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     for (const auto& g : statics.groups) {
@@ -399,14 +444,16 @@ void farm(World& w, std::vector<Option>& out) {
         ++scored;
         out.push_back(std::move(o));
     };
-    if (const int routeId = mapplan::routeGroup(); routeId >= 0)
-        for (int i = 0; i < n; ++i)
-            if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == routeId) {
-                auto c = pre[static_cast<std::size_t>(i)];
-                pre[static_cast<std::size_t>(i)].group = nullptr;
-                scoreOne(c);
-                break;
-            }
+    // The route's and the loop's camps are always scored, whatever their bounds.
+    for (const int forced : {mapplan::routeGroup(), loop::target()})
+        if (forced >= 0)
+            for (int i = 0; i < n; ++i)
+                if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
+                    auto c = pre[static_cast<std::size_t>(i)];
+                    pre[static_cast<std::size_t>(i)].group = nullptr;
+                    scoreOne(c);
+                    break;
+                }
     for (int round = 0; round < n; ++round) {
         // Selection instead of a full sort: we usually stop after a handful.
         int pick = -1;

@@ -31,7 +31,7 @@ inline constexpr float contested_camp_factor = 0.35f;  // an enemy champion was 
 inline constexpr int race_end_gems = 850;          // enemy banked this many: bank what we carry now
 inline constexpr float race_end_bank_boost = 6.0f;
 inline constexpr int enemy_spawn_radius = 7;       // fights this close to the enemy spawn are not worth taking
-inline constexpr float travel_weight = 4.0f;       // walking turns count this much in farm scores
+inline constexpr float travel_weight = 3.0f;       // walking turns count this much in farm scores
 inline constexpr int max_scored_groups = 6;        // fully score at most this many camp groups per turn
 inline constexpr int max_team_per_camp = 4;
 inline constexpr int max_party_wait_claimed = 10;  // ...also when allies have claimed it (was 30: 100-turn holds)
@@ -146,6 +146,27 @@ inline constexpr int route_max_round = 300;          // routes are the opening; 
 inline constexpr float route_end_hp = 0.45f;         // below this health the route ends
 inline constexpr int route_enemy_radius = 8;         // an enemy this close to the route camp ends the route
 inline constexpr int route_lookahead = 3;            // candidate camps per lookahead step
+
+// ---- farming loops (draft-planned cycles over camp groups; strategy/loop.h)
+inline constexpr bool loops = false;                 // A/B switch (lost to v1.11: -201 +/- 122)
+inline constexpr int loop_candidates = 18;           // camp groups the loop solver considers
+inline constexpr float loop_dps_scale = 6.0f;        // real damage vs the profile's farmPower (wolf trio: ~14 turns solo)
+inline constexpr float loop_party_overhead = 3.0f;   // turns a party loses walking in and spreading out
+inline constexpr int loop_max_sweeps = 4;            // local search passes per number of loops
+inline constexpr float loop_handoff_turns = 1.0f;    // capture cost per camp when one stays behind
+inline constexpr float loop_heal_hp = 0.6f;          // health spent between trips home
+inline constexpr float loop_split_factor = 0.9f;     // each extra loop's rates count this much less
+inline constexpr float loop_near_side = 0.45f;       // share of the spawn-to-spawn walk: full weight up to here
+inline constexpr float loop_far_side = 0.65f;        // ...down to loop_far_weight from here on
+inline constexpr float loop_far_weight = 0.35f;
+inline constexpr float loop_bonus = 2.5f;            // farm score multiplier for the loop's current camp
+inline constexpr float loop_off_factor = 0.6f;       // camps not on our loop
+inline constexpr int loop_max_wait = 8;              // a respawning loop camp is skipped if it is back later than this
+inline constexpr int loop_skip_rounds = 40;          // a loop camp too strong for us now is skipped this long
+inline constexpr unsigned long long draft_loop_floor = 190000;     // first draft turn: loop solving stops here
+inline constexpr unsigned long long draft_neighbour_floor = 260000; // first draft turn: nearest-camp lists stop here
+inline constexpr unsigned long long draft_neighbour_floor_late = 92000; // later picks: a little more, keeping planning fuel
+inline constexpr unsigned long long draft_loop_floor_late = 86000; // later picks: continue solving down to here
 inline constexpr float altar_time_weight = 1.0f;     // farm scores: walk to the altar, amortised over a bag
 inline constexpr float centre_band = 0.2f;           // centre: |our dist - their dist| <= this x spawn-to-spawn
 inline constexpr float centre_share = 0.4f;          // contest when the centre holds this share of income...
@@ -167,6 +188,13 @@ inline constexpr float raid_own_half_factor = 0.4f;  // ...our half's camps get 
 inline constexpr int regroup_radius = 10;            // allies this close to a sturdy spotter respond...
 inline constexpr int regroup_radius_squishy = 25;    // ...this close to a squishy one (not a tank, or below...
 inline constexpr float squishy_hp = 0.6f;            // ...this health)
+inline constexpr bool combat_call = true;            // a champion fighting enemy champions (anywhere) calls allies too
+// Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
+// distance from the draft) are worth more for a while.
+inline constexpr float chain_bonus = 1.5f;
+inline constexpr int chain_rounds = 30;              // how long the bonus lasts
+inline constexpr bool capture_handoff = true;        // one party member captures, the rest move on
+inline constexpr float handoff_factor = 0.1f;        // capture score for the members moving on
 inline constexpr float regroup_squishy_factor = 2.0f;  // regroup pull for a squishy spotter
 inline constexpr int regroup_enemy_radius = 8;       // the alert holds only while the enemy is this close to the spotter
 inline constexpr int regroup_arrive = 4;             // this close to the spotter counts as grouped

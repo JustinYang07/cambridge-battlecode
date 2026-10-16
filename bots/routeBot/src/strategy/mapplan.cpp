@@ -16,7 +16,7 @@ namespace {
 
 constexpr int kFar = 1 << 14;
 constexpr std::uint8_t kMagic = 0x52;  // 'R'
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kVersion = 3;
 constexpr std::size_t kHeader = 4 + 32;  // magic, version, flags, group count, centre bitmap
 
 // One BFS, exported so reads are local array lookups instead of host calls.
@@ -389,6 +389,418 @@ void ensureType(std::size_t t) {
 }
 } // namespace
 
+// ---- farming loops (draft): cyclic orienteering over camp groups
+//
+// A loop is a cycle a party repeats all game. Its rate is gems per round:
+//   rate = sum(value) / max(walk + sum(kill + capture) + bank + heal, max respawn + capture)
+// so a lap shorter than a camp's respawn gains nothing (the party would wait). Each camp's value is
+// weighted by how far toward the enemy it sits (our side counts in full). Solved by cheapest
+// insertion and then local search (2-opt, moving one camp, dropping, swapping in an unused camp),
+// for 1, 2 and 3 parallel loops; the best total wins. Every step is small and the state persists,
+// so solving stops at a fuel floor and resumes on the next draft turn. Draft fuel is dear (heap
+// allocations especially), so tours are fixed arrays and insertions are scored from running sums.
+namespace {
+
+struct LoopCand {
+    int g = 0;
+    float value = 0, gems = 0, resp = 0;
+    int dA = 0, dO = 0;
+    std::array<float, 7> kill{}, dmg{};  // by party size 1..6: turns to kill, damage per head
+    std::array<std::uint8_t, 7> ok{};    // a party this size can take it (its tank survives)
+};
+
+struct Tour {
+    int n = 0;
+    std::array<int, kMaxLoopLen> v{};  // indices into LS.c
+};
+
+// Running sums of a tour, enough to score it (and to score one insertion into it) in O(1).
+struct Sums {
+    float val = 0, gems = 0, serv = 0, dmg = 0, resp = 0, walk = 0, detour = 1e9f;
+    int dO = kFar;
+};
+
+struct Solution {
+    bool done = false;
+    int k = 0;
+    float total = 0;
+    std::array<int, kMaxLoops> m{};      // bodies per loop
+    std::array<Tour, kMaxLoops> tours;
+    std::array<float, kMaxLoops> rate{};
+};
+
+struct LoopSolver {
+    bool started = false, ready = false;
+    int bodies = 0;
+    float dps = 50, hp = 950, bankT = 50;
+    std::vector<LoopCand> c;
+    int nc = 0;
+    std::vector<std::uint16_t> d;  // nc x nc walking distances
+    int k = 1, phase = 0, sweeps = 0, move = 0;
+    bool cycleImproved = false;
+    Solution cur;
+    std::array<Sums, kMaxLoops> sums;
+    std::vector<std::uint8_t> used;
+    // Per loop and candidate: cheapest extra walk to insert it, and the edge (by its start camp).
+    std::array<std::vector<int>, kMaxLoops> insAdd, insFrom;
+    std::array<Solution, kMaxLoops + 1> best;  // finished solutions by k
+    unsigned long long insertCost = 15000, sweepCost = 15000, fuel = 0, setupFuel = 0;
+    int evals = 0;
+} LS;
+
+int dd(int a, int b) { return LS.d[static_cast<std::size_t>(a * LS.nc + b)]; }
+const LoopCand& cand(int i) { return LS.c[static_cast<std::size_t>(i)]; }
+std::size_t party(int m) { return static_cast<std::size_t>(std::clamp(m, 1, 6)); }
+
+// Detour to bank from the edge a -> b.
+float edgeDetour(int a, int b) { return static_cast<float>(cand(a).dA + cand(b).dA - dd(a, b)); }
+
+Sums sumsOf(const Tour& t, int m) {
+    Sums s;
+    const auto mi = party(m);
+    const float capCost = m > 1 ? tune::loop_handoff_turns : tune::capture_turns;
+    for (int i = 0; i < t.n; ++i) {
+        const auto& x = cand(t.v[static_cast<std::size_t>(i)]);
+        s.val += x.value;
+        s.gems += x.gems;
+        s.serv += x.kill[mi] + capCost;
+        s.dmg += x.dmg[mi];
+        s.resp = std::max(s.resp, x.resp);
+        s.dO = std::min(s.dO, x.dO);
+        if (t.n > 1) {
+            const int a = t.v[static_cast<std::size_t>(i)], b = t.v[static_cast<std::size_t>((i + 1) % t.n)];
+            s.walk += static_cast<float>(dd(a, b));
+            s.detour = std::min(s.detour, edgeDetour(a, b));
+        } else {
+            s.detour = 2.0f * static_cast<float>(x.dA);
+        }
+    }
+    return s;
+}
+
+float rateOf(const Sums& s, int m) {
+    if (s.val <= 0) return 0;
+    ++LS.evals;
+    const float mf = static_cast<float>(m);
+    // The bag is split across the party; each banks once it holds its bank target.
+    const float bank = std::min(1.0f, s.gems / (mf * LS.bankT)) * std::max(s.detour, 0.0f) + s.gems / (10.0f * mf);
+    // Damage taken per lap, paid back by trips home (recall, then the walk back).
+    const float heal = s.dmg / (tune::loop_heal_hp * LS.hp) * (tune::recall_turns + static_cast<float>(std::min(s.dO, 200)));
+    const float lap = std::max(s.walk + s.serv + bank + heal, s.resp + tune::capture_turns);
+    return s.val / std::max(lap, 1.0f);
+}
+
+float rateOf(const Tour& t, int m) { return rateOf(sumsOf(t, m), m); }
+
+void insertAt(Tour& t, int pos, int x) {
+    for (int i = t.n; i > pos; --i) t.v[static_cast<std::size_t>(i)] = t.v[static_cast<std::size_t>(i - 1)];
+    t.v[static_cast<std::size_t>(pos)] = x;
+    ++t.n;
+}
+
+void eraseAt(Tour& t, int pos) {
+    for (int i = pos; i + 1 < t.n; ++i) t.v[static_cast<std::size_t>(i)] = t.v[static_cast<std::size_t>(i + 1)];
+    --t.n;
+}
+
+void beginK(int k) {
+    LS.k = k;
+    LS.phase = 0;
+    LS.sweeps = 0;
+    LS.move = 0;
+    LS.cycleImproved = false;
+    LS.cur = Solution{};
+    LS.cur.k = k;
+    for (int l = 0; l < k && l < kMaxLoops; ++l) LS.cur.m[static_cast<std::size_t>(l)] = LS.bodies / k + (l < LS.bodies % k ? 1 : 0);
+    LS.sums = {};
+    LS.used.assign(static_cast<std::size_t>(LS.nc), 0);
+    for (auto& v : LS.insAdd) v.assign(static_cast<std::size_t>(LS.nc), 0);
+    for (auto& v : LS.insFrom) v.assign(static_cast<std::size_t>(LS.nc), -1);
+}
+
+// Cheapest gap for candidate ci in tour t (tours of 2+ camps): extra walk, and the gap's start camp.
+void scanGap(const Tour& t, int ci, int& add, int& from) {
+    add = 1 << 30;
+    from = -1;
+    for (int i = 0; i < t.n; ++i) {
+        const int a = t.v[static_cast<std::size_t>(i)], b = t.v[static_cast<std::size_t>((i + 1) % t.n)];
+        const int x = dd(a, ci) + dd(ci, b) - dd(a, b);
+        if (x < add) { add = x; from = a; }
+    }
+}
+
+// After inserting x between a and b in loop l: only gaps a->x and x->b are new; candidates whose
+// best gap was a->b (now gone) rescan.
+void updateGaps(int l, int a, int x, int b) {
+    const auto li = static_cast<std::size_t>(l);
+    const auto& t = LS.cur.tours[li];
+    for (int ci = 0; ci < LS.nc; ++ci) {
+        const auto c = static_cast<std::size_t>(ci);
+        if (LS.used[c]) continue;
+        if (t.n == 2 || LS.insFrom[li][c] == a || LS.insFrom[li][c] < 0) {
+            scanGap(t, ci, LS.insAdd[li][c], LS.insFrom[li][c]);
+            continue;
+        }
+        const int ax = dd(a, ci) + dd(ci, x) - dd(a, x), xb = dd(x, ci) + dd(ci, b) - dd(x, b);
+        if (ax < LS.insAdd[li][c]) { LS.insAdd[li][c] = ax; LS.insFrom[li][c] = a; }
+        if (xb < LS.insAdd[li][c]) { LS.insAdd[li][c] = xb; LS.insFrom[li][c] = x; }
+    }
+}
+
+// Position just after camp `from` in t.
+int posAfter(const Tour& t, int from) {
+    for (int i = 0; i < t.n; ++i)
+        if (t.v[static_cast<std::size_t>(i)] == from) return i + 1;
+    return t.n;
+}
+
+void startLoops(const std::vector<bc::champion_type>& predicted) {
+    LS.started = true;
+    const auto& s = Statics::get();
+    LS.bodies = std::clamp(static_cast<int>(predicted.size()), 1, 6);
+    float dps = 0, hp = 0, bank = 0;
+    for (auto t : predicted) {
+        const auto ch = champ(t);
+        dps += ch.dps;
+        hp += ch.hp;
+        bank += ch.bankTarget;
+    }
+    const float nb = static_cast<float>(std::max<std::size_t>(predicted.size(), 1));
+    LS.dps = std::max(dps / nb, 10.0f) * tune::loop_dps_scale;
+    LS.hp = std::max(hp / nb, 300.0f);
+    LS.bankT = std::max(bank / nb, 20.0f);
+
+    // Candidates: value per turn from spawn, our side weighted in full and the enemy's side less.
+    std::vector<std::pair<float, int>> rank;
+    std::vector<float> weight(static_cast<std::size_t>(A.n), 0);
+    for (int g = 0; g < A.n; ++g) {
+        const auto gi = static_cast<std::size_t>(g);
+        if (!A.farmable[gi] || A.dOur[gi] >= kFar) continue;
+        const float o = static_cast<float>(A.dOur[gi]);
+        const float r = A.dEnemy[gi] >= kFar ? 0.0f : o / std::max(o + static_cast<float>(A.dEnemy[gi]), 1.0f);
+        const float t = std::clamp((r - tune::loop_near_side) / (tune::loop_far_side - tune::loop_near_side), 0.0f, 1.0f);
+        weight[gi] = 1.0f - (1.0f - tune::loop_far_weight) * t;
+        const auto& grp = s.groups[gi];
+        rank.push_back({weight[gi] * value(grp) / (o + grp.totalHealth / LS.dps + tune::capture_turns), g});
+    }
+    std::sort(rank.begin(), rank.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+    if (static_cast<int>(rank.size()) > tune::loop_candidates) rank.resize(static_cast<std::size_t>(tune::loop_candidates));
+    for (const auto& [score, g] : rank) {
+        const auto gi = static_cast<std::size_t>(g);
+        const auto& grp = s.groups[gi];
+        LoopCand x;
+        x.g = g;
+        x.value = weight[gi] * value(grp);
+        x.gems = static_cast<float>(grp.gems);
+        x.resp = static_cast<float>(grp.respawn);
+        x.dA = std::min(altarDist(g), 200);
+        x.dO = A.dOur[gi];
+        const float soloKill = grp.totalHealth / LS.dps;
+        for (int m = 1; m <= 6; ++m) {
+            const auto mi = static_cast<std::size_t>(m);
+            // Parties do not kill m times faster: walking in and spreading out costs a few turns.
+            x.kill[mi] = m == 1 ? soloKill : tune::loop_party_overhead + soloKill / static_cast<float>(m);
+            // Monsters hit the nearest champion: the party's tank takes most of it.
+            const float tankHit = grp.harmless ? 0.0f : x.kill[mi] * grp.totalStrength * (m > 1 ? tune::party_focus_share : 1.0f);
+            x.dmg[mi] = grp.harmless ? 0.0f : x.kill[mi] * grp.totalStrength / static_cast<float>(m);
+            x.ok[mi] = tankHit <= tune::route_max_hp_use * LS.hp ? 1 : 0;
+        }
+        LS.c.push_back(x);
+    }
+    LS.nc = static_cast<int>(LS.c.size());
+    LS.d.assign(static_cast<std::size_t>(LS.nc * LS.nc), 0);
+    for (int a = 0; a < LS.nc; ++a)
+        for (int b = a + 1; b < LS.nc; ++b) {
+            const auto v = static_cast<std::uint16_t>(std::min(groupDist(cand(a).g, cand(b).g), 2000));
+            LS.d[static_cast<std::size_t>(a * LS.nc + b)] = v;
+            LS.d[static_cast<std::size_t>(b * LS.nc + a)] = v;
+        }
+    beginK(1);
+}
+
+// One insertion: the unused camp, loop and position that raise the rate most. False if none does.
+// Scored from the tour's running sums (the detour is optimistic: the replaced edge is not removed).
+bool insertStep() {
+    float bestGain = 1e-5f;
+    int bc_ = -1, bl = -1, bp = -1;
+    for (int l = 0; l < LS.k; ++l) {
+        const auto li = static_cast<std::size_t>(l);
+        const auto& t = LS.cur.tours[li];
+        if (t.n >= kMaxLoopLen) continue;
+        const int m = LS.cur.m[li];
+        const auto mi = party(m);
+        const float capCost = m > 1 ? tune::loop_handoff_turns : tune::capture_turns;
+        const auto& s = LS.sums[li];
+        const float base = LS.cur.rate[li];
+        for (int ci = 0; ci < LS.nc; ++ci) {
+            const auto& x = cand(ci);
+            if (LS.used[static_cast<std::size_t>(ci)] || !x.ok[mi]) continue;
+            Sums ns = s;
+            ns.val += x.value;
+            ns.gems += x.gems;
+            ns.serv += x.kill[mi] + capCost;
+            ns.dmg += x.dmg[mi];
+            ns.resp = std::max(ns.resp, x.resp);
+            ns.dO = std::min(ns.dO, x.dO);
+            int pos = t.n;
+            if (t.n == 0) {
+                ns.detour = 2.0f * static_cast<float>(x.dA);
+            } else if (t.n == 1) {
+                const int a = t.v[0];
+                ns.walk = static_cast<float>(2 * dd(a, ci));
+                ns.detour = std::min(edgeDetour(a, ci), edgeDetour(ci, a));
+            } else {
+                const int a = LS.insFrom[li][static_cast<std::size_t>(ci)];
+                if (a < 0) continue;
+                pos = posAfter(t, a);
+                const int b = t.v[static_cast<std::size_t>(pos % t.n)];
+                ns.walk += static_cast<float>(LS.insAdd[li][static_cast<std::size_t>(ci)]);
+                ns.detour = std::min({ns.detour, edgeDetour(a, ci), edgeDetour(ci, b)});
+            }
+            const float gain = rateOf(ns, m) - base;
+            if (gain > bestGain) { bestGain = gain; bc_ = ci; bl = l; bp = pos; }
+        }
+    }
+    if (bc_ < 0) return false;
+    const auto li = static_cast<std::size_t>(bl);
+    auto& t = LS.cur.tours[li];
+    insertAt(t, bp, bc_);
+    LS.used[static_cast<std::size_t>(bc_)] = 1;
+    LS.sums[li] = sumsOf(t, LS.cur.m[li]);
+    LS.cur.rate[li] = rateOf(LS.sums[li], LS.cur.m[li]);
+    if (t.n >= 2) updateGaps(bl, t.v[static_cast<std::size_t>((bp + t.n - 1) % t.n)], bc_, t.v[static_cast<std::size_t>((bp + 1) % t.n)]);
+    return true;
+}
+
+// One kind of local-search move over every loop (0: 2-opt, 1: move one camp, 2: drop a camp,
+// 3: swap in an unused camp). Split up so each step stays small on a 100k pick turn.
+bool improveSweep(int kind) {
+    bool improved = false;
+    for (int l = 0; l < LS.k; ++l) {
+        const auto li = static_cast<std::size_t>(l);
+        auto& t = LS.cur.tours[li];
+        const int m = LS.cur.m[li];
+        float r = LS.cur.rate[li];
+        auto tryKeep = [&](const Tour& alt) {
+            const float nr = rateOf(alt, m);
+            if (nr > r + 1e-6f) { r = nr; t = alt; improved = true; return true; }
+            return false;
+        };
+        auto at = [&](int i) { return t.v[static_cast<std::size_t>(((i % t.n) + t.n) % t.n)]; };
+        // 2-opt: reverse t[i..j]; scored only when it shortens the walk.
+        for (int i = 0; kind == 0 && t.n >= 4 && i < t.n - 1; ++i)
+            for (int j = i + 1; j < t.n; ++j) {
+                if (i == 0 && j == t.n - 1) continue;
+                if (dd(at(i - 1), at(j)) + dd(at(i), at(j + 1)) - dd(at(i - 1), at(i)) - dd(at(j), at(j + 1)) >= 0) continue;
+                Tour alt = t;
+                std::reverse(alt.v.begin() + i, alt.v.begin() + j + 1);
+                tryKeep(alt);
+            }
+        // Or-opt: move one camp to the gap where it costs least, when that shortens the walk.
+        for (int i = 0; kind == 1 && t.n >= 3 && i < t.n; ++i) {
+            const int x = at(i);
+            const int saved = dd(at(i - 1), x) + dd(x, at(i + 1)) - dd(at(i - 1), at(i + 1));
+            Tour rest = t;
+            eraseAt(rest, i);
+            int bestAdd = saved, bestPos = -1;
+            for (int j = 0; j < rest.n; ++j) {
+                const int u = rest.v[static_cast<std::size_t>(j)], v = rest.v[static_cast<std::size_t>((j + 1) % rest.n)];
+                const int add = dd(u, x) + dd(x, v) - dd(u, v);
+                if (add < bestAdd) { bestAdd = add; bestPos = j + 1; }
+            }
+            if (bestPos < 0) continue;
+            insertAt(rest, bestPos, x);
+            tryKeep(rest);
+        }
+        // Drop a camp whose time costs more than it brings.
+        for (int i = t.n - 1; kind == 2 && t.n > 1 && i >= 0; --i) {
+            const int x = t.v[static_cast<std::size_t>(i)];
+            Tour alt = t;
+            eraseAt(alt, i);
+            if (tryKeep(alt)) LS.used[static_cast<std::size_t>(x)] = 0;
+        }
+        // Swap an unused camp in for the loop camp nearest it.
+        const auto mi = party(m);
+        for (int ci = 0; kind == 3 && ci < LS.nc && t.n > 0; ++ci) {
+            if (LS.used[static_cast<std::size_t>(ci)] || !cand(ci).ok[mi]) continue;
+            int near = 0;
+            for (int i = 1; i < t.n; ++i)
+                if (dd(ci, t.v[static_cast<std::size_t>(i)]) < dd(ci, t.v[static_cast<std::size_t>(near)])) near = i;
+            Tour alt = t;
+            const int out = alt.v[static_cast<std::size_t>(near)];
+            alt.v[static_cast<std::size_t>(near)] = ci;
+            if (tryKeep(alt)) {
+                LS.used[static_cast<std::size_t>(out)] = 0;
+                LS.used[static_cast<std::size_t>(ci)] = 1;
+            }
+        }
+        if (!improved) continue;
+        LS.cur.rate[li] = r;
+        LS.sums[li] = sumsOf(t, m);
+        for (int ci = 0; t.n >= 2 && ci < LS.nc; ++ci)
+            if (!LS.used[static_cast<std::size_t>(ci)]) scanGap(t, ci, LS.insAdd[li][static_cast<std::size_t>(ci)], LS.insFrom[li][static_cast<std::size_t>(ci)]);
+    }
+    return improved;
+}
+
+void finishK() {
+    auto& s = LS.cur;
+    s.total = 0;
+    for (int l = 0; l < LS.k; ++l) s.total += s.rate[static_cast<std::size_t>(l)];
+    s.total *= std::pow(tune::loop_split_factor, static_cast<float>(LS.k - 1));
+    s.done = true;
+    LS.best[static_cast<std::size_t>(LS.k)] = s;
+    if (LS.k >= std::min(LS.bodies, kMaxLoops)) LS.ready = true;
+    else beginK(LS.k + 1);
+}
+
+// The best finished solution with at most `maxK` loops (the unfinished k = 1 if nothing finished).
+const Solution* bestLoops(int maxK) {
+    const Solution* pick = nullptr;
+    for (int k = 1; k <= kMaxLoops && k <= maxK; ++k) {
+        const auto& s = LS.best[static_cast<std::size_t>(k)];
+        if (s.done && (!pick || s.total > pick->total)) pick = &s;
+    }
+    if (!pick && LS.started && LS.k == 1) pick = &LS.cur;
+    return pick;
+}
+
+} // namespace
+
+void solveLoops(const std::vector<bc::champion_type>& predicted, unsigned long long floor) {
+    if (!tune::loops || !analysed()) return;
+    const auto start = bc::fuel_remaining();
+    try {
+        if (!LS.started) {
+            if (predicted.empty()) return;
+            startLoops(predicted);
+            LS.setupFuel = start - bc::fuel_remaining();
+        }
+        // Each step only starts when the most it has cost so far still fits above the floor.
+        while (!LS.ready && bc::fuel_remaining() > floor + (LS.phase == 0 ? LS.insertCost : LS.sweepCost)) {
+            const auto before = bc::fuel_remaining();
+            if (LS.phase == 0) {
+                if (!insertStep()) LS.phase = 1;
+                LS.insertCost = std::max(LS.insertCost, before - bc::fuel_remaining());
+            } else {
+                // Moves 0-3 are local search, 4 tries another insertion; a full cycle without any
+                // gain (or tune::loop_max_sweeps cycles) finishes this number of loops.
+                const bool better = LS.move < 4 ? improveSweep(LS.move) : insertStep();
+                LS.cycleImproved = LS.cycleImproved || better;
+                if (++LS.move == 5) {
+                    LS.move = 0;
+                    if (!LS.cycleImproved || ++LS.sweeps >= tune::loop_max_sweeps) finishK();
+                    LS.cycleImproved = false;
+                }
+                LS.sweepCost = std::max(LS.sweepCost, before - bc::fuel_remaining());
+            }
+        }
+    } catch (const bc::error&) {
+        LS.ready = true;  // keep whatever finished
+    }
+    LS.fuel += start - bc::fuel_remaining();
+}
+
 const Features& features() { return A.f; }
 
 float draftBonus(bc::champion_draft pick, int teamSize) {
@@ -430,10 +842,40 @@ std::vector<bc::champion_type> bodies(const std::vector<bc::champion_draft>& pic
     return out;
 }
 
+namespace {
+std::vector<std::array<std::uint8_t, 3>> neighbourCache;
+int neighbourNext = 0;
+} // namespace
+
+// Each farmable group's kNeighbours nearest farmable groups by walking distance (exact where the
+// draft built fields, estimated elsewhere), while fuel lasts above `floor`; resumes on the next
+// pick. Groups still missing use the in-game straight-line fallback.
+void buildNeighbours(unsigned long long floor) {
+    if (!analysed()) return;
+    if (neighbourCache.empty()) neighbourCache.assign(static_cast<std::size_t>(A.n), {255, 255, 255});
+    auto& out = neighbourCache;
+    for (int h = neighbourNext; h < A.n; neighbourNext = ++h) {
+        if (bc::fuel_remaining() < floor) return;
+        if (!A.farmable[static_cast<std::size_t>(h)]) continue;
+        std::array<std::pair<int, int>, 3> best;
+        best.fill({kFar, 255});
+        for (int g = 0; g < A.n; ++g) {
+            if (g == h || !A.farmable[static_cast<std::size_t>(g)]) continue;
+            const int d = groupDist(h, g);
+            if (d >= best[2].first) continue;
+            best[2] = {d, g};
+            for (int i = 2; i > 0 && best[static_cast<std::size_t>(i)].first < best[static_cast<std::size_t>(i - 1)].first; --i)
+                std::swap(best[static_cast<std::size_t>(i)], best[static_cast<std::size_t>(i - 1)]);
+        }
+        for (std::size_t i = 0; i < 3; ++i) out[static_cast<std::size_t>(h)][i] = static_cast<std::uint8_t>(best[i].second);
+    }
+}
+
 Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigned long long fuelFloor) {
     Plan p;
     if (!analysed()) return p;
     p.valid = true;
+    p.neighbours = neighbourCache;
     p.contestCentre = decideCentre(roster, teamSize);
     p.centre = A.centre;
     prepare(0);
@@ -516,6 +958,36 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
         }
         p.routes.push_back(r);
     }
+
+    // Farming loops: the best solution for this many bodies; tanks spread first, one per loop,
+    // then every champion joins the loop with the most room left.
+    if (const auto* sol = bestLoops(static_cast<int>(roster.size()))) {
+        const int k = sol->k;
+        std::array<int, kMaxLoops> room{};
+        const int nb = static_cast<int>(roster.size());
+        for (int l = 0; l < k; ++l) room[static_cast<std::size_t>(l)] = nb / k + (l < nb % k ? 1 : 0);
+        for (int l = 0; l < k; ++l) {
+            Loop lp;
+            lp.bodies = room[static_cast<std::size_t>(l)];
+            const auto& t = sol->tours[static_cast<std::size_t>(l)];
+            for (int i = 0; i < t.n; ++i) lp.camps.push_back(static_cast<std::uint8_t>(LS.c[static_cast<std::size_t>(t.v[static_cast<std::size_t>(i)])].g));
+            p.loops.push_back(lp);
+        }
+        std::vector<std::size_t> order2(roster.size());
+        for (std::size_t i = 0; i < order2.size(); ++i) order2[i] = i;
+        std::stable_sort(order2.begin(), order2.end(), [&](std::size_t a, std::size_t b) {
+            const auto& pa = profile(roster[a]);
+            const auto& pb = profile(roster[b]);
+            return pa.roles.tank * pa.survivability > pb.roles.tank * pb.survivability;
+        });
+        for (auto i : order2) {
+            int l = 0;
+            for (int j = 1; j < k; ++j)
+                if (room[static_cast<std::size_t>(j)] > room[static_cast<std::size_t>(l)]) l = j;
+            --room[static_cast<std::size_t>(l)];
+            p.loopOf.push_back({roster[i], static_cast<std::uint8_t>(l)});
+        }
+    }
     return p;
 }
 
@@ -533,6 +1005,20 @@ void write(const Plan& p) {
         bytes.push_back(static_cast<std::uint8_t>(r.len));
         for (int i = 0; i < r.len; ++i) bytes.push_back(r.steps[static_cast<std::size_t>(i)]);
     }
+    bytes.push_back(static_cast<std::uint8_t>(p.loops.size()));
+    for (const auto& l : p.loops) {
+        bytes.push_back(static_cast<std::uint8_t>(l.bodies));
+        bytes.push_back(static_cast<std::uint8_t>(std::min<std::size_t>(l.camps.size(), kMaxLoopLen)));
+        for (std::size_t i = 0; i < l.camps.size() && i < kMaxLoopLen; ++i) bytes.push_back(l.camps[i]);
+    }
+    bytes.push_back(static_cast<std::uint8_t>(p.loopOf.size()));
+    for (const auto& [t, l] : p.loopOf) {
+        bytes.push_back(static_cast<std::uint8_t>(t));
+        bytes.push_back(l);
+    }
+    bytes.push_back(static_cast<std::uint8_t>(std::min<std::size_t>(p.neighbours.size(), kMaxGroups)));
+    for (std::size_t i = 0; i < p.neighbours.size() && i < kMaxGroups; ++i)
+        for (auto v : p.neighbours[i]) bytes.push_back(v);
     bc::draft_memory = bytes;
 }
 
@@ -547,6 +1033,20 @@ std::string describe(const Plan& p) {
            (p.contestCentre ? " -> CONTEST" : " -> farm own side") + "; splash " +
            num(static_cast<long long>(f.splashShare * 100)) + "% gold " + num(static_cast<long long>(f.goldShare * 100)) +
            "% party " + num(static_cast<long long>(f.partyShare * 100)) + "%";
+    out += "; neighbours " + num(neighbourNext) + "/" + num(A.n);
+    if (LS.started) {
+        out += "; loops fuel " + num(static_cast<long long>(LS.fuel / 1000)) + "k (setup " + num(static_cast<long long>(LS.setupFuel / 1000)) + "k, insert " +
+               num(static_cast<long long>(LS.insertCost / 1000)) + "k, sweep " + num(static_cast<long long>(LS.sweepCost / 1000)) + "k) evals " + num(LS.evals) +
+               " cands " + num(LS.nc) + " k" + num(LS.k) + " phase " + num(LS.phase) + " totals";
+        for (int k = 1; k <= kMaxLoops; ++k) {
+            const auto& s = LS.best[static_cast<std::size_t>(k)];
+            out += " k" + num(k) + "=" + (s.done ? num(static_cast<long long>(s.total * 1000)) : std::string("-"));
+        }
+        for (std::size_t l = 0; l < p.loops.size(); ++l) {
+            out += "; loop" + num(static_cast<long long>(l)) + " x" + num(p.loops[l].bodies);
+            for (std::size_t i = 0; i < p.loops[l].camps.size(); ++i) out += (i ? ">g" : ": g") + num(p.loops[l].camps[i]);
+        }
+    }
     for (const auto& r : p.routes) {
         out += "; ";
         out += name(r.type);
@@ -581,10 +1081,56 @@ const Plan& read() {
             for (int i = 0; i < route.len; ++i) route.steps[static_cast<std::size_t>(i)] = at(pos++);
             readCache.routes.push_back(route);
         }
+        const int loops = std::min<int>(at(pos++), kMaxLoops);
+        for (int l = 0; l < loops; ++l) {
+            Loop lp;
+            lp.bodies = at(pos++);
+            const int len = std::min<int>(at(pos++), kMaxLoopLen);
+            for (int i = 0; i < len; ++i) lp.camps.push_back(at(pos++));
+            readCache.loops.push_back(lp);
+        }
+        const int owners = at(pos++);
+        for (int i = 0; i < owners; ++i) {
+            const auto t = static_cast<bc::champion_type>(at(pos++));
+            readCache.loopOf.push_back({t, at(pos++)});
+        }
+        const int nb = at(pos++);
+        readCache.neighbours.assign(static_cast<std::size_t>(nb), {255, 255, 255});
+        for (int i = 0; i < nb; ++i)
+            for (std::size_t j = 0; j < 3; ++j) readCache.neighbours[static_cast<std::size_t>(i)][j] = at(pos++);
     } catch (const std::exception&) {
         // Truncated or foreign memory: whatever decoded so far stands; the brain covers the rest.
     }
     return readCache;
+}
+
+bool isNeighbour(int groupId, int other) {
+    const auto& p = read();
+    if (groupId < 0 || other < 0) return false;
+    if (groupId < static_cast<int>(p.neighbours.size()) && p.neighbours[static_cast<std::size_t>(groupId)][0] != 255) {
+        for (auto v : p.neighbours[static_cast<std::size_t>(groupId)])
+            if (v == other) return true;
+        return false;
+    }
+    // No draft list: the kNeighbours nearest by straight-line distance, computed once per group.
+    static std::vector<std::array<int, 3>> local;
+    const auto& s = Statics::get();
+    if (local.empty()) local.assign(s.groups.size(), {-2, -2, -2});
+    auto& mine = local[static_cast<std::size_t>(groupId)];
+    if (mine[0] == -2) {
+        std::array<std::pair<int, int>, 3> best;
+        best.fill({kFar, -1});
+        for (const auto& g : s.groups) {
+            if (g.id == groupId || g.hasMonolith || (g.gems == 0 && g.gold == 0)) continue;
+            const int d = dist(g.center, s.groups[static_cast<std::size_t>(groupId)].center);
+            if (d >= best[2].first) continue;
+            best[2] = {d, g.id};
+            for (int i = 2; i > 0 && best[static_cast<std::size_t>(i)].first < best[static_cast<std::size_t>(i - 1)].first; --i)
+                std::swap(best[static_cast<std::size_t>(i)], best[static_cast<std::size_t>(i - 1)]);
+        }
+        for (std::size_t i = 0; i < 3; ++i) mine[i] = best[i].second;
+    }
+    return mine[0] == other || mine[1] == other || mine[2] == other;
 }
 
 bool isCentre(int groupId) {
@@ -642,6 +1188,8 @@ int routeGroup() {
     const auto step = mine->steps[static_cast<std::size_t>(stepIdx)];
     return step == kAltarStep ? -1 : step;
 }
+
+bool routeActive() { return followInit && !ended; }
 
 bool routeWantsBank(const World& w) {
     return !ended && mine && stepIdx < mine->len && mine->steps[static_cast<std::size_t>(stepIdx)] == kAltarStep &&

@@ -6,6 +6,7 @@
 #include "../core/statics.h"
 #include "../core/trace.h"
 #include "../core/world.h"
+#include "../brain/option.h"
 
 namespace bc = cambc;
 
@@ -35,13 +36,26 @@ void update(World& w) {
             if (e.hp > 0 && dist(e.pos, w.pos) <= tune::regroup_enemy_radius &&
                 dist(e.pos, s.spawnCenter) < dist(e.pos, s.enemySpawnCenter))
                 ++seen;
+    // Combat call: we fought an enemy champion last turn, or one close by is hitting us. Anywhere
+    // on the map: allies nearby come to us. Sent as a squishy call (the strong pull).
+    bool fighting = false;
+    if (tune::combat_call && w.alive && seen == 0) {
+        int close = 0;
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, w.pos) <= tune::regroup_enemy_radius) ++close;
+        const bool hitByThem = w.beingHit && w.incoming <= 0 && close > 0;  // hurt, and not by monsters
+        if (close > 0 && (w.lastOption == static_cast<int>(OptionKind::fight) || hitByThem)) {
+            seen = close;
+            fighting = true;
+        }
+    }
     // A fragile spotter (not a tank, or hurt) is the one that needs help: it calls harder.
-    const bool squishy = profile(w.type).survivability < 1.0f || w.hpFrac() < tune::squishy_hp;
+    const bool squishy = fighting || profile(w.type).survivability < 1.0f || w.hpFrac() < tune::squishy_hp;
     const bool mineAlert = alert.fresh && dist(w.pos, bc::vec2{alert.x, alert.y}) <= tune::regroup_arrive;
     bool spotter = false;
     if (seen > 0 && (!alert.fresh || mineAlert)) {
         comms::raiseAlert(w.pos.x, w.pos.y, seen, squishy, w.round);
-        if (!alert.fresh) trace().note("alert: enemy on our half");
+        if (!alert.fresh) trace().note(fighting ? "alert: fighting, calling allies" : "alert: enemy on our half");
         alert = comms::readAlert(w.round);
         spotter = true;
     }

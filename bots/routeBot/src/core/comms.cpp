@@ -71,6 +71,12 @@ unsigned claimersMask(int groupId, int exceptSlot) {
     return mask;
 }
 
+int claimOf(int slot) {
+    return slot >= 0 && slot < alert_byte ? groupOf(cache[static_cast<std::size_t>(slot)]) : -1;
+}
+
+int claimBracket(int slot) { return claimOf(slot) >= 0 ? bracketOf(cache[static_cast<std::size_t>(slot)]) : 3; }
+
 unsigned ownersMask(int groupId, int mySlot, int tiles) {
     const int mine = bracket(tiles);
     unsigned mask = 0;

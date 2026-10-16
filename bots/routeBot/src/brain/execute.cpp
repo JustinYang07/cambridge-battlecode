@@ -312,6 +312,15 @@ void execute(World& w, const Option& o) {
     }
     combat::support(w);
 
+    // Chaining: the camp we worked last turn is dead now (killed or captured): start the chain from it.
+    if ((w.lastOption == static_cast<int>(OptionKind::farm) || w.lastOption == static_cast<int>(OptionKind::capture)) &&
+        w.lastTarget >= 0 && w.lastTarget < static_cast<int>(w.groups.size()) && w.chainFrom != w.lastTarget) {
+        const auto st = w.groups[static_cast<std::size_t>(w.lastTarget)].status;
+        if (st == GroupStatus::reward || st == GroupStatus::respawning) {
+            w.chainFrom = w.lastTarget;
+            w.chainRound = w.round;
+        }
+    }
     if (w.lastOption == static_cast<int>(o.kind) && w.lastTarget == o.target) ++w.turnsOnOption;
     else w.turnsOnOption = 0;
     w.lastOption = static_cast<int>(o.kind);

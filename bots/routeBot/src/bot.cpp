@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
+#include "strategy/loop.h"
 #include "strategy/mapplan.h"
 #include "strategy/plan.h"
 #include "strategy/regroup.h"
@@ -78,6 +79,9 @@ void Bot::play_turn() {
         const int routeBefore = mapplan::routeGroup();
         mapplan::follow(w);
         if (mapplan::routeGroup() != routeBefore) w.forceReplan = true;
+        const int loopBefore = loop::target();
+        loop::update(w);
+        if (loop::target() != loopBefore) w.forceReplan = true;
         // Commit to a plan like a human would: rescoring every option costs most of a turn's
         // fuel, so only replan when something relevant changed.
         std::vector<Option> options;

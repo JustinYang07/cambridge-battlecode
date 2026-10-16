@@ -142,11 +142,8 @@ void play_draft() {
         // per-champion camp tables. Later picks (100k) only assign routes; an overrun draft turn
         // gets a random pick, so they build nothing expensive.
         mark();
-        if (mine.empty()) {
-            mapplan::buildFields(tune::draft_fuel_reserve);
-            mark();
-            mapplan::prepare(tune::draft_prepare_floor);
-        }
+        if (mine.empty()) mapplan::buildFields(tune::draft_fuel_reserve);
+        mapplan::buildNeighbours(mine.empty() ? tune::draft_neighbour_floor : tune::draft_neighbour_floor_late);
         mark();
         const auto& base = baseRoster(teamSize);
         for (std::size_t i = 0; i < base.size(); ++i)
@@ -163,6 +160,19 @@ void play_draft() {
             }
         std::stable_sort(options.begin(), options.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
         if (!options.empty()) fallback = options.front().pick;
+        // Farming loops: solved for the roster we expect (the best options now), continued on the
+        // later picks while fuel is spare; the last pick assigns the real roster to them.
+        if (mine.empty()) {
+            std::vector<bc::champion_draft> guess;
+            for (const auto& o : options)
+                if (static_cast<int>(guess.size()) < teamSize) guess.push_back(o.pick);
+            mapplan::solveLoops(mapplan::bodies(guess), tune::draft_loop_floor);
+            mark();
+            mapplan::prepare(tune::draft_prepare_floor);
+        } else {
+            mapplan::solveLoops({}, tune::draft_loop_floor_late);
+        }
+        mark();
     } catch (const std::exception& e) {
         planText = std::string("draft error: ") + e.what();
     }

@@ -49,12 +49,27 @@ struct Route {
     std::array<std::uint8_t, kMaxSteps> steps{};
 };
 
+// A farming loop (after the opening): a cycle over camp groups that a party of `bodies` champions
+// repeats all game, solved in the draft as cyclic orienteering (gems per round, where a lap shorter
+// than a camp's respawn gains nothing).
+inline constexpr int kMaxLoops = 3;
+inline constexpr int kMaxLoopLen = 16;
+struct Loop {
+    int bodies = 0;
+    std::vector<std::uint8_t> camps;  // group ids in visiting order
+};
+
 struct Plan {
     bool valid = false;          // analysis finished; otherwise champions use the brain alone
     bool contestCentre = false;
     std::vector<std::uint8_t> centre;  // per group: 1 if in the centre band
     std::vector<Route> routes;
+    std::vector<Loop> loops;
+    std::vector<std::pair<cambc::champion_type, std::uint8_t>> loopOf;  // champion -> loop index
+    // Per group: its nearest farmable groups by walking distance (kNeighbours, 255 = none).
+    std::vector<std::array<std::uint8_t, 3>> neighbours;
 };
+inline constexpr int kNeighbours = 3;
 
 // ---- draft side
 // Map features from the spawn fields: runs once (fits the first draft turn's 10x fuel).
@@ -72,6 +87,11 @@ const Features& features();
 float draftBonus(cambc::champion_draft pick, int teamSize);
 // Champion bodies a roster of picks gives (Cassi & Issac are two).
 std::vector<cambc::champion_type> bodies(const std::vector<cambc::champion_draft>& picks);
+// Solve (or continue solving) the farming loops for a team of `predicted` bodies while more than
+// `floor` fuel is left. The first call sets the team; later calls (empty roster) resume.
+void solveLoops(const std::vector<cambc::champion_type>& predicted, unsigned long long floor);
+// Nearest-camp lists (Plan::neighbours) while more than `floor` fuel is left; resumes next pick.
+void buildNeighbours(unsigned long long floor);
 // Below `fuelFloor` fuel, remaining champions get only their first camp (no lookahead).
 Plan planFor(const std::vector<cambc::champion_type>& roster, int teamSize, unsigned long long fuelFloor);
 void write(const Plan& p);
@@ -84,9 +104,14 @@ const Plan& read();                    // decoded from the draft memory snapshot
 void follow(World& w);
 // Camp group the route wants next (-1: no route or the route is over / at an altar step).
 int routeGroup();
+// The opening route is still running (it has priority over the loop).
+bool routeActive();
 // The route's current step is an altar visit and we carry gems.
 bool routeWantsBank(const World& w);
 bool isCentre(int groupId);
+// `other` is one of `groupId`'s nearest farmable groups (by walking distance, from the draft; by
+// straight-line distance if the draft plan is missing). Scales with the map, unlike a radius.
+bool isNeighbour(int groupId, int other);
 std::string routeText();
 
 } // namespace mapplan
