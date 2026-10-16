@@ -129,6 +129,8 @@ inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush
                                                  // 10 monster>treasure, 11 jungle>power>durability (casters focus)
 inline constexpr bool stat_matching = false;     // Ryth buys health (bonus hp -> strength), casters focus
 inline constexpr bool lock_own_altars = true;  // also lock unlocked altars on our side as we pass (A/B switch)
+inline constexpr bool break_altar_locks = true;   // bank at enemy-locked altars too: tributing attacks the lock (3 hits remove it)
+inline constexpr int lock_break_turns = 3;          // turns a lone champion needs to break one
 inline constexpr bool buy_altar_locks = true;   // keep an altar lock: cancel enemy tributes, lock enemy-side altars
 inline constexpr bool buy_tp_crystals = false;
 

@@ -29,18 +29,26 @@ void bank(World& w, std::vector<Option>& out) {
             if (k.first < 0 || carry.second < k.second) std::swap(k, carry);
         }
     }
-    int bestIdx = -1, bestTravel = Navigator::unreachable;
+    // An enemy altar lock is not a wall: tributing against it is converted into a basic attack on
+    // the lock, and three remove it (rules). Skipping locked altars lost elkring with a 720-gem
+    // lead: routeBot locked both altars, and we sat on 900 banked + a winning bag for 190 rounds.
+    // A locked altar costs the turns to break the lock instead.
+    int bestIdx = -1, bestTravel = Navigator::unreachable, bestCost = Navigator::unreachable;
+    bool bestLocked = false;
     for (auto [k, estimate] : nearest) {
-        if (k < 0 || estimate >= bestTravel) continue;  // walking never beats the estimate
+        if (k < 0 || estimate >= bestCost) continue;  // walking never beats the estimate
         const auto i = static_cast<std::size_t>(k);
         if (!w.mayInvade() && w.theirHalf(altars[i])) continue;  // no invading without a numbers lead
+        bool locked = false;
         try {
-            if (bc::vision::has_altar_lock(altars[i]) && bc::vision::altar_lock_at(altars[i]).is_enemy()) continue;
+            locked = bc::vision::has_altar_lock(altars[i]) && bc::vision::altar_lock_at(altars[i]).is_enemy();
         } catch (const bc::error&) {
         }
+        if (locked && !tune::break_altar_locks) continue;
         const int exact = fields::toAltar(k, w.pos);
         const int d = exact >= 0 ? exact : nav().distToRange(w, altars[i], 1);
-        if (d < bestTravel) { bestTravel = d; bestIdx = k; }
+        const int cost = d + (locked ? tune::lock_break_turns : 0);
+        if (cost < bestCost) { bestCost = cost; bestTravel = d; bestIdx = k; bestLocked = locked; }
     }
     if (bestIdx < 0) return;
 
@@ -52,6 +60,10 @@ void bank(World& w, std::vector<Option>& out) {
     const float gems = static_cast<float>(w.gems);
     o.add("bag", gems * gemValue(w));
     o.turns("travel", w.walkTurns(static_cast<float>(bestTravel)));
+    if (bestLocked) {
+        o.turns("break their lock", static_cast<float>(tune::lock_break_turns));
+        o.c.note << "locked: breaking it";
+    }
     o.turns("tribute", std::ceil(gems / 10.0f));
     // Alone, a full bag is an invitation: bank at a lower bag size.
     const bool alone = w.alliesWithin(w.pos, 6) == 0;
