@@ -131,4 +131,59 @@ void Statics::init() {
     } catch (const bc::error&) {
         // Keep every group reachable rather than lose them all.
     }
+    // Pockets a dash can enter: flood fill from each sealed group's neighbouring tiles, then the
+    // landing tile nearest the group with a legal dash from a tile we can walk to.
+    dashBlock = terrain & ~bc::map::holes();
+    try {
+        for (auto& g : groups) {
+            if (g.reachable || g.tiles.empty()) continue;
+            bc::bitboard seeds;
+            seeds.clear();
+            for (auto t : g.tiles) seeds.draw_chebyshev(t, 1.0f);
+            seeds = seeds & ~terrain & ~g.tileMask;
+            if (seeds.is_empty()) continue;
+            bc::distance_field field;
+            bc::bitboard pocket;
+            field.compute(terrain, seeds, pocket);
+            pocket = pocket & ~reach;
+            int best = 1 << 20;
+            for (auto p : pocket.positions()) {
+                if (g.tileMask.is_set(p)) continue;
+                bc::bitboard near;
+                near.clear();
+                near.draw_chebyshev(p, 2.0f);
+                for (auto e : (near & reach).positions()) {
+                    if (!dashLegal(e, p)) continue;
+                    const int cost = dist(p, g.center) * 4 + dist(e, spawnCenter);
+                    if (cost < best) { best = cost; g.dashFrom = e; g.dashTo = p; }
+                }
+            }
+            if (best < (1 << 20)) {
+                g.dashIn = true;
+                g.pocket = pocket | g.tileMask;
+            }
+        }
+    } catch (const bc::error&) {
+        for (auto& g : groups) g.dashIn = false;
+    }
+}
+
+bool Statics::dashLegal(bc::vec2 from, bc::vec2 to) const {
+    const int d = dist(from, to);
+    if (d < 1 || d > 2 || to.x < 0 || to.y < 0 || to.x >= width || to.y >= height || terrain.is_set(to)) return false;
+    if (d == 1) return true;
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dy = -1; dy <= 1; ++dy) {
+            const bc::vec2 m{from.x + dx, from.y + dy};
+            if (m.x < 0 || m.y < 0 || m.x >= width || m.y >= height || dist(m, to) > 1) continue;
+            if (!dashBlock.is_set(m)) return true;
+        }
+    return false;
+}
+
+const GroupInfo* Statics::pocketAt(bc::vec2 tile) const {
+    if (reach.is_set(tile)) return nullptr;
+    for (const auto& g : groups)
+        if (g.dashIn && g.pocket.is_set(tile)) return &g;
+    return nullptr;
 }

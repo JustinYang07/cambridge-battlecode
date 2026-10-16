@@ -108,7 +108,23 @@ struct Candidate {
     int travel, wait;
     bc::vec2 nearest;
     float bound;  // optimistic score: no option for this group can score higher
+    bool dash = false;  // a sealed group we get into (and out of) by dashing
 };
+
+// Sealed group a dash can get into, for a champion that has a dash.
+bool dashable(const World& w, const GroupInfo& g) {
+    return tune::dash_pockets && !g.reachable && g.dashIn && w.kit.dashRange >= 2.0f;
+}
+// Walking + dashing distance to a sealed group's nearest tile (from outside: to the dash tile,
+// one dash, then on from the landing tile; from inside: straight there).
+int dashTravel(const World& w, const GroupInfo& g, bc::vec2& nearest) {
+    const bc::vec2 from = g.pocket.is_set(w.pos) ? w.pos : g.dashTo;
+    int best = 1 << 20;
+    for (auto t : g.tiles)
+        if (dist(from, t) < best) { best = dist(from, t); nearest = t; }
+    if (g.pocket.is_set(w.pos)) return best;
+    return static_cast<int>(static_cast<float>(dist(w.pos, g.dashFrom)) * 1.25f) + 1 + best;
+}
 
 Option scoreGroup(World& w, const Candidate& c) {
     const auto& statics = Statics::get();
@@ -377,6 +393,13 @@ Option scoreGroup(World& w, const Candidate& c) {
             o.mul("off loop", tune::loop_off_factor);
         }
     }
+    // Sealed pocket: only we get in (no party), and leaving costs the walk back to the landing
+    // tile plus a dash (the 8-round cooldown is over by the time the camp is down).
+    if (c.dash) {
+        o.turns("dash out", static_cast<float>(dist(c.nearest, g.dashTo) + tune::dash_exit_turns));
+        if (o.need > 1) o.mul("dash: solo only", 0.05f);
+        o.c.note << "dash in";
+    }
     o.finish();
     return o;
 }
@@ -402,11 +425,13 @@ void farm(World& w, std::vector<Option>& out) {
         if (n >= kMax) break;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         if (g.gems == 0 && g.gold == 0) continue;
-        if (!g.reachable) continue;  // sealed off from our spawn: cannot be walked to
+        const bool dash = dashable(w, g);
+        if (!g.reachable && !dash) continue;  // sealed off from our spawn: cannot be walked to
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         // Exact walking distance once its field exists (a tighter bound prunes more groups),
         // otherwise Chebyshev distance, which walking never beats.
-        int cheb = fields::toGroup(g.id, w.pos);
+        bc::vec2 unused;
+        int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
         // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
         // captured on foot, so it is not a farming option (it used to be scored by straight-line
         // distance, and champions stood still for 1,500 rounds trying to path to it).
@@ -431,7 +456,7 @@ void farm(World& w, std::vector<Option>& out) {
         // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
         // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
         const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
-        pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier};
+        pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, dash};
     }
     fuel::mark("farm.pre");
 
@@ -452,7 +477,9 @@ void farm(World& w, std::vector<Option>& out) {
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         int travel = Navigator::unreachable;
-        if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
+        if (c.dash) {
+            travel = std::max(0, dashTravel(w, g, c.nearest) - reach);
+        } else if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
             if (tune::skip_field_unreachable && d >= Navigator::unreachable) return;  // no walking path (see above)
             // Precomputed field: one local read. Aim at the straight-line nearest tile.
             if (d < Navigator::unreachable) travel = std::max(0, d - reach);

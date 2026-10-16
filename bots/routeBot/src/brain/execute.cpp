@@ -340,8 +340,20 @@ void execute(World& w, const Option& o) {
     else comms::clear(w.slot);
 
     switch (o.kind) {
-    case OptionKind::farm: farmGroup(w, statics.groups[static_cast<std::size_t>(o.target)], o.need); break;
-    case OptionKind::capture: capture(w, statics.groups[static_cast<std::size_t>(o.target)]); break;
+    case OptionKind::farm:
+    case OptionKind::capture: {
+        const auto& g = statics.groups[static_cast<std::size_t>(o.target)];
+        // A sealed group: dash into its pocket first.
+        if (!g.reachable && g.dashIn && !g.pocket.is_set(w.pos)) {
+            nav().enterPocket(w, g);
+            combat::act(w, combat::Focus{.groupId = g.id}, false);
+        } else if (o.kind == OptionKind::farm) {
+            farmGroup(w, g, o.need);
+        } else {
+            capture(w, g);
+        }
+        break;
+    }
     case OptionKind::bank: bank(w, o.target); break;
     case OptionKind::heal: heal(w); break;
     case OptionKind::flee: flee(w); break;

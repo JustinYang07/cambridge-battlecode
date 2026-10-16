@@ -110,7 +110,10 @@ public:
     // from us (its distance to our tile grew since we last saw it, within 2 rounds).
     bool enemyMovingAway(int index, cambc::vec2 now) const;
     // Gems-only mode: from tune::gems_only_round, while the enemy has banked tune::gems_only_lag more gems.
-    bool gemsOnly() const { return round >= tune::gems_only_round && enemyGems - teamGems >= tune::gems_only_lag; }
+    bool gemsOnly() const {
+        return round >= tune::gems_only_round &&
+               (enemyGems - teamGems >= tune::gems_only_lag || (tune::gems_only_when_none && teamGems == 0));
+    }
     // The tile is on their half (nearer their spawn than ours).
     bool theirHalf(cambc::vec2 p) const;
     int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
