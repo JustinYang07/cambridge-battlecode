@@ -5,6 +5,7 @@
 #include "../core/comms.h"
 #include "../core/config.h"
 #include "../nav/navigator.h"
+#include "../strategy/cohesion.h"
 #include "../strategy/regroup.h"
 #include "scorers.h"
 
@@ -24,7 +25,10 @@ void fight(World& w, std::vector<Option>& out) {
                 theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
                 ++theirCount;
             }
-        const auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
+        auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
+        // Measured on traced fights: the target loses ~0.2x the damage per round our side's
+        // stats promise (allies not all on it, targets stepping out of range, lost turns).
+        ours.dps *= tune::fight_our_dps_scale;
         const float turnsToKill = e.hp / ours.dps;
         const float edge = (ours.hp / theirDps) / std::max(theirHp / ours.dps, 0.1f);
         // We are the one they can reach first: alone in front, we may die before the target does.
@@ -61,6 +65,27 @@ void fight(World& w, std::vector<Option>& out) {
         const float missing = std::clamp(1.0f - e.hp / std::max(e.maxHp, 1.0f), 0.0f, 1.0f);
         if (missing > 0.05f) o.mul("enemy hurt", 1.0f + tune::fight_hurt_bonus * missing);
         if (e.channeling) o.mul("interrupt channel", 1.5f);
+        // Gems-only mode (we are behind): fight harder, but only as a group: 2+ of us near the target
+        // and at least as many of us as of them there. A lone champion's fights are unchanged.
+        if (w.gemsOnly() && tune::gems_only_group_fight != 1.0f) {
+            int us = 1, them = 0;
+            for (const auto& a : w.allies)
+                if (dist(a.pos, e.pos) <= tune::favour_radius) ++us;
+            for (const auto& x : w.enemies)
+                if (x.hp > 0 && dist(x.pos, e.pos) <= tune::favour_radius) ++them;
+            if (us >= 2 && us >= them) o.mul("behind: group fight", tune::gems_only_group_fight);
+        }
+        // No chasing: an enemy out of our reach and moving away is leaving; let it go.
+        if (tune::no_chase_factor != 1.0f && !e.channeling && dist(w.pos, e.pos) > w.range && w.enemyMovingAway(e.index, e.pos))
+            o.mul("it is leaving", tune::no_chase_factor);
+        if (!w.mayInvade() && !e.channeling && w.theirHalf(e.pos)) o.mul("their half: no lead", tune::no_invade_factor);
+        // Fight as a group: with less than half the active team around us, leave it unless the
+        // target is channelling or is the one hitting us.
+        if (tune::cohesion && !e.channeling && cohesion::activeCount() >= 3) {
+            const int withUs = 1 + w.alliesWithin(w.pos, tune::favour_radius);
+            const bool hittingUs = w.beingHit && w.incoming <= 0 && dist(e.pos, w.pos) <= e.range;
+            if (withUs * 2 < cohesion::activeCount() && !hittingUs) o.mul("group not here", tune::cohesion_alone_fight);
+        }
         // After the early game, fights on their half are where we die (lanes: nearly half our
         // mid-game deaths, after chasing or fighting there). Farm instead. A channelling enemy and a
         // raid (their team down) are still worth it.

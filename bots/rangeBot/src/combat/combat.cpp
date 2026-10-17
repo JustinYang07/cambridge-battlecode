@@ -35,17 +35,23 @@ SpellShape shape(const bc::ability& a) {
 CampSeen* campInRange(World& w, int groupId, int range) {
     // Keep hitting last turn's target until it dies; otherwise dangerous monsters first
     // (strength per remaining health), then the weakest.
-    for (auto& c : w.camps)
-        if (c.pos == w.lastAttacked && c.handle && c.hp > 0 && dist(c.pos, w.pos) <= range &&
-            (groupId < 0 || c.groupId == groupId))
-            return &c;
+    // rangeBot (camp_focus_fire): no stickiness, and ties broken by tile, so every champion on a
+    // camp picks the same monster from the same readings: the first one hurt becomes everyone's
+    // target (each champion kept its own wolf and the party split its damage).
+    if (!tune::camp_focus_fire)
+        for (auto& c : w.camps)
+            if (c.pos == w.lastAttacked && c.handle && c.hp > 0 && dist(c.pos, w.pos) <= range &&
+                (groupId < 0 || c.groupId == groupId))
+                return &c;
     CampSeen* best = nullptr;
     float bestKey = -1;
     for (auto& c : w.camps) {
         if (!c.handle || c.hp <= 0 || dist(c.pos, w.pos) > range) continue;
         if (groupId >= 0 && c.groupId != groupId) continue;
         const float key = (c.strength + 1.0f) / std::max(c.hp, 1.0f);
-        if (key > bestKey) { bestKey = key; best = &c; }
+        const bool tieWins = tune::camp_focus_fire && best && std::abs(key - bestKey) <= 1e-7f * std::max(key, bestKey) &&
+                             (c.pos.x < best->pos.x || (c.pos.x == best->pos.x && c.pos.y < best->pos.y));
+        if (key > bestKey * (tune::camp_focus_fire ? 1.0f + 1e-7f : 1.0f) || tieWins) { bestKey = std::max(key, bestKey); best = &c; }
     }
     return best;
 }

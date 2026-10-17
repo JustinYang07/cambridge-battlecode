@@ -100,7 +100,10 @@ const std::vector<bc::champion_draft>& baseRoster(int teamSize) {
     using D = bc::champion_draft;
     static const std::vector<D> ranged{D::cassi_and_issac, D::stellar, D::tavi, D::varg, D::ren};
     static const std::vector<D> small{D::cassi_and_issac, D::varg, D::ren, D::stellar, D::tavi};
-    return teamSize <= 3 ? small : ranged;
+    // Mite's 3-pick roster on open maps: Ren, Stellar, Cassi & Issac (Varg last).
+    static const std::vector<D> mite{D::cassi_and_issac, D::ren, D::stellar, D::varg, D::tavi};
+    if (teamSize <= 3) return tune::draft_mite_small ? mite : small;
+    return ranged;
 }
 
 // Picks outside the tested roster that strong map features can promote (a gold-heavy map for

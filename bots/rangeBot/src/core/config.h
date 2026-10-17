@@ -15,6 +15,17 @@ inline constexpr float centre_zone = 0.5f;          // the centre: radius below 
 
 // ---- party rotation: a party moves on together instead of waiting out its camp's respawn
 inline constexpr bool party_rotation = true;        // A/B switch
+inline constexpr bool move_on_all_game = true;        // rangeBot: a camp a teammate holds is no option for the rest of us (they move on), all game
+inline constexpr bool capture_board = false;          // rangeBot: announce captures in shared byte 5 (teams of <=5 bodies; off: -129 +/- 132, idle 16 -> 3 rounds but no gain)
+inline constexpr bool bank_by_recall = true;          // rangeBot: bank via recall + walk from spawn when quicker
+inline constexpr float bank_recall_margin = 3.0f;
+inline constexpr bool bank_recall_any_altar = true;   // rangeBot: after a recall, bank at the altar nearest spawn
+inline constexpr bool bank_recall_combo = true;       // rangeBot: a recall-bank also counts the heal and shopping it gives     // ...by at least this many turns
+inline constexpr bool capture_step_off = true;        // rangeBot: off a capture's tiles when a teammate keeps it (all game)
+inline constexpr float party_full_factor = 0.3f;     // rangeBot: a party camp nearer allies already claim in full: x this (1: off)
+inline constexpr float ranged_cover_share = 0.15f;   // rangeBot: ranged on a camp a melee ally claims expects this share of monster hits (0: off)
+inline constexpr bool capture_keeper_mobile = false;   // rangeBot: ...then one with a dash (banks sooner)
+inline constexpr bool camp_focus_fire = false;         // rangeBot: every champion on a camp hits the same monster (no per-champion stickiness)
 inline constexpr bool capture_keeper_not_tank = true;  // rangeBot: the capture keeper is not the tank when another champion is on the tiles
 inline constexpr int rotate_capture_rounds = 150;  // rangeBot: ...only in the opening (all game: ~250 more lost turns a game)
 inline constexpr bool rotate_on_capture = true;     // rangeBot: a teammate capturing our party camp ends it for the rest of the party (rows: they walked back to the first wolves)
@@ -234,7 +245,7 @@ inline constexpr unsigned long long draft_loop_floor = 190000;     // first draf
 inline constexpr unsigned long long draft_neighbour_floor = 260000; // first draft turn: nearest-camp lists stop here
 inline constexpr unsigned long long draft_neighbour_floor_late = 92000; // later picks: a little more, keeping planning fuel
 inline constexpr unsigned long long draft_loop_floor_late = 86000; // later picks: continue solving down to here
-inline constexpr float altar_time_weight = 1.0f;     // farm scores: walk to the altar, amortised over a bag
+inline constexpr float altar_time_weight = 0.0f;     // farm scores: walk to the altar, amortised over a bag
 inline constexpr float centre_band = 0.2f;           // centre: |our dist - their dist| <= this x spawn-to-spawn
 inline constexpr float centre_share = 0.4f;          // contest when the centre holds this share of income...
 inline constexpr int centre_rules_needed = 2;        // ...and at least this many of the other 3 rules hold

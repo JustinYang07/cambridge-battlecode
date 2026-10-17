@@ -33,6 +33,7 @@ void bank(World& w, std::vector<Option>& out) {
     for (auto [k, estimate] : nearest) {
         if (k < 0 || estimate >= bestTravel) continue;  // walking never beats the estimate
         const auto i = static_cast<std::size_t>(k);
+        if (!w.mayInvade() && w.theirHalf(altars[i])) continue;  // no invading without a numbers lead
         try {
             if (bc::vision::has_altar_lock(altars[i]) && bc::vision::altar_lock_at(altars[i]).is_enemy()) continue;
         } catch (const bc::error&) {
@@ -54,7 +55,8 @@ void bank(World& w, std::vector<Option>& out) {
     o.turns("tribute", std::ceil(gems / 10.0f));
     // Alone, a full bag is an invitation: bank at a lower bag size.
     const bool alone = w.alliesWithin(w.pos, 6) == 0;
-    const float target = w.role().bankTarget * (alone ? tune::alone_bank_factor : 1.0f);
+    const float early = w.round < tune::early_bank_round ? tune::early_bank_factor : 1.0f;
+    const float target = w.role().bankTarget * early * (alone ? tune::alone_bank_factor : 1.0f);
     o.mul("bag fullness", std::pow(std::min(gems / target, 1.5f), 1.5f));
     if (alone) o.c.note << "alone";
     if (w.teamGems + w.gems >= 1000) o.mul("wins the game", 20.0f);

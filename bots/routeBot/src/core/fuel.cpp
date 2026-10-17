@@ -53,6 +53,7 @@ unsigned long long used() {
 static std::string format(const std::array<Section, 16>& list, std::size_t n, bool wasSplit) {
     std::string out = wasSplit ? "SPLIT" : "";
     for (std::size_t i = 0; i < n; ++i) {
+        if (list[i].used < 2500) continue;  // keep the note short: only sections that matter
         if (!out.empty()) out += ' ';
         out += list[i].name;
         out += ' ';

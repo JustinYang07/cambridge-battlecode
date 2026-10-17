@@ -1105,12 +1105,21 @@ const Plan& read() {
 }
 
 bool isNeighbour(int groupId, int other) {
-    const auto& p = read();
     if (groupId < 0 || other < 0) return false;
+    const auto n = neighboursOf(groupId);
+    return n[0] == other || n[1] == other || n[2] == other;
+}
+
+std::array<int, 3> neighboursOf(int groupId) {
+    const auto& p = read();
+    if (groupId < 0) return {-1, -1, -1};
     if (groupId < static_cast<int>(p.neighbours.size()) && p.neighbours[static_cast<std::size_t>(groupId)][0] != 255) {
-        for (auto v : p.neighbours[static_cast<std::size_t>(groupId)])
-            if (v == other) return true;
-        return false;
+        std::array<int, 3> out{-1, -1, -1};
+        for (std::size_t i = 0; i < 3; ++i) {
+            const auto v = p.neighbours[static_cast<std::size_t>(groupId)][i];
+            out[i] = v == 255 ? -1 : static_cast<int>(v);
+        }
+        return out;
     }
     // No draft list: the kNeighbours nearest by straight-line distance, computed once per group.
     static std::vector<std::array<int, 3>> local;
@@ -1130,7 +1139,7 @@ bool isNeighbour(int groupId, int other) {
         }
         for (std::size_t i = 0; i < 3; ++i) mine[i] = best[i].second;
     }
-    return mine[0] == other || mine[1] == other || mine[2] == other;
+    return mine;
 }
 
 bool isCentre(int groupId) {

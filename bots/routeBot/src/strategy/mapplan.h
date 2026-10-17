@@ -112,6 +112,8 @@ bool isCentre(int groupId);
 // `other` is one of `groupId`'s nearest farmable groups (by walking distance, from the draft; by
 // straight-line distance if the draft plan is missing). Scales with the map, unlike a radius.
 bool isNeighbour(int groupId, int other);
+// The (up to 3) nearest camp groups to `groupId`; -1 where there is none.
+std::array<int, 3> neighboursOf(int groupId);
 std::string routeText();
 
 } // namespace mapplan

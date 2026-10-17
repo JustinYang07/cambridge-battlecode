@@ -45,7 +45,7 @@ bool farmWhileWaiting(World& w, const GroupInfo& g) {
     const GroupInfo* best = nullptr;
     int bestDist = 1 << 20;
     for (const auto& other : statics.groups) {
-        if (!other.harmless || dist(other.center, g.center) > tune::wait_farm_radius) continue;
+        if (!other.harmless || !other.reachable || dist(other.center, g.center) > tune::wait_farm_radius) continue;
         const auto& mem = w.groups[static_cast<std::size_t>(other.id)];
         if (mem.status == GroupStatus::respawning) continue;
         if ((other.tileMask & w.dangerExcept(g.id)).is_empty() == false) continue;
@@ -125,6 +125,9 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             for (auto t : g.tiles) goals |= nav().standTiles(w, t, 1);
         // Never stand on a spawn tile unless capturing: an occupied tile stops the whole group respawning.
         goals = goals & ~g.tileMask;
+        // Only tiles we can walk to: a camp sealed in a pocket made every goal unreachable and the
+        // whole team stood still for 800 turns (ambush).
+        if (const auto open = goals & Statics::get().reach; !open.is_empty()) goals = open;
         // Monsters hit the nearest champion: ranged allies stand at full range so whoever is
         // closer (ideally the tank) soaks the hits.
         if (w.ranged) {
@@ -220,6 +223,30 @@ std::vector<bc::vec2> nearbyThreats(const World& w) {
     return threats;
 }
 
+// Where to retreat: the nearest ally (seen, or the camp a teammate claims) that is further from
+// the threat than we are and within tune::retreat_ally_radius, so the chaser meets two of us.
+// Spawn (-1,-1) otherwise.
+bc::vec2 retreatTarget(const World& w) {
+    const auto& s = Statics::get();
+    bc::vec2 threat{-1, -1};
+    int threatD = 1 << 20;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) < threatD) { threatD = dist(e.pos, w.pos); threat = e.pos; }
+    if (threat.x < 0) return {-1, -1};
+    bc::vec2 best{-1, -1};
+    int bestD = tune::retreat_ally_radius + 1;
+    auto consider = [&](bc::vec2 p) {
+        const int d = dist(p, w.pos);
+        if (d >= 2 && d < bestD && dist(p, threat) > threatD) { bestD = d; best = p; }
+    };
+    for (const auto& a : w.allies) consider(a.pos);
+    for (int sl = 0; sl < w.allyCount && sl < comms::alert_byte; ++sl) {
+        const int g = sl == w.slot ? -1 : comms::claimOf(sl);
+        if (g >= 0 && g < static_cast<int>(s.groups.size())) consider(s.groups[static_cast<std::size_t>(g)].center);
+    }
+    return best;
+}
+
 void heal(World& w) {
     auto& me = bc::self();
     if (w.atSpawn) {
@@ -240,6 +267,12 @@ void heal(World& w) {
     for (const auto& g : w.ghosts)
         if (w.round - g.round <= 1 && dist(g.pos, w.pos) <= g.range + 5) enemyClose = true;
     if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit)) {
+        // Toward an ally first when one is near and away from the threat: the chaser meets two of us.
+        if (const auto ally = retreatTarget(w); ally.x >= 0 && nav().stepToward(w, ally, 1, true, &avoid)) {
+            trace().note("enemy close: retreating to an ally");
+            combat::act(w, combat::Focus{}, false);
+            return;
+        }
         trace().note("enemy close: walking home around it");
         nav().stepToward(w, Statics::get().allySpawn, true, &avoid, Statics::get().spawnCenter);
         combat::act(w, combat::Focus{}, false);
@@ -270,6 +303,15 @@ void heal(World& w) {
 void flee(World& w) {
     std::vector<bc::vec2> threats;
     for (const auto& e : w.enemies) threats.push_back(e.pos);
+    // Toward an ally away from the threat, around enemy reach; else out of reach, else home.
+    if (const auto ally = retreatTarget(w); ally.x >= 0) {
+        const auto avoid = w.enemyReach();
+        if (nav().stepToward(w, ally, 1, true, &avoid)) {
+            trace().note("fleeing to an ally");
+            combat::act(w, combat::Focus{}, false);
+            return;
+        }
+    }
     if (!nav().stepEscape(w) && !nav().stepAway(w, threats, 6)) nav().stepToward(w, Statics::get().allySpawn, true);
     combat::act(w, combat::Focus{}, false);
 }
@@ -298,14 +340,27 @@ void execute(World& w, const Option& o) {
     else comms::clear(w.slot);
 
     switch (o.kind) {
-    case OptionKind::farm: farmGroup(w, statics.groups[static_cast<std::size_t>(o.target)], o.need); break;
-    case OptionKind::capture: capture(w, statics.groups[static_cast<std::size_t>(o.target)]); break;
+    case OptionKind::farm:
+    case OptionKind::capture: {
+        const auto& g = statics.groups[static_cast<std::size_t>(o.target)];
+        // A sealed group: dash into its pocket first.
+        if (!g.reachable && g.dashIn && !g.pocket.is_set(w.pos)) {
+            nav().enterPocket(w, g);
+            combat::act(w, combat::Focus{.groupId = g.id}, false);
+        } else if (o.kind == OptionKind::farm) {
+            farmGroup(w, g, o.need);
+        } else {
+            capture(w, g);
+        }
+        break;
+    }
     case OptionKind::bank: bank(w, o.target); break;
     case OptionKind::heal: heal(w); break;
     case OptionKind::flee: flee(w); break;
     case OptionKind::fight: fight(w, o); break;
     case OptionKind::wait:
         if (o.target == 2) nav().stepToward(w, o.at, tune::regroup_arrive - 1, true, &w.danger);  // regroup
+        else if (o.target == 3) nav().stepToward(w, o.at, 5, true);                             // hunt (their spawn is not walkable)
         else if (!w.atSpawn) nav().stepToward(w, statics.allySpawn, false, nullptr, statics.spawnCenter);
         combat::act(w, combat::Focus{}, false);
         break;

@@ -71,6 +71,8 @@ unsigned claimersMask(int groupId, int exceptSlot) {
     return mask;
 }
 
+bool active(int slot) { return slot >= 0 && slot < alert_byte && cache[static_cast<std::size_t>(slot)] != 0; }
+
 int claimOf(int slot) {
     return slot >= 0 && slot < alert_byte ? groupOf(cache[static_cast<std::size_t>(slot)]) : -1;
 }

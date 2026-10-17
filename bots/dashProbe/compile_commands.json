@@ -1,0 +1,20 @@
+[
+  {
+    "command": "C:\\Users\\Matthew\\AppData\\Local\\cambc\\wasi-sdk-33\\bin\\clang++.exe --target=wasm32-wasip1 --sysroot=C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot -IC:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/sdk/cpp -isystem C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\bot.cpp.obj -c C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\bot.cpp --sysroot=\"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "C:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/bots/dashProbe/.cambc/build",
+    "file": "C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\bot.cpp",
+    "output": "CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\bot.cpp.obj"
+  },
+  {
+    "command": "C:\\Users\\Matthew\\AppData\\Local\\cambc\\wasi-sdk-33\\bin\\clang++.exe --target=wasm32-wasip1 --sysroot=C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot -IC:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/sdk/cpp -isystem C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\draft.cpp.obj -c C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\draft.cpp --sysroot=\"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "C:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/bots/dashProbe/.cambc/build",
+    "file": "C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\draft.cpp",
+    "output": "CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\draft.cpp.obj"
+  },
+  {
+    "command": "C:\\Users\\Matthew\\AppData\\Local\\cambc\\wasi-sdk-33\\bin\\clang++.exe --target=wasm32-wasip1 --sysroot=C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot -IC:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/sdk/cpp -isystem C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/cmake/../../share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1 -O3 -DNDEBUG -std=c++20 -msimd128 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -o CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\main.cpp.obj -c C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\main.cpp --sysroot=\"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot\" -isystem \"C:/Users/Matthew/AppData/Local/cambc/wasi-sdk-33/share/wasi-sysroot/include/wasm32-wasip1/eh/c++/v1\"",
+    "directory": "C:/Users/Matthew/Desktop/UNSW/cambridge-battlecode/bots/dashProbe/.cambc/build",
+    "file": "C:\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\main.cpp",
+    "output": "CMakeFiles\\bot.dir\\C_\\Users\\Matthew\\Desktop\\UNSW\\cambridge-battlecode\\bots\\dashProbe\\src\\main.cpp.obj"
+  }
+]

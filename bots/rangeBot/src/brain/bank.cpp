@@ -7,12 +7,23 @@
 #include "../core/config.h"
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
+#include "../shop/shop.h"
 #include "../strategy/mapplan.h"
 #include "scorers.h"
 
 namespace bc = cambc;
 
 namespace scorers {
+
+// Turns to bank at `altarIdx` by recalling home and walking from spawn (a large number when not
+// worth considering: off, already home, or the altar's field is not built yet).
+float recallBankTurns(const World& w, int altarIdx) {
+    if (!tune::bank_by_recall || w.atSpawn || altarIdx < 0) return 1e9f;
+    const int fromSpawn = fields::toAltar(altarIdx, Statics::get().spawnCenter);
+    if (fromSpawn < 0 || fromSpawn >= Navigator::unreachable) return 1e9f;
+    return tune::recall_turns + w.walkTurns(static_cast<float>(fromSpawn));
+}
+
 
 void bank(World& w, std::vector<Option>& out) {
     if (w.gems < tune::bank_min_gems) return;
@@ -59,7 +70,42 @@ void bank(World& w, std::vector<Option>& out) {
     o.c.target << 'a' << bestIdx;
     const float gems = static_cast<float>(w.gems);
     o.add("bag", gems * gemValue(w));
-    o.turns("travel", w.walkTurns(static_cast<float>(bestTravel)));
+    // Recall first when that is quicker: 5 turns home, then the walk from spawn (rows: walking the
+    // bag from the far wolves took ~40 rounds; their team recalled and banked in ~25).
+    float travel = w.walkTurns(static_cast<float>(bestTravel));
+    float viaHome = recallBankTurns(w, bestIdx);
+    // After a recall the nearest altar is the one nearest spawn, not the one nearest us.
+    if (tune::bank_recall_any_altar && viaHome < 1e8f) {
+        for (int i = 0; i < static_cast<int>(altars.size()); ++i) {
+            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)]))) continue;
+            bool locked = false;
+            try {
+                locked = bc::vision::has_altar_lock(altars[static_cast<std::size_t>(i)]) &&
+                         bc::vision::altar_lock_at(altars[static_cast<std::size_t>(i)]).is_enemy();
+            } catch (const bc::error&) {
+            }
+            if (locked) continue;
+            if (const float t = recallBankTurns(w, i); t < viaHome) {
+                viaHome = t;
+                o.target = i;
+                o.at = altars[static_cast<std::size_t>(i)];
+                o.c.target.clear();
+                o.c.target << 'a' << i;
+            }
+        }
+    }
+    if (viaHome + tune::bank_recall_margin < travel) {
+        travel = viaHome;
+        o.c.note << "recall first; ";
+        // The recall also heals us fully on spawn and opens the shop: one trip for all three.
+        if (tune::bank_recall_combo) {
+            const float missing = std::clamp(1.0f - w.hpFrac(), 0.0f, 1.0f);
+            if (missing > 0.05f) o.add("heals on the way", missing * missing * 60.0f);
+            if (const auto buy = shop::affordable(w); buy.shards >= tune::shop_min_shards || buy.completes)
+                o.add("shops on the way", static_cast<float>(buy.shards) * tune::shop_shard_value * 0.5f);
+        }
+    }
+    o.turns("travel", travel);
     if (bestLocked) {
         o.turns("break their lock", static_cast<float>(tune::lock_break_turns));
         o.c.note << "locked: breaking it";

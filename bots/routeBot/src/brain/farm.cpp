@@ -11,6 +11,7 @@
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
 #include "../shop/shop.h"
+#include "../strategy/cohesion.h"
 #include "../strategy/loop.h"
 #include "../strategy/mapplan.h"
 #include "../strategy/plan.h"
@@ -107,7 +108,23 @@ struct Candidate {
     int travel, wait;
     bc::vec2 nearest;
     float bound;  // optimistic score: no option for this group can score higher
+    bool dash = false;  // a sealed group we get into (and out of) by dashing
 };
+
+// Sealed group a dash can get into, for a champion that has a dash.
+bool dashable(const World& w, const GroupInfo& g) {
+    return tune::dash_pockets && !g.reachable && g.dashIn && w.kit.dashRange >= 2.0f;
+}
+// Walking + dashing distance to a sealed group's nearest tile (from outside: to the dash tile,
+// one dash, then on from the landing tile; from inside: straight there).
+int dashTravel(const World& w, const GroupInfo& g, bc::vec2& nearest) {
+    const bc::vec2 from = g.pocket.is_set(w.pos) ? w.pos : g.dashTo;
+    int best = 1 << 20;
+    for (auto t : g.tiles)
+        if (dist(from, t) < best) { best = dist(from, t); nearest = t; }
+    if (g.pocket.is_set(w.pos)) return best;
+    return static_cast<int>(static_cast<float>(dist(w.pos, g.dashFrom)) * 1.25f) + 1 + best;
+}
 
 Option scoreGroup(World& w, const Candidate& c) {
     const auto& statics = Statics::get();
@@ -156,7 +173,9 @@ Option scoreGroup(World& w, const Candidate& c) {
     // Allies whose claim outranks ours: nearer to the camp, or as near and an earlier slot. Only they
     // keep us off a solo camp; a claim from across the map no longer does (it blocked the nearest
     // champion in 188 of 513 walk-pasts in the v1 A/B).
-    const unsigned owners = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
+    unsigned owners = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
+    // Cohesion: following the leader onto its camp is the point, not a clash over a solo camp.
+    if (g.id == cohesion::leaderCamp() && cohesion::leader() >= 0) owners &= ~(1u << cohesion::leader());
     if (o.kind == OptionKind::farm) {
         const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
         // Health we must keep to walk out of reach afterwards (monsters do not chase).
@@ -202,7 +221,14 @@ Option scoreGroup(World& w, const Candidate& c) {
         // stood inside a sleeping camp's range made the verdict flip with every step in and out
         // (Varg alternated farm / heal-first on collision for 50+ rounds).
         const float escapeCost = engaged ? static_cast<float>(nav().escapeTurns(w)) * solo.hitting : 0.0f;
-        if (fight.damage > budget) {
+        // Gem rally: an ally claims a gem camp that needs a party. Judge it with a full party and
+        // pull towards it (stampede's only gems sit in one elk camp: one champion held it alone for
+        // 750 turns while the rest farmed gold, each judging it too strong for two).
+        const bool gemRally = tune::gem_rally_bonus != 1.0f && g.gems > 0 && claims > 0 && need > 1;
+        bool tooStrong = fight.damage > budget;
+        if (tooStrong && gemRally) tooStrong = combat::campFight(w, g, left, tune::max_team_per_camp, share).damage > budget;
+        if (gemRally && !tooStrong) o.mul("rally: ally holds gems", tune::gem_rally_bonus);
+        if (tooStrong) {
             o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
         } else if (fight.damage + reserve + escapeCost > w.hp) {
@@ -323,7 +349,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     const bool waiting = c.wait > 0;
     if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
+    if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
+    if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4)
+        o.mul("early: gems first", 0.05f);
     if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds)
         o.mul("opening gold", w.kit.goldBonus ? tune::opening_gold_bonus * 1.3f : tune::opening_gold_bonus);
     if (mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= 10) o.mul("enemy nearby", tune::contested_camp_factor);
@@ -342,6 +371,14 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.mul("committed", tune::engaged_bonus + tune::focus_bonus_per_damage * done);
     }
     if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
+    // No invading without a numbers lead.
+    if (!w.mayInvade() && w.theirHalf(g.center)) o.mul("their half: no lead", tune::no_invade_factor);
+    // Cohesion: farm around the leader (soft pull; banking and healing stay individual).
+    if (const int lc = cohesion::leaderCamp(); lc >= 0 && !raiding) {
+        if (g.id == lc) o.mul("with the leader", tune::cohesion_leader_bonus);
+        else if (mapplan::isNeighbour(lc, g.id)) o.mul("next to the leader", tune::cohesion_near_bonus);
+        else o.mul("away from the leader", tune::cohesion_away_factor);
+    }
     // Chaining: right after taking a camp, its nearest camps (from the draft's walking distances)
     // come first.
     if (w.chainFrom >= 0 && w.chainFrom != g.id && w.round - w.chainRound <= tune::chain_rounds &&
@@ -355,6 +392,13 @@ Option scoreGroup(World& w, const Candidate& c) {
         } else if (!raiding && !loop::onLoop(g.id)) {
             o.mul("off loop", tune::loop_off_factor);
         }
+    }
+    // Sealed pocket: only we get in (no party), and leaving costs the walk back to the landing
+    // tile plus a dash (the 8-round cooldown is over by the time the camp is down).
+    if (c.dash) {
+        o.turns("dash out", static_cast<float>(dist(c.nearest, g.dashTo) + tune::dash_exit_turns));
+        if (o.need > 1) o.mul("dash: solo only", 0.05f);
+        o.c.note << "dash in";
     }
     o.finish();
     return o;
@@ -373,7 +417,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);
@@ -381,10 +425,17 @@ void farm(World& w, std::vector<Option>& out) {
         if (n >= kMax) break;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         if (g.gems == 0 && g.gold == 0) continue;
+        const bool dash = dashable(w, g);
+        if (!g.reachable && !dash) continue;  // sealed off from our spawn: cannot be walked to
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         // Exact walking distance once its field exists (a tighter bound prunes more groups),
         // otherwise Chebyshev distance, which walking never beats.
-        int cheb = fields::toGroup(g.id, w.pos);
+        bc::vec2 unused;
+        int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
+        // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
+        // captured on foot, so it is not a farming option (it used to be scored by straight-line
+        // distance, and champions stood still for 1,500 rounds trying to path to it).
+        if (tune::skip_field_unreachable && cheb >= Navigator::unreachable) continue;
         if (cheb < 0) {
             cheb = 1 << 20;
             for (auto t : g.tiles) cheb = std::min(cheb, dist(w.pos, t));
@@ -405,10 +456,11 @@ void farm(World& w, std::vector<Option>& out) {
         // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
         // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
         const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
-        pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier};
+        pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, dash};
     }
     fuel::mark("farm.pre");
 
+    const std::size_t first = out.size();  // this scorer's options start here
     float best = 0;
     int scored = 0;
     // Degrade gracefully when the turn is already expensive (big maps, crowded fights).
@@ -425,7 +477,10 @@ void farm(World& w, std::vector<Option>& out) {
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
         int travel = Navigator::unreachable;
-        if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
+        if (c.dash) {
+            travel = std::max(0, dashTravel(w, g, c.nearest) - reach);
+        } else if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
+            if (tune::skip_field_unreachable && d >= Navigator::unreachable) return;  // no walking path (see above)
             // Precomputed field: one local read. Aim at the straight-line nearest tile.
             if (d < Navigator::unreachable) travel = std::max(0, d - reach);
             int nearestD = 1 << 20;
@@ -468,7 +523,12 @@ void farm(World& w, std::vector<Option>& out) {
         }
     }
     // The route's and the loop's camps are always scored, whatever their bounds.
-    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp})
+    // A gem camp an ally claims (it may be holding there for a party) is always scored too.
+    int rallyGroup = -1;
+    if (tune::gem_rally_bonus != 1.0f)
+        for (int i = 0; i < n && rallyGroup < 0; ++i)
+            if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
@@ -477,6 +537,10 @@ void farm(World& w, std::vector<Option>& out) {
                     scoreOne(c);
                     break;
                 }
+    // The forced camps above used up the scoring budget on tight turns, so the best-bound camp was
+    // never scored at all (pilgrimage's inner gem camp: bound ~3,000, pruned every turn with one
+    // slot). Always score at least min_bound_scored camps in bound order.
+    const int forcedScored = scored;
     for (int round = 0; round < n; ++round) {
         // Selection instead of a full sort: we usually stop after a handful.
         int pick = -1;
@@ -487,7 +551,9 @@ void farm(World& w, std::vector<Option>& out) {
         auto c = pre[static_cast<std::size_t>(pick)];
         pre[static_cast<std::size_t>(pick)].group = nullptr;
         // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
-        if ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored) break;
+        const bool owed = scored - forcedScored < tune::min_bound_scored;
+        if (!owed && ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored)) break;
+        if (owed && c.bound < best) break;  // nothing left can win anyway
 
         scoreOne(c);
     }
@@ -509,6 +575,25 @@ void farm(World& w, std::vector<Option>& out) {
             pre[static_cast<std::size_t>(pick)].group = nullptr;
             scoreOne(c);
         }
+    // Gems-only mode: from the mid game, while the enemy has banked gems_only_lag more than us, the
+    // whole team leaves gold-only camps for gem camps. Only when some gem camp is worth going to:
+    // otherwise gold scored below idling and all six stood at spawn for 1,700 rounds (lanes), never
+    // banking, so the mode never ended.
+    if (w.gemsOnly() && !w.hunting()) {
+        float bestGem = 0;
+        const auto isCamp = [&](const Option& o) { return o.kind == OptionKind::farm || o.kind == OptionKind::capture; };
+        for (std::size_t i = first; i < out.size(); ++i)
+            if (isCamp(out[i]) && statics.groups[static_cast<std::size_t>(out[i].target)].gems > 0) bestGem = std::max(bestGem, out[i].score);
+        if (bestGem >= tune::idle_rescue_score)
+            for (std::size_t i = first; i < out.size(); ++i) {
+                if (!isCamp(out[i])) continue;
+                const auto& g = statics.groups[static_cast<std::size_t>(out[i].target)];
+                if (g.gems == 0 && g.gold > 0) {
+                    out[i].mul("behind on gems: gems only", tune::gems_only_factor);
+                    out[i].finish();
+                }
+            }
+    }
     if (nearestOut >= 0 && tune::nearest_camp_bonus != 1.0f) {
         auto& o = out[static_cast<std::size_t>(nearestOut)];
         o.mul("nearest camp", tune::nearest_camp_bonus);
