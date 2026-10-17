@@ -7,6 +7,7 @@
 #include "../core/config.h"
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
+#include "../shop/shop.h"
 #include "../strategy/mapplan.h"
 #include "scorers.h"
 
@@ -72,9 +73,37 @@ void bank(World& w, std::vector<Option>& out) {
     // Recall first when that is quicker: 5 turns home, then the walk from spawn (rows: walking the
     // bag from the far wolves took ~40 rounds; their team recalled and banked in ~25).
     float travel = w.walkTurns(static_cast<float>(bestTravel));
-    if (const float viaHome = recallBankTurns(w, bestIdx); viaHome + tune::bank_recall_margin < travel) {
+    float viaHome = recallBankTurns(w, bestIdx);
+    // After a recall the nearest altar is the one nearest spawn, not the one nearest us.
+    if (tune::bank_recall_any_altar && viaHome < 1e8f) {
+        for (int i = 0; i < static_cast<int>(altars.size()); ++i) {
+            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)]))) continue;
+            bool locked = false;
+            try {
+                locked = bc::vision::has_altar_lock(altars[static_cast<std::size_t>(i)]) &&
+                         bc::vision::altar_lock_at(altars[static_cast<std::size_t>(i)]).is_enemy();
+            } catch (const bc::error&) {
+            }
+            if (locked) continue;
+            if (const float t = recallBankTurns(w, i); t < viaHome) {
+                viaHome = t;
+                o.target = i;
+                o.at = altars[static_cast<std::size_t>(i)];
+                o.c.target.clear();
+                o.c.target << 'a' << i;
+            }
+        }
+    }
+    if (viaHome + tune::bank_recall_margin < travel) {
         travel = viaHome;
         o.c.note << "recall first; ";
+        // The recall also heals us fully on spawn and opens the shop: one trip for all three.
+        if (tune::bank_recall_combo) {
+            const float missing = std::clamp(1.0f - w.hpFrac(), 0.0f, 1.0f);
+            if (missing > 0.05f) o.add("heals on the way", missing * missing * 60.0f);
+            if (const auto buy = shop::affordable(w); buy.shards >= tune::shop_min_shards || buy.completes)
+                o.add("shops on the way", static_cast<float>(buy.shards) * tune::shop_shard_value * 0.5f);
+        }
     }
     o.turns("travel", travel);
     if (bestLocked) {

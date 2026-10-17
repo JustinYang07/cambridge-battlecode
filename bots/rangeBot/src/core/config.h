@@ -18,7 +18,9 @@ inline constexpr bool party_rotation = true;        // A/B switch
 inline constexpr bool move_on_all_game = true;        // rangeBot: a camp a teammate holds is no option for the rest of us (they move on), all game
 inline constexpr bool capture_board = false;          // rangeBot: announce captures in shared byte 5 (teams of <=5 bodies; off: -129 +/- 132, idle 16 -> 3 rounds but no gain)
 inline constexpr bool bank_by_recall = true;          // rangeBot: bank via recall + walk from spawn when quicker
-inline constexpr float bank_recall_margin = 3.0f;     // ...by at least this many turns
+inline constexpr float bank_recall_margin = 3.0f;
+inline constexpr bool bank_recall_any_altar = true;   // rangeBot: after a recall, bank at the altar nearest spawn
+inline constexpr bool bank_recall_combo = true;       // rangeBot: a recall-bank also counts the heal and shopping it gives     // ...by at least this many turns
 inline constexpr bool capture_step_off = true;        // rangeBot: off a capture's tiles when a teammate keeps it (all game)
 inline constexpr float party_full_factor = 0.3f;     // rangeBot: a party camp nearer allies already claim in full: x this (1: off)
 inline constexpr float ranged_cover_share = 0.15f;   // rangeBot: ranged on a camp a melee ally claims expects this share of monster hits (0: off)
