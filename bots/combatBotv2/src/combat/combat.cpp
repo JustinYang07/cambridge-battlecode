@@ -105,6 +105,37 @@ bool basicAttack(World& w, const Focus& focus) {
     return false;
 }
 
+// The ability stuns: a crowd-control spell, or a ground spell that lingers (Ryth's area stun).
+bool stuns(const bc::ability& a) {
+    if (a.is_cc()) return true;
+    const auto& info = a.info();
+    if (!info) return false;
+    const auto* aoe = std::get_if<bc::ability_aoe_damage>(&*info);
+    return aoe && aoe->duration > 0;
+}
+
+// Stun target (tune::stun_target): 1 the squishiest enemy in reach (low health, half weight on max
+// health), 2 the one doing the most damage to us (its damage per turn, doubled when it can hit us
+// or an ally now); 0 our usual pick. Already-stunned enemies are skipped.
+EnemySeen* stunTarget(World& w, int range, const Focus& focus) {
+    if (tune::stun_target == 0) return enemyInRange(w, range, focus);
+    EnemySeen* best = nullptr;
+    float bestKey = 0;
+    for (auto& e : w.enemies) {
+        if (e.hp <= 0 || e.stunned || dist(e.pos, w.pos) > range) continue;
+        float key;
+        if (tune::stun_target == 1) {
+            key = -(e.hp + 0.5f * e.maxHp);
+        } else {
+            bool hitting = dist(e.pos, w.pos) <= e.range;
+            for (const auto& al : w.allies) hitting = hitting || dist(e.pos, al.pos) <= e.range;
+            key = (e.strength + e.focus * 1.5f / tune::spell_cooldown) * (hitting ? 2.0f : 1.0f);
+        }
+        if (!best || key > bestKey) { best = &e; bestKey = key; }
+    }
+    return best ? best : enemyInRange(w, range, focus);
+}
+
 bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
     auto& me = bc::self();
     if (!me.can_cast()) return false;
@@ -115,31 +146,50 @@ bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
         if (s.exclusive && !beforeMove) continue;
         if (!w.abilityReady(slot)) continue;
         const int range = static_cast<int>(s.range);
+        const bool stunning = stuns(a);
         FixedStr<40> msg;
         try {
             if (a.is_aoe_damage()) {
-                // Ground spell: centre it where it hits the most monsters/enemies.
+                // Ground spell: centre it where it hits the most enemy champions, then monsters.
+                const int radius = static_cast<int>(s.radius);
                 bc::vec2 best{};
-                int bestHits = 0;
+                int bestScore = 0, bestChamps = 0;
                 auto consider = [&](bc::vec2 centre) {
                     if (dist(centre, w.pos) > range) return;
-                    int hits = 0;
-                    for (const auto& c : w.camps) hits += c.hp > 0 && dist(c.pos, centre) <= static_cast<int>(s.radius);
-                    for (const auto& e : w.enemies) hits += 2 * (dist(e.pos, centre) <= static_cast<int>(s.radius));
-                    if (hits > bestHits) { bestHits = hits; best = centre; }
+                    int camps = 0, champs = 0;
+                    for (const auto& c : w.camps)
+                        camps += c.hp > 0 && (focus.groupId < 0 || c.groupId == focus.groupId || !tune::aoe_champions_first) &&
+                                 dist(c.pos, centre) <= radius;
+                    for (const auto& e : w.enemies)
+                        champs += e.hp > 0 && dist(e.pos, centre) <= radius;
+                    const int score = tune::aoe_champions_first ? 100 * champs + camps : camps + 2 * champs;
+                    if (score > bestScore) { bestScore = score; best = centre; bestChamps = champs; }
                 };
+                if (tune::aoe_champions_first && !w.enemies.empty()) {
+                    // Every tile in reach that touches an enemy (a spot between two of them hits both).
+                    for (int dx = -range; dx <= range; ++dx)
+                        for (int dy = -range; dy <= range; ++dy) {
+                            const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
+                            if (t.x < 0 || t.y < 0 || t.x >= Statics::get().width || t.y >= Statics::get().height) continue;
+                            bool near = false;
+                            for (const auto& e : w.enemies) near = near || (e.hp > 0 && dist(e.pos, t) <= radius);
+                            if (near) consider(t);
+                        }
+                } else {
+                    for (const auto& e : w.enemies) consider(e.pos);
+                }
                 for (const auto& c : w.camps) if (c.handle && (focus.groupId < 0 || c.groupId == focus.groupId)) consider(c.pos);
-                for (const auto& e : w.enemies) consider(e.pos);
-                if (bestHits > 0 && a.use(best)) {
+                if (bestScore > 0 && a.use(best)) {
                     w.spentAbility(slot);
-                    trace().action((msg << "aoe" << best.x << ',' << best.y).view());
+                    trace().action((msg << "aoe" << best.x << ',' << best.y << 'x' << bestChamps).view());
                     return true;
                 }
                 continue;
             }
-            if (auto* e = enemyInRange(w, range, focus)) {
+            if (auto* e = stunning ? stunTarget(w, range, focus) : enemyInRange(w, range, focus)) {
                 if (a.use(e->handle)) {
                     w.spentAbility(slot);
+                    if (stunning) e->stunned = true;
                     refresh(*e);
                     trace().action((msg << (a.is_cc() ? "st" : "se") << e->pos.x << ',' << e->pos.y).view());
                     return true;

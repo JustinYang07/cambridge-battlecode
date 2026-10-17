@@ -179,6 +179,12 @@ void World::refresh(bool firstTurn) {
                 }
                 e.stun = known > 0;
             }
+            if ((tune::stun_target != 0 || tune::stunned_team_target) && dist(e.pos, pos) <= tune::stun_check_radius) {
+                try {
+                    e.stunned = c.buffs().has_stun();
+                } catch (const bc::error&) {
+                }
+            }
             enemies.push_back(e);
             const float dps = e.strength + e.focus * 1.5f / tune::spell_cooldown;
             auto it = std::find_if(ghosts.begin(), ghosts.end(), [&](const EnemyGhost& g) { return g.handle == c; });
@@ -220,6 +226,16 @@ void World::refresh(bool firstTurn) {
     if (teamTarget < 0 && hurt >= 0) {
         teamTarget = hurt;
         teamTargetSeen = round;
+    }
+    // A stunned enemy cannot hit back or walk away: everyone switches to it (the weakest if several).
+    if (tune::stunned_team_target) {
+        const EnemySeen* st = nullptr;
+        for (const auto& e : enemies)
+            if (e.stunned && e.hp > 0 && e.index >= 0 && (!st || e.hp < st->hp)) st = &e;
+        if (st) {
+            teamTarget = st->index;
+            teamTargetSeen = round;
+        }
     }
     fuel::mark("refresh.champs");
 
@@ -647,6 +663,13 @@ bool World::enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const
     const auto k = static_cast<std::size_t>(index);
     if (enemyPrevRound_[k] < round - 2 || enemyPrevRound_[k] >= round) return false;
     return dist(now, target) < dist(enemyPrevPos_[k], target);
+}
+
+bool World::enemyApproaching(int index, cambc::vec2 now) const {
+    if (index < 0 || index >= static_cast<int>(enemyPrevPos_.size())) return false;
+    const auto k = static_cast<std::size_t>(index);
+    if (enemyPrevRound_[k] < round - 2 || enemyPrevRound_[k] >= round) return false;
+    return dist(now, pos) < dist(enemyPrevPos_[k], pos);
 }
 
 bool World::enemyMovingAway(int index, cambc::vec2 now) const {

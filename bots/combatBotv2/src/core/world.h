@@ -35,6 +35,7 @@ struct EnemySeen {
     bool channeling = false;  // recalling / tributing: a stationary, interruptible target
     bool tributing = false;
     bool stun = false;        // has a crowd-control ability (Tavi, Ren, Cassi, ...)
+    bool stunned = false;     // stunned right now (read within tune::stun_check_radius)
 };
 
 // Where an enemy was last seen; vision is not shared, so remembering recent sightings
@@ -109,6 +110,8 @@ public:
     // Enemy (roster index) seen last round further from us than now... reversed: it is moving away
     // from us (its distance to our tile grew since we last saw it, within 2 rounds).
     bool enemyMovingAway(int index, cambc::vec2 now) const;
+    // The enemy got nearer to us since we last saw it (within 2 rounds).
+    bool enemyApproaching(int index, cambc::vec2 now) const;
     // Seen within the last two rounds and now nearer `target` than it was (combatBotv2).
     bool enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const;
     // Gems-only mode: from tune::gems_only_round, while the enemy has banked tune::gems_only_lag more gems.
