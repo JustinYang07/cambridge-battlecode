@@ -69,6 +69,12 @@ inline constexpr float recall_turns = 5.0f;          // engine recall channel
 inline constexpr int monster_range = 3;
 
 // ---- team fights (attackBot)
+inline constexpr bool team_up = true;               // fights: outnumbered with enemies nearer than our allies, walk to the allies first
+inline constexpr int team_up_radius = 6;            // ...enemies and allies this close count as here
+inline constexpr int team_up_ally_radius = 12;      // ...only toward allies this close
+inline constexpr bool party_engage = false;         // fights: allies with us and more of us than of them near the target: engage together
+inline constexpr int engage_radius = 8;             // ...allies near us and enemies near the target within this
+inline constexpr float engage_bonus = 2.0f;         // ...the fight scores this much more (on: deaths 7.7 -> 13.3, kills 5.8 -> 3.8)
 inline constexpr int fight_join_radius = 4;        // enemies this close to the target join its side
 inline constexpr int fight_beside_radius = 3;      // allies this close to us fight (and draw fire) with us
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
