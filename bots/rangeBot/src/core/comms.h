@@ -61,6 +61,15 @@ int claimBracket(int slot);
 // Bit per allied slot (excluding exceptSlot) attacking this enemy champion.
 unsigned focusMask(int enemyIndex, int exceptSlot);
 
+// ---- capture board (byte 5, only for teams of at most 5 bodies, where it is not a claim byte)
+// The champion that completes a capture writes the group there (7 bits, +1) with a bit that flips
+// on every write, so a repeat capture of the same group is still news. Teammates far away learn
+// that the group now respawns, which vision cannot tell them.
+inline constexpr int capture_byte = 5;
+void announceCapture(int groupId);
+// The group captured since our last call (-1: nothing new). Call once per turn after refresh().
+int newCapture();
+
 // ---- team alert (bytes 6-7): an enemy seen on our half, and who saw it
 inline constexpr int alert_byte = 6;
 struct Alert {

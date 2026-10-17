@@ -105,6 +105,22 @@ unsigned ownersMask(int groupId, int mySlot, int tiles) {
     return mask;
 }
 
+void announceCapture(int groupId) {
+    if (groupId < 0 || groupId > 126) return;
+    const auto old = cache[capture_byte];
+    const std::uint8_t flip = (old & 0x80) ? 0 : 0x80;
+    write(capture_byte, static_cast<std::uint8_t>(flip | (groupId + 1)));
+}
+
+int newCapture() {
+    static int last = -1;
+    const int v = cache[capture_byte];
+    if (last < 0) { last = v; return -1; }  // first look: whatever is there is old news
+    if (v == last) return -1;
+    last = v;
+    return (v & 0x7F) ? (v & 0x7F) - 1 : -1;
+}
+
 Alert readAlert(int round) {
     Alert a;
     const auto lo = cache[alert_byte], hi = cache[alert_byte + 1];

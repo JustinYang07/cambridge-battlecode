@@ -110,6 +110,29 @@ void Bot::play_turn() {
         }
     }
     comms::refresh();
+    // Capture board (teams of 5 bodies or fewer): we just captured a group -> tell the team; a
+    // teammate did -> it respawns from now (rows: the far wolves sat respawned 18-44 rounds before
+    // anyone came, nobody far away knew when they would be back).
+    if (tune::capture_board && w.allyCount <= comms::capture_byte) {
+        static int gemsBefore = 0;  // w.prevGems is already this turn's count here
+        const int gained = w.gems - gemsBefore;
+        gemsBefore = w.alive ? w.gems : 0;
+        if (w.alive && gained > 0) {
+            if (const auto* g = Statics::get().groupAt(w.pos); g && g->gems > 0 && gained >= g->gems / 6) {
+                comms::announceCapture(g->id);
+                auto& mem = w.groups[static_cast<std::size_t>(g->id)];
+                mem.status = GroupStatus::respawning;
+                mem.respawnAt = w.round + g->respawn;
+                mem.healthLeft = 0;
+            }
+        }
+        if (const int c = comms::newCapture(); c >= 0 && c < static_cast<int>(w.groups.size())) {
+            auto& mem = w.groups[static_cast<std::size_t>(c)];
+            mem.status = GroupStatus::respawning;
+            mem.respawnAt = w.round + Statics::get().groups[static_cast<std::size_t>(c)].respawn;
+            mem.healthLeft = 0;
+        }
+    }
     cohesion::update(w);
     const bool wasRegrouping = regroup::active();
     regroup::update(w);
