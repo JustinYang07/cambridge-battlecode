@@ -87,7 +87,8 @@ void scoutBushes(World& w) {
     lastPos = pos;
     if (!bushNear[static_cast<std::size_t>(pos.y * s.width + pos.x)]) return;
     const int dx = pos.x - from.x, dy = pos.y - from.y;
-    if (dx == 0 && dy == 0) return;  // only when moving toward bushes
+    // Moving toward bushes only, unless any bush in range will do (tune::ward_any_bush).
+    if (!tune::ward_any_bush && dx == 0 && dy == 0) return;
     // A hidden bush tile ahead of us within placement reach: the ward goes on it, once (a bush
     // next to the one we already warded is covered by it).
     const int reach = static_cast<int>(bc::constants::ward_placement_radius);
@@ -97,7 +98,7 @@ void scoutBushes(World& w) {
         for (int x = std::max(0, pos.x - reach); x <= std::min(s.width - 1, pos.x + reach); ++x) {
             const bc::vec2 b{x, y};
             if (!bushB[static_cast<std::size_t>(y * s.width + x)]) continue;
-            if ((x - pos.x) * dx + (y - pos.y) * dy < 0) continue;
+            if (!tune::ward_any_bush && (x - pos.x) * dx + (y - pos.y) * dy < 0) continue;
             if (dist(b, lastWard) <= 3 || w.isVisible(b)) continue;
             const int d = dist(b, pos);
             if (d < bestD) { bestD = d; best = b; }

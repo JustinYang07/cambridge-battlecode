@@ -161,21 +161,41 @@ void play_draft() {
                 const auto d = static_cast<bc::champion_draft>(i);
                 if (!taken(d)) options.push_back(score(d, teamSize, false));
             }
-        // combatBot: Ryth takes Vesper Vale's place (and her score), so it is drafted exactly where
-        // she would have been; Ryth's own entry goes.
-        if (tune::draft_ryth_for_vesper && !taken(bc::champion_draft::ryth)) {
-            std::erase_if(options, [](const Scored& s) { return s.pick == bc::champion_draft::ryth; });
-            for (auto& s : options)
-                if (s.pick == bc::champion_draft::vesper_vale) s.pick = bc::champion_draft::ryth;
-        }
         std::stable_sort(options.begin(), options.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
         if (!options.empty()) fallback = options.front().pick;
+        // Fixed comps, taken from the top for however many picks the map has (3 picks: the first
+        // three; 4 and 5 add the next). Any champion can be taken at any time. Gold-heavy maps get
+        // the caster comp; every other map Ren, Stellar, Cassi & Issac, Ryth, Varg.
+        using D = bc::champion_draft;
+        static const std::vector<D> standardOrder{D::ren, D::stellar, D::cassi_and_issac, D::ryth, D::varg};
+        static const std::vector<D> goldOrder{D::stellar, D::tavi, D::prism, D::cassi_and_issac, D::ren};
+        // Gold-heavy: most farmable camps hold no gems at all (contest, stampede).
+        int goldOnly = 0, farmable = 0;
+        for (const auto& g : Statics::get().groups) {
+            if (g.hasMonolith || (g.gems == 0 && g.gold == 0)) continue;
+            ++farmable;
+            if (g.gems == 0) ++goldOnly;
+        }
+        const float goldOnlyShare = farmable > 0 ? static_cast<float>(goldOnly) / static_cast<float>(farmable) : 0.0f;
+        const bool goldMap = goldOnlyShare >= tune::gold_draft_share;
+        planText += "gold-only camps " + std::to_string(static_cast<int>(goldOnlyShare * 100.0f)) + "%; ";
+        const auto& fixedOrder = goldMap ? goldOrder : standardOrder;
+        if (tune::fixed_draft) {
+            for (auto d : fixedOrder)
+                if (!taken(d)) { fallback = d; break; }
+            planText += goldMap ? "gold map comp; " : "standard comp; ";
+        }
         // Farming loops: solved for the roster we expect (the best options now), continued on the
         // later picks while fuel is spare; the last pick assigns the real roster to them.
         if (mine.empty()) {
             std::vector<bc::champion_draft> guess;
-            for (const auto& o : options)
-                if (static_cast<int>(guess.size()) < teamSize) guess.push_back(o.pick);
+            if (tune::fixed_draft) {
+                for (auto d : fixedOrder)
+                    if (static_cast<int>(guess.size()) < teamSize) guess.push_back(d);
+            } else {
+                for (const auto& o : options)
+                    if (static_cast<int>(guess.size()) < teamSize) guess.push_back(o.pick);
+            }
             mapplan::solveLoops(mapplan::bodies(guess), tune::draft_loop_floor);
             mark();
             mapplan::prepare(tune::draft_prepare_floor);

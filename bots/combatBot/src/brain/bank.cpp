@@ -24,6 +24,21 @@ float recallBankTurns(const World& w, int altarIdx) {
     return tune::recall_turns + w.walkTurns(static_cast<float>(fromSpawn));
 }
 
+// Exposure of an altar, in walking tiles added to its cost: towards the enemy spawn (a centre
+// altar about half, one on their side the full amount) and enemies seen near it, both growing with
+// the bag (corners: every tribute went to the centre altar, where we fought and died).
+float altarExposure(const World& w, int altarIdx) {
+    if (tune::altar_exposure_tiles <= 0 && tune::altar_enemy_tiles <= 0) return 0;
+    const auto& st = Statics::get();
+    const auto at = st.altars[static_cast<std::size_t>(altarIdx)];
+    const float ours = static_cast<float>(dist(at, st.spawnCenter));
+    const float theirs = static_cast<float>(dist(at, st.enemySpawnCenter));
+    const float depth = ours / std::max(ours + theirs, 1.0f);  // 0 at our spawn, 1 at theirs
+    const float bagScale = 1.0f + static_cast<float>(w.gems) / tune::altar_exposure_bag;
+    float tiles = tune::altar_exposure_tiles * std::clamp((depth - 0.35f) / 0.3f, 0.0f, 1.0f);
+    if (w.enemyPressure(at, tune::enemy_watch_radius) > 0) tiles += tune::altar_enemy_tiles;
+    return tiles * bagScale;
+}
 
 void bank(World& w, std::vector<Option>& out) {
     if (w.gems < tune::bank_min_gems) return;
@@ -58,7 +73,7 @@ void bank(World& w, std::vector<Option>& out) {
         if (locked && !tune::break_altar_locks) continue;
         const int exact = fields::toAltar(k, w.pos);
         const int d = exact >= 0 ? exact : nav().distToRange(w, altars[i], 1);
-        const int cost = d + (locked ? tune::lock_break_turns : 0);
+        const int cost = d + (locked ? tune::lock_break_turns : 0) + static_cast<int>(altarExposure(w, k));
         if (cost < bestCost) { bestCost = cost; bestTravel = d; bestIdx = k; bestLocked = locked; }
     }
     if (bestIdx < 0) return;
@@ -85,7 +100,7 @@ void bank(World& w, std::vector<Option>& out) {
             } catch (const bc::error&) {
             }
             if (locked) continue;
-            if (const float t = recallBankTurns(w, i); t < viaHome) {
+            if (const float t = recallBankTurns(w, i) + altarExposure(w, i) - altarExposure(w, o.target); t < viaHome) {
                 viaHome = t;
                 o.target = i;
                 o.at = altars[static_cast<std::size_t>(i)];
