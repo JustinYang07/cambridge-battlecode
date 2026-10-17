@@ -367,7 +367,15 @@ void flee(World& w) {
             return;
         }
     }
-    if (!nav().stepEscape(w) && !nav().stepAway(w, threats, 6)) nav().stepToward(w, Statics::get().allySpawn, true);
+    // Run home around their reach (43% of our deaths came while fleeing, a third of those flights
+    // drifting away from home: the nearest tile out of reach is often deeper in their half).
+    if (tune::flee_home_weighted && nav().stepHome(w)) {
+        combat::act(w, combat::Focus{}, false);
+        return;
+    }
+    // Nothing to escape out of: head home along the spawn path rather than just away from them.
+    if (!nav().stepEscape(w) && !(tune::flee_homeward ? false : nav().stepAway(w, threats, 6)))
+        nav().stepToward(w, Statics::get().allySpawn, true, nullptr, Statics::get().spawnCenter, spawnPath());
     combat::act(w, combat::Focus{}, false);
 }
 

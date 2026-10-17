@@ -81,6 +81,12 @@ void survive(World& w, std::vector<Option>& out) {
         o.add("danger", danger * tune::flee_value);
         o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
         o.turns("lost farming", 25.0f);
+        // Stand together: with allies beside us matching the enemies here, running gets us chased
+        // and hit from range while the others lose a fighter (57% of our deaths came in even or
+        // better fights, 76% with an ally within 6). Keep fighting unless badly hurt.
+        if (tune::stand_together && pressure > 0 && f > tune::stand_min_hp &&
+            w.alliedPower(w.pos, tune::fight_beside_radius + 2) >= pressure)
+            o.mul("stand with allies", tune::stand_flee_factor);
         o.c.note << "die in " << static_cast<int>(turnsToDie);
         o.finish();
         out.push_back(std::move(o));

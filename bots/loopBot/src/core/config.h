@@ -60,7 +60,7 @@ inline constexpr int fight_beside_radius = 3;      // allies this close to us fi
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
 // Early retreat (ladder losses: retreats began at a median 393 HP, 70% died within 3 turns):
 // flee while the enemies near us would need longer than our escape plus this margin to kill us.
-inline constexpr bool predicted_retreat = false;   // -75 with it (retreats cost more than they saved)
+inline constexpr bool predicted_retreat = true;    // loopBot: on (+249, deaths 11.1 -> 8.8 with the homeward flee; was -75 before it)
 inline constexpr float retreat_margin_turns = 4.0f;
 inline constexpr int retreat_ally_radius = 0;        // retreat toward an ally this close (away from the threat), else spawn (0: off; -29 +/- 87 at 20)
 inline constexpr float focus_fire_bonus = 2.0f;
@@ -123,6 +123,9 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
 inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
+inline constexpr bool treasure_maps = true;        // build 12: treasure emblem first on treasure maps (shop.cpp)
+inline constexpr int treasure_map_max_area = 1400;  // ...small maps (all gold within early reach)...
+inline constexpr float treasure_map_max_elk_share = 0.8f;  // ...that are not mostly elk; or no gems outside Monoliths
 inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
@@ -267,6 +270,12 @@ inline constexpr int chain_rounds = 30;              // how long the bonus lasts
 inline constexpr bool capture_handoff = true;        // one party member captures, the rest move on
 inline constexpr float handoff_factor = 0.1f;        // capture score when a teammate claiming it is nearer its tiles
 inline constexpr float capture_taken_factor = 0.01f; // capture score when a teammate already stands on its tiles (one capturer is enough)
+inline constexpr bool stand_together = false;       // allies here match the enemies: flee scores x stand_flee_factor...
+inline constexpr float stand_min_hp = 0.3f;         // ...while above this health
+inline constexpr float stand_flee_factor = 0.3f;
+inline constexpr bool flee_home_weighted = true;    // flee steps: home distance + flee_reach_cost per enemy/monster reach
+inline constexpr int flee_reach_cost = 6;           // ...(steps of home distance one enemy's reach is worth)
+inline constexpr bool flee_homeward = true;         // fleeing: equally quick escapes go toward home; else walk home
 inline constexpr bool tank_opens = true;            // ranged hold fire on a sleeping camp until the tank is beside it...
 inline constexpr int tank_open_radius = 15;         // ...if a tank claiming it is this close to the camp...
 inline constexpr int tank_open_wait = 6;            // ...for at most this many turns

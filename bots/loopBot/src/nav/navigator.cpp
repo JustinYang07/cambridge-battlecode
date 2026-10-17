@@ -1,4 +1,5 @@
 #include "navigator.h"
+#include "fields.h"
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -347,6 +348,56 @@ int Navigator::escapeTurns(const World& w) {
     return escapeVisited_.is_set(w.pos) ? escape_.get(w.pos) : 16;
 }
 
+bool Navigator::stepHome(World& w) {
+    if (fields::toSpawn(0, w.pos) < 0) {
+        if (bc::fuel_remaining() <= tune::field_build_fuel) return false;
+        fields::ensureSpawn(0);
+    }
+    const auto& st = Statics::get();
+    const auto blockedNow = blocked(w);
+    // Home distance plus a heavy cost per enemy (and awake monster) that could hit the tile:
+    // running home around them, not through them and not just out of the nearest reach.
+    auto cost = [&](bc::vec2 t) {
+        if (t.x < 0 || t.y < 0 || t.x >= st.width || t.y >= st.height || (t != w.pos && blockedNow.is_set(t))) return 1 << 20;
+        const int home = fields::toSpawn(0, t);
+        if (home < 0 || home >= unreachable) return 1 << 20;
+        int c = home;
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, t) <= e.range + 1) c += tune::flee_reach_cost;
+        if (w.danger.is_set(t)) c += tune::flee_reach_cost;
+        return c;
+    };
+    const int here = cost(w.pos);
+    if (here >= (1 << 20) || fields::toSpawn(0, w.pos) == 0) return false;
+    static constexpr std::array<bc::vec2, 8> kCompass{{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}};
+    bc::vec2 walk{-1, -1};
+    int walkCost = here;
+    for (const auto dir : kCompass) {
+        const bc::vec2 t = w.pos + dir;
+        const int c = cost(t);
+        if (c < walkCost) { walkCost = c; walk = t; }
+    }
+    // A dash that beats the best step by 2+ (two tiles home, or out of their reach) is worth it.
+    if (const int slot = readyDash(w); slot >= 0) {
+        bc::vec2 best{-1, -1};
+        int bestCost = walkCost;
+        for (int dy = -2; dy <= 2; ++dy)
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dy)) < 2) continue;
+                const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
+                const int c = cost(t);
+                if (c < bestCost && st.dashLegal(w.pos, t)) { bestCost = c; best = t; }
+            }
+        if (best.x >= 0 && bestCost + 2 <= walkCost && dashTo(w, slot, best)) {
+            trace().note("fleeing home: dash");
+            return true;
+        }
+    }
+    if (walk.x < 0 || !bc::self().can_move()) return false;
+    trace().note("fleeing home");
+    return tryMove(w, walk);
+}
+
 bool Navigator::stepEscape(World& w) {
     auto& me = bc::self();
     computeEscape(w);
@@ -356,10 +407,18 @@ bool Navigator::stepEscape(World& w) {
     if (!me.can_move()) return moved;
     bc::vec2 best = w.pos;
     auto bestD = escape_.get(w.pos);
+    // Equally quick ways out: take the one toward home (contest: Vesper Vale escaped deeper into
+    // their half, the enemies standing between it and our spawn).
+    auto home = [](bc::vec2 t) {
+        const int d = fields::toSpawn(0, t);
+        return d < 0 ? unreachable : d;
+    };
+    int bestHome = home(w.pos);
     for (auto t : blocked(w).reachable_tiles(w.pos, 1).positions()) {
         if (t == w.pos || !escapeVisited_.is_set(t)) continue;
         const auto d = escape_.get(t);
-        if (d < bestD) { bestD = d; best = t; }
+        const int h = tune::flee_homeward ? home(t) : 0;
+        if (d < bestD || (d == bestD && best != w.pos && h < bestHome)) { bestD = d; best = t; bestHome = h; }
     }
     return (best != w.pos && tryMove(w, best)) || moved;
 }

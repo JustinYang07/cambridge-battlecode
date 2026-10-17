@@ -52,6 +52,10 @@ public:
     int escapeTurns(const World& w);
     // Walk (and dash) along the shortest route out of reach. Returns true if we moved.
     bool stepEscape(World& w);
+    // Flee home: step (or dash) to the tile nearest our spawn along the spawn field, each visible
+    // enemy whose reach covers a tile (and awake monsters' reach) costing tune::flee_reach_cost.
+    // False when the spawn field is not ready or no tile improves on standing still.
+    bool stepHome(World& w);
 
 private:
     bool tryMove(World& w, cambc::vec2 dest);

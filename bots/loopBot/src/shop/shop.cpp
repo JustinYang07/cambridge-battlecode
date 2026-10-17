@@ -35,6 +35,30 @@ const char* familyName(Family f) {
 // Build orders. tune::build_variant selects one (see config.h); 0 is the default:
 // farm safely first (jungle), then faster (monster), then recall faster (home) and
 // survive fights (durability), then raw stats.
+// Treasure-first map (loopBot): the treasure emblem's extra gold beats jungle's safer farming where
+// gold is everywhere close to spawn and the early camps are weak (self-play, treasure - jungle:
+// swirl +774, eight +269, fragment +212; corners -837, interlock -545, stampede -360). Small maps
+// put every cluster and wolf within early reach; mostly-elk maps do not count (elk are slow and
+// tough early). A map whose only gems are in its Monoliths (contest) is a gold game too.
+bool treasureMap() {
+    // The map never changes: worked out once (plan() runs every turn; rescanning cost fuel).
+    static int cached = -1;
+    if (cached >= 0) return cached == 1;
+    const auto& s = Statics::get();
+    float elkHp = 0, wolfHp = 0;
+    int gems = 0;
+    for (const auto& g : s.groups) {
+        if (g.hasMonolith) continue;
+        gems += g.gems;
+        for (const auto& m : g.killOrder)
+            if (m.strength > 0) (m.strength >= 40.0f ? elkHp : wolfHp) += m.health;  // monsters only
+    }
+    const bool small = s.width * s.height <= tune::treasure_map_max_area;
+    const bool mostlyElk = elkHp > tune::treasure_map_max_elk_share * std::max(elkHp + wolfHp, 1.0f);
+    cached = (gems == 0 || (small && !mostlyElk)) ? 1 : 0;
+    return cached == 1;
+}
+
 std::vector<Step> plan(bc::champion_type type) {
     const auto& p = profile(type);
     Stat main = p.primary;
@@ -84,7 +108,7 @@ std::vector<Step> plan(bc::champion_type type) {
         add(F::jungle, main); add(F::power, main); add(F::durability, main);
         break;
     case 12:  // Mite's order from its games: jungle, durability, a bruiser emblem of health, then power
-        add(F::jungle, main); add(F::durability, main); add(F::bruiser, Stat::health);
+        add(tune::treasure_maps && treasureMap() ? F::treasure : F::jungle, main); add(F::durability, main); add(F::bruiser, Stat::health);
         break;
     case 10:  // camp damage first, then treasure
         add(F::monster, main); add(F::treasure, main); add(F::jungle, main); add(F::home, Stat::health);
