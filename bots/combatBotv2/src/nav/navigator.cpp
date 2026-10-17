@@ -6,6 +6,7 @@
 #include "../core/config.h"
 #include "../core/fixed_str.h"
 #include "../core/trace.h"
+#include "../brain/scorers.h"
 
 namespace bc = cambc;
 
@@ -238,6 +239,21 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     if (goals.is_empty()) {
         trace().note("no free goal tile");
         return false;
+    }
+    // combatBotv2: walk around the tiles of a dead camp a teammate is capturing (not our goal):
+    // standing on one as the capture completes takes half its reward (rows: the party walking on to
+    // the next wolves crossed the keeper's tiles). Avoided like danger: only while a route around exists.
+    bc::bitboard merged;
+    if (tune::avoid_teammate_capture) {
+        bool any = false;
+        for (const auto& g : Statics::get().groups) {
+            if (dist(g.center, w.pos) > tune::capture_avoid_radius || w.groups[static_cast<std::size_t>(g.id)].status != GroupStatus::reward) continue;
+            if (!(goalsIn & g.tileMask).is_empty() || !scorers::allyHoldingOf(w, g.id)) continue;
+            if (!any) merged = avoid ? *avoid : bc::bitboard{};
+            merged |= g.tileMask;
+            any = true;
+        }
+        if (any) avoid = &merged;
     }
     // Set paths: far from the goal, walk the precomputed field (built now if it is missing).
     if (tune::set_paths && far.read && aim.x >= 0 && dist(w.pos, aim) > tune::field_walk_tiles) {

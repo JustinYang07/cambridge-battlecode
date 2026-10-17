@@ -41,7 +41,15 @@ void survive(World& w, std::vector<Option>& out) {
         const bool enemiesAbout = w.enemyPressure(w.pos, tune::enemy_watch_radius + 3) > 0;
         const float start = tune::heal_start_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
         const float urgent = tune::heal_urgent_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
-        const float urgency = std::clamp((start - f) / (start - urgent), 0.0f, 1.0f);
+        float urgency = std::clamp((start - f) / (start - urgent), 0.0f, 1.0f);
+        // combatBotv2: tanking a camp (no enemy champions about), go by the damage we are taking,
+        // not by health fraction: stay until death is ~3 turns past the walk out of the monsters'
+        // reach (rows: Ren left the third wolves at 35% with ~6 turns of health to spare).
+        if (tune::late_heal && !enemiesAbout && w.engagedGroup >= 0 && w.hitRate > 1.0f) {
+            const float spare = w.hp / w.hitRate - static_cast<float>(nav().escapeTurns(w)) - tune::death_margin_turns;
+            urgency = spare <= 0 ? 1.0f : spare >= tune::late_heal_window ? 0.0f : 1.0f - spare / tune::late_heal_window;
+            o.c.note << "turns to spare " << static_cast<int>(spare) << "; ";
+        }
         o.add("low health", urgency * urgency * 60.0f);
         if (canShop && !(fightNear && f >= tune::heal_start_frac)) {
             o.add("shopping", static_cast<float>(buy.shards) * tune::shop_shard_value * (buy.completes ? 1.5f : 1.0f));

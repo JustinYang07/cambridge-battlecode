@@ -235,6 +235,29 @@ void capture(World& w, const GroupInfo& g) {
         // a tribute timed to finish just as the capture does, and the reward is banked with it.
         if (w.lastTarget == g.id && w.lastOption == static_cast<int>(OptionKind::capture)) ++w.captureTurns;
         else w.captureTurns = 1;
+        // combatBotv2 (as Fish): the keeper recalls from the tile a round before the capture
+        // completes. The reward lands during the 5-turn channel, so it is on its way home (spawn,
+        // shop, the altar by spawn) instead of walking the bag over. Only when banking via spawn is
+        // about as quick as walking to an altar, or we want the heal anyway, and nobody is about.
+        if (tune::recall_on_capture && w.captureTurns >= static_cast<int>(tune::capture_turns) - 1 &&
+            w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0 && !w.beingHit && w.incoming <= 0 &&
+            scorers::captureShareOf(w, g.id) >= 1.0f) {
+            float viaHome = 1e9f, walk = 1e9f;
+            for (int i = 0; i < static_cast<int>(Statics::get().altars.size()); ++i) {
+                viaHome = std::min(viaHome, scorers::recallBankTurns(w, i));
+                if (const int d = fields::toAltar(i, w.pos); d >= 0 && d < Navigator::unreachable) walk = std::min(walk, w.walkTurns(static_cast<float>(d)));
+            }
+            if (viaHome <= walk + tune::capture_recall_margin || w.hpFrac() < tune::capture_recall_hp) {
+                try {
+                    bc::self().recall();
+                    trace().action("rc");
+                    trace().note("recall timed with the capture");
+                    return;
+                } catch (const bc::error& e) {
+                    trace().note(std::string("recall failed: ") + e.message());
+                }
+            }
+        }
         const int ticks = std::max(1, (w.gems + 9) / 10);
         if (w.gems > 0 && w.captureTurns + ticks >= static_cast<int>(tune::capture_turns)) {
             for (auto a : Statics::get().altars)
@@ -251,6 +274,8 @@ void capture(World& w, const GroupInfo& g) {
     }
     combat::act(w, combat::Focus{}, false);
 }
+
+void offTeammateCapture(World& w);
 
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
@@ -273,6 +298,7 @@ void bank(World& w, int altarIdx) {
         w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0) {
         const int walk = fields::toAltar(altarIdx, w.pos);
         if (walk > 0 && scorers::recallBankTurns(w, altarIdx) + tune::bank_recall_margin < w.walkTurns(static_cast<float>(walk))) {
+            offTeammateCapture(w);
             try {
                 me.recall();
                 trace().action("rc");
@@ -334,6 +360,22 @@ bc::vec2 retreatTarget(const World& w) {
     return best;
 }
 
+// combatBotv2: before a recall, step off the tiles of a dead camp a teammate is capturing. The
+// recall's 5 turns match the capture's, so a champion recalling on the tiles is still there when it
+// completes and takes half the reward (rows: Ryth, the tank, recalled on the wolves' tiles and
+// split the capture with Cassi, the keeper). Moves one tile; the recall can follow this turn.
+void offTeammateCapture(World& w) {
+    if (!tune::recall_off_capture) return;
+    const auto* g = Statics::get().groupAt(w.pos);
+    if (!g || w.groups[static_cast<std::size_t>(g->id)].status != GroupStatus::reward || !scorers::allyHoldingOf(w, g->id)) return;
+    bc::bitboard ring;
+    ring.clear();
+    ring.draw_chebyshev(w.pos, 1.0f);
+    const auto goals = ring & ~g->tileMask & ~nav().blocked(w);
+    if (goals.is_empty()) return;
+    if (nav().stepToward(w, goals, false, nullptr, Statics::get().spawnCenter)) trace().note("off a teammate's capture before recalling");
+}
+
 void heal(World& w) {
     auto& me = bc::self();
     if (w.atSpawn) {
@@ -378,6 +420,7 @@ void heal(World& w) {
             return;
         }
     }
+    offTeammateCapture(w);
     try {
         me.recall();
         trace().action("rc");
@@ -752,7 +795,49 @@ bool safeDash(const World& w, bc::vec2 target) {
     return true;
 }
 
+// Team up before the fight: the enemies we see are nearer to us, on average, than our living
+// allies are, and here they outnumber us. Step toward our allies (hitting whatever is in range)
+// until they are on average no farther than the enemies, then fight together.
+bool teamUp(World& w, const Option& o) {
+    // Only with a bag worth protecting: empty-handed, we fight as before (team-up cost kills).
+    if (!tune::team_up || w.gems < tune::team_up_min_gems) return false;
+    float enemySum = 0;
+    int enemies = 0, enemiesNear = 0;
+    for (const auto& e : w.enemies) {
+        if (e.hp <= 0) continue;
+        enemySum += static_cast<float>(dist(e.pos, w.pos));
+        ++enemies;
+        if (dist(e.pos, w.pos) <= tune::team_up_radius) ++enemiesNear;
+    }
+    if (enemies == 0) return false;
+    float allySum = 0, cx = 0, cy = 0;
+    int allies = 0, alliesNear = 0;
+    for (int s = 0; s < w.allyCount; ++s) {
+        if (s == w.slot) continue;
+        const auto p = w.allyPos(s);
+        if (p.x < 0 || dist(p, w.pos) > tune::team_up_ally_radius) continue;  // too far to team up with
+        allySum += static_cast<float>(dist(p, w.pos));
+        cx += static_cast<float>(p.x);
+        cy += static_cast<float>(p.y);
+        ++allies;
+        if (dist(p, w.pos) <= tune::team_up_radius) ++alliesNear;
+    }
+    if (allies == 0) return false;  // nobody near enough to team up with: fight or flee as before
+    const float enemyAvg = enemySum / static_cast<float>(enemies), allyAvg = allySum / static_cast<float>(allies);
+    const bool outnumbered = enemiesNear > 1 + alliesNear;
+    if (!outnumbered || enemyAvg >= allyAvg) return false;
+    const bc::vec2 centre{static_cast<int>(cx / static_cast<float>(allies) + 0.5f), static_cast<int>(cy / static_cast<float>(allies) + 0.5f)};
+    combat::Focus focus{.enemy = o.enemy, .anyEnemy = true};
+    nav().stepToward(w, centre, 1, true);
+    combat::act(w, focus, false);
+    FixedStr<64> msg;
+    trace().note((msg << "team up: " << enemiesNear << "v" << (1 + alliesNear) << ", enemies " << static_cast<int>(enemyAvg)
+                      << " allies " << static_cast<int>(allyAvg)).view());
+    return true;
+}
+
 void fight(World& w, const Option& o) {
+    if (teamUp(w, o)) return;
     if (rangedFight(w, o)) return;
     combat::Focus focus{.enemy = o.enemy};
     if (dist(w.pos, o.at) <= w.range) {

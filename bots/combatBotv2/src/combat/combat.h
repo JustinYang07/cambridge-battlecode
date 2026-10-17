@@ -21,7 +21,9 @@ struct FightEstimate {
 // Fight `g` with `party` champions of roughly our strength. Uses live health of visible
 // members, otherwise the remembered fraction. Pessimistic: monsters mostly focus us.
 // `share` is the fraction of monster hits we expect to absorb in a party (<0: role default).
-FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share = -1.0f);
+// `mates`: allies (by slot bit) known to fight it with us; their own damage counts (combatBotv2),
+// and any party places beyond them count as copies of us.
+FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share = -1.0f, unsigned mates = 0);
 float championDamagePerTurn(const World& w);                     // our damage per turn against a champion
 float threatPerTurn(const World& w, cambc::vec2 at);             // enemy champion damage that can reach `at`
 

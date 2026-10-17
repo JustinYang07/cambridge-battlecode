@@ -166,6 +166,9 @@ public:
     // Chaining: the last camp we worked that died, and when (camps near it get a bonus for a while).
     int chainFrom = -1, chainRound = -1000;
     float prevHp = -1;
+    int prevHpRound = -1;
+    // combatBotv2: health lost per round while monsters are on us (smoothed; 0 when not engaged).
+    float hitRate = 0;
     std::vector<std::string> pendingNotes;  // notes from refresh(), traced once the turn's trace starts
 
     void refresh(bool firstTurn);
@@ -199,6 +202,13 @@ public:
     bool abilityReady(int slot);
     // An ally's health fraction by draft slot (a host read; -1 when unknown or dead).
     float allyHpFrac(int slot) const;
+    // An ally's health lost (max - current) by draft slot (0 when unknown or dead).
+    float allyMissingHp(int slot) const;
+    // An ally's current health by draft slot (0 when unknown or dead).
+    float allyHp(int slot) const;
+    // combatBotv2: an ally's damage per turn on a camp group (strength with splash, plus its spells
+    // from focus), read once per turn; 0 when unknown or dead.
+    float allyCampDps(int slot, const GroupInfo& g) const;
     // An ally's tile by draft slot ({-1,-1} when unknown or dead).
     cambc::vec2 allyPos(int slot) const;
     // Same, read once per turn (two host calls per ally otherwise; combatBotv2's checks ask often).
