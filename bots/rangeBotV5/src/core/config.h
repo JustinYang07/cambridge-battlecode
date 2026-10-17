@@ -72,6 +72,7 @@ inline constexpr int monster_range = 3;
 inline constexpr bool team_up = true;               // fights: outnumbered with enemies nearer than our allies, walk to the allies first
 inline constexpr int team_up_radius = 6;            // ...enemies and allies this close count as here
 inline constexpr int team_up_ally_radius = 12;      // ...only toward allies this close
+inline constexpr int team_up_min_gems = 0;          // ...only while carrying at least this many gems (0: always; 1 or 22 lost most of the drop in gems lost on death)
 inline constexpr bool party_engage = false;         // fights: allies with us and more of us than of them near the target: engage together
 inline constexpr int engage_radius = 8;             // ...allies near us and enemies near the target within this
 inline constexpr float engage_bonus = 2.0f;         // ...the fight scores this much more (on: deaths 7.7 -> 13.3, kills 5.8 -> 3.8)

@@ -599,7 +599,8 @@ bool rangedFight(World& w, const Option& o) {
 // allies are, and here they outnumber us. Step toward our allies (hitting whatever is in range)
 // until they are on average no farther than the enemies, then fight together.
 bool teamUp(World& w, const Option& o) {
-    if (!tune::team_up) return false;
+    // Only with a bag worth protecting: empty-handed, we fight as before (team-up cost kills).
+    if (!tune::team_up || w.gems < tune::team_up_min_gems) return false;
     float enemySum = 0;
     int enemies = 0, enemiesNear = 0;
     for (const auto& e : w.enemies) {
