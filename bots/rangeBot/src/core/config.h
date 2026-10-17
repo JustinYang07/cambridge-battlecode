@@ -15,6 +15,7 @@ inline constexpr float centre_zone = 0.5f;          // the centre: radius below 
 
 // ---- party rotation: a party moves on together instead of waiting out its camp's respawn
 inline constexpr bool party_rotation = true;        // A/B switch
+inline constexpr bool move_on_all_game = true;        // rangeBot: a camp a teammate holds is no option for the rest of us (they move on), all game
 inline constexpr bool capture_board = false;          // rangeBot: announce captures in shared byte 5 (teams of <=5 bodies; off: -129 +/- 132, idle 16 -> 3 rounds but no gain)
 inline constexpr bool bank_by_recall = true;          // rangeBot: bank via recall + walk from spawn when quicker
 inline constexpr float bank_recall_margin = 3.0f;     // ...by at least this many turns

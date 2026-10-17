@@ -302,7 +302,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     // A teammate holds our party camp's capture and the rest of the party moves on together: judge
     // the next camp with them, not alone (rows: Cassi and Issac judged the second wolves "too strong"
     // solo and stood on the first camp's tiles, splitting its reward three ways).
-    if (rotateOnCapture(w) && tune::party_rotation && w.partyMates != 0 && g.id != w.lastTarget &&
+    if ((rotateOnCapture(w) || tune::move_on_all_game) && tune::party_rotation && w.partyMates != 0 && g.id != w.lastTarget &&
         mem.status != GroupStatus::respawning && mem.status != GroupStatus::reward && w.lastTarget >= 0 &&
         w.lastTarget < static_cast<int>(w.groups.size()) &&
         mapplan::isNeighbour(w.lastTarget, g.id) &&  // only where the party moves on to (every camp: +200 lost turns)
@@ -444,8 +444,12 @@ Option scoreGroup(World& w, const Candidate& c) {
         o.turns("capture", tune::capture_turns);
         if (owners) o.mul("nearer ally capturing", tune::ally_claim_factor);
         // Capture hand-off: a loop mate stays for this one, we walk on to the next camp.
-        if (const float share = captureShare(w, g.id); share < 1.0f)
+        if (const float share = captureShare(w, g.id); share < 1.0f) {
             o.mul(share <= tune::capture_taken_factor ? "teammate is capturing" : "teammate capturing first", share);
+            // A teammate stands on the tiles holding it: we add nothing here. Move on to the next camp
+            // now, as their team does (we used to wait beside the tiles for the 5-round capture).
+            if (tune::move_on_all_game && allyHolding(w, g.id)) o.mul("teammate holds it: move on", 1e-4f);
+        }
         // An enemy on the spawn tiles contests the capture: progress resets every round, so the
         // reward is not 5 turns away (both teams' Vargs sat on packs' cluster trading hits for 14
         // turns, scoring capture 2109 until one died). Winning the fight is the way to the reward.
