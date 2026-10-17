@@ -586,6 +586,7 @@ void execute(World& w, const Option& o) {
     if (o.kind == OptionKind::fight) comms::claimEnemy(w.slot, o.target);
     else if (o.kind == OptionKind::wait && o.target == 2) comms::claimRegroup(w.slot);
     else if (farming) comms::claimGroup(w.slot, o.target, dist(w.pos, statics.groups[static_cast<std::size_t>(o.target)].center));
+    else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold)) comms::claimRetreat(w.slot);
     else comms::clear(w.slot);
 
     // rangeBot: an enemy in range or our front behind us outranks the walk (not captures,

@@ -14,7 +14,7 @@ struct Step {
 };
 
 // Read the inventory once per turn; cheap queries below use this snapshot.
-void refresh();
+void refresh(const World& w);  // re-reads the inventory only where buying is possible (or after a purchase)
 // Buy toward the build plan if this champion is allowed to shop right now.
 void spend(World& w);
 // Keep one altar lock (and optionally a teleport crystal) in the bag; 10 gold each, spawn only.

@@ -14,6 +14,9 @@ namespace scorers {
 void fight(World& w, std::vector<Option>& out) {
     const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
     for (const auto& e : w.enemies) {
+        // On or by its own spawn it heals every round: scored at x0.05 anyway, so skip the work
+        // (rushbait-v2: scoring five enemies standing on their spawn cost ~30k fuel every turn).
+        if (tune::fight_skip_at_spawn && !e.channeling && dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius) continue;
         // Fights are team against team: the target plus enemies close enough to join it, against
         // us plus allies near it or already attacking it (shared focus). Each side's time to wipe
         // the other decides who wins; we all hit the target, so it falls in e.hp / our damage.

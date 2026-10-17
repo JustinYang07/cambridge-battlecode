@@ -7,6 +7,7 @@
 //              b = 0: within 6 tiles, 1: within 15, 2: further (Chebyshev to the group's centre)
 //   220..249   fighting enemy champion k = value - 220 (index in the enemy roster)
 //   250        walking to an ally's alert (regrouping): counted as on its way to the fight
+//   251        retreating from a fight (rangeBot): allies can follow or hold
 // Claims are rewritten every turn, so a dead or retargeted champion releases its claim on its
 // next turn, and the distance bracket follows the claimer as it walks.
 //
@@ -27,6 +28,7 @@ inline constexpr int max_slots = 8;
 inline constexpr int max_claim_group = 72;
 inline constexpr int enemy_code = 220;
 inline constexpr int regroup_code = 250;
+inline constexpr int retreat_code = 251;
 
 // Distance bracket for a claim from this far away (tiles).
 int bracket(int tiles);
@@ -36,6 +38,10 @@ void refresh();
 void claimGroup(int slot, int groupId, int tiles);  // groupId < 0 clears the claim
 void claimEnemy(int slot, int enemyIndex);  // focus fire: the enemy champion we are attacking
 void claimRegroup(int slot);  // on our way to an ally's alert
+void claimRetreat(int slot);  // retreating from a fight
+// The ally in `slot` is retreating / fighting an enemy champion (from its claim byte).
+bool retreating(int slot);
+bool fighting(int slot);
 void clear(int slot);
 // Allies (excluding exceptSlot) currently walking to an alert.
 int regroupers(int exceptSlot);

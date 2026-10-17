@@ -14,7 +14,6 @@
 #include "../strategy/cohesion.h"
 #include "../strategy/loop.h"
 #include "../strategy/mapplan.h"
-#include "../strategy/plan.h"
 #include "../strategy/regroup.h"
 #include "scorers.h"
 
@@ -96,7 +95,52 @@ namespace {
 // Anchored on who is actually standing on the tiles (ally positions are exact, so every champion
 // reaches the same answer): designating a capturer who was not there yet, or who then went home
 // to heal, left the camp empty and reset the capture. Returns the factor for our capture score.
+float captureShareUncached(const World& w, int groupId);
+
+bool rotateOnCapture(const World& w) { return tune::rotate_on_capture && w.round <= tune::rotate_capture_rounds; }
+
+// A teammate stands on this group's capture tiles now (the 5-round capture is under way), cached
+// per turn. Narrower than captureShare() < 1, which a nearer ally's claim alone also gives: a camp
+// killed and left uncaptured kept the whole party rotating and rescoring for rounds.
+bool allyHolding(const World& w, int groupId) {
+    static int round = -1, slot = -1;
+    static std::vector<std::int8_t> cache;
+    if (round != w.round || slot != w.slot) {
+        round = w.round;
+        slot = w.slot;
+        cache.assign(Statics::get().groups.size(), -1);
+    }
+    if (groupId < 0 || groupId >= static_cast<int>(cache.size())) return false;
+    auto& c = cache[static_cast<std::size_t>(groupId)];
+    if (c < 0) {
+        c = 0;
+        const auto& g = Statics::get().groups[static_cast<std::size_t>(groupId)];
+        for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !c; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPos(sl);
+            if (p.x >= 0 && dist(p, g.center) <= 3 && g.tileMask.is_set(p)) c = 1;
+        }
+    }
+    return c == 1;
+}
+
+// Cached per turn and group: farm scoring asks it once per scored camp and the rotation checks
+// ask again (uncached, the rotation rules cost ~245 lost turns a game).
 float captureShare(const World& w, int groupId) {
+    static int round = -1, slot = -1;
+    static std::vector<float> cache;
+    if (round != w.round || slot != w.slot) {
+        round = w.round;
+        slot = w.slot;
+        cache.assign(Statics::get().groups.size(), -1.0f);
+    }
+    if (groupId < 0 || groupId >= static_cast<int>(cache.size())) return captureShareUncached(w, groupId);
+    auto& c = cache[static_cast<std::size_t>(groupId)];
+    if (c < 0) c = captureShareUncached(w, groupId);
+    return c;
+}
+
+float captureShareUncached(const World& w, int groupId) {
     if (!tune::capture_handoff) return 1.0f;
     const auto& g = Statics::get().groups[static_cast<std::size_t>(groupId)];
     if (w.enemyPressure(g.center, tune::route_enemy_radius) > 0) return 1.0f;  // enemies about: hold it together
@@ -104,12 +148,16 @@ float captureShare(const World& w, int groupId) {
         bool homeward;
         float hp, power;
         int slot;
+        bool tank = false;
     };
     // Only what every teammate can read about every other: health. (A bag test made it one-sided:
     // a teammate's bag may not be readable, so both champions on the tiles decided they kept it.)
     auto homeward = [&](float hp) { return hp < tune::capture_home_hp; };
     auto keeps = [](const Key& a, const Key& b) {  // a keeps the capture rather than b
         if (a.homeward != b.homeward) return a.homeward;
+        // The tank walks on with the party (rows: Varg kept the first wolves' capture, the second
+        // wolves were too strong without it, and three of us stood on the tiles splitting it).
+        if (tune::capture_keeper_not_tank && a.tank != b.tank) return !a.tank;
         if (std::abs(a.hp - b.hp) > 0.02f) return a.hp < b.hp;
         if (a.power != b.power) return a.power < b.power;
         return a.slot > b.slot;
@@ -120,7 +168,7 @@ float captureShare(const World& w, int groupId) {
         return best;
     };
     const bool meOn = g.tileMask.is_set(w.pos);
-    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot};
+    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, isTank(w.type)};
     const int myDist = nearestTile(w.pos);
     bool allyOnTiles = false, allyKeeps = false, allyNearer = false;
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
@@ -132,7 +180,7 @@ float captureShare(const World& w, int groupId) {
             allyOnTiles = true;
             if (meOn) {
                 const float hp = w.allyHpFrac(sl);
-                const Key them{hp >= 0 && homeward(hp), hp >= 0 ? hp : 1.0f, profile(type).farmPower, sl};
+                const Key them{hp >= 0 && homeward(hp), hp >= 0 ? hp : 1.0f, profile(type).farmPower, sl, isTank(type)};
                 if (keeps(them, me)) allyKeeps = true;
             }
         } else if (!meOn && comms::claimOf(sl) == groupId) {
@@ -223,6 +271,17 @@ Option scoreGroup(World& w, const Candidate& c) {
     unsigned owners = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
     // Cohesion: following the leader onto its camp is the point, not a clash over a solo camp.
     if (g.id == cohesion::leaderCamp() && cohesion::leader() >= 0) owners &= ~(1u << cohesion::leader());
+    // A teammate holds our party camp's capture and the rest of the party moves on together: judge
+    // the next camp with them, not alone (rows: Cassi and Issac judged the second wolves "too strong"
+    // solo and stood on the first camp's tiles, splitting its reward three ways).
+    if (rotateOnCapture(w) && tune::party_rotation && w.partyMates != 0 && g.id != w.lastTarget &&
+        mem.status != GroupStatus::respawning && mem.status != GroupStatus::reward && w.lastTarget >= 0 &&
+        w.lastTarget < static_cast<int>(w.groups.size()) &&
+        mapplan::isNeighbour(w.lastTarget, g.id) &&  // only where the party moves on to (every camp: +200 lost turns)
+        w.groups[static_cast<std::size_t>(w.lastTarget)].status == GroupStatus::reward && allyHolding(w, w.lastTarget)) {
+        const int movingOn = std::max(0, __builtin_popcount(w.partyMates) - 1);  // less the keeper
+        claims = std::max(claims, std::min(tune::max_team_per_camp - 1, movingOn));
+    }
     if (o.kind == OptionKind::farm) {
         const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
         // Health we must keep to walk out of reach afterwards (monsters do not chase).
@@ -300,8 +359,13 @@ Option scoreGroup(World& w, const Candidate& c) {
                 // Leader: the lowest slot among mates still at our camp (one off banking cannot lead).
                 const unsigned present = w.partyMates & comms::claimersMask(w.lastTarget, w.slot);
                 const bool leader = (present & ((1u << w.slot) - 1u)) == 0;
-                if (leader && from.status == GroupStatus::respawning && from.respawnAt - w.round >= tune::rotate_min_wait &&
-                    mem.status != GroupStatus::respawning) {
+                // Down for long enough, or down and a teammate holds its capture (the rest of us move on
+                // now rather than stand on the tiles splitting the reward, then walk back to the camp
+                // behind us: rows' second wolves).
+                const bool handedOff = rotateOnCapture(w) && from.status == GroupStatus::reward && allyHolding(w, w.lastTarget);
+                const bool done = (from.status == GroupStatus::respawning && from.respawnAt - w.round >= tune::rotate_min_wait) || handedOff;
+                // A capture hand-off frees everyone but the keeper (the keeper may be the lowest slot).
+                if ((leader || handedOff) && done && mem.status != GroupStatus::respawning && mem.status != GroupStatus::reward) {
                     rotating = true;
                     o.mul("lead the party on", tune::rotate_bonus);
                 }
@@ -347,19 +411,11 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (incoming > 0 && incoming * tune::capture_turns >= w.hp) o.mul("would not survive", 0.02f);
     }
 
-    // Spread out: prefer camps in our squad's region, leave other squads' regions to them.
-    const int home = strategy::homeRegion(w);
-    const int region = home >= 0 ? strategy::plan().groupRegion[static_cast<std::size_t>(g.id)] : -1;
     if (g.id == mapplan::routeGroup()) {
         o.mul("route", tune::route_bonus);
         o.c.note << "route";
     }
     bool raiding = false;
-    // Squad regions spread the team out; a farming loop already says where each party goes.
-    if (home >= 0 && region >= 0 && loop::target() < 0) {
-        if (region == home) o.mul("home region", tune::home_region_bonus);
-        else o.mul("other squad's region", tune::other_region_factor);
-    }
     // Raid: their team is (nearly) wiped, so their half is open until the first of them respawns.
     // Clusters are free and quick (strong pull); monster camps take longer and they may come back
     // mid-fight (mild pull). Only camps we can finish in time, and bolder the healthier we are.
@@ -468,7 +524,7 @@ void farm(World& w, std::vector<Option>& out) {
     std::array<Candidate, kMax> pre;
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
-    const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f * tune::home_region_bonus *
+    const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
                                 tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
@@ -569,7 +625,10 @@ void farm(World& w, std::vector<Option>& out) {
     int nearestUp = -1;
     for (int i = 0, bestD = 1 << 20; i < n; ++i) {
         const auto& pc = pre[static_cast<std::size_t>(i)];
-        if (pc.group && w.groups[static_cast<std::size_t>(pc.group->id)].status != GroupStatus::respawning && pc.travel < bestD) {
+        if (pc.group && w.groups[static_cast<std::size_t>(pc.group->id)].status != GroupStatus::respawning &&
+            !(rotateOnCapture(w) && w.groups[static_cast<std::size_t>(pc.group->id)].status == GroupStatus::reward &&
+              allyHolding(w, pc.group->id)) &&
+            pc.travel < bestD) {
             bestD = pc.travel;
             nearestUp = pc.group->id;
         }

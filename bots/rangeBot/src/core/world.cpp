@@ -222,9 +222,18 @@ void World::refresh(bool firstTurn) {
     fuel::mark("refresh.champs");
 
     // Camps: presence from camp_tiles against the static camp table.
+    // A group whose nearest tile is beyond our sight (vision 8; our ward is within 2 and sees 6)
+    // cannot be visible: skip its per-tile tests (big maps scanned every tile of every group).
+    static std::vector<int> extent;  // per group: farthest tile from its centre
+    if (extent.size() != statics.groups.size()) {
+        extent.assign(statics.groups.size(), 0);
+        for (const auto& g : statics.groups)
+            for (auto t : g.tiles) extent[static_cast<std::size_t>(g.id)] = std::max(extent[static_cast<std::size_t>(g.id)], dist(t, g.center));
+    }
     for (const auto& g : statics.groups) {
         auto& mem = groups[static_cast<std::size_t>(g.id)];
         mem.visibleNow = false;
+        if (tune::scan_skip_far && dist(g.center, pos) > tune::scan_sight + extent[static_cast<std::size_t>(g.id)]) continue;
         for (auto t : g.tiles) mem.visibleNow = mem.visibleNow || bit(visibleBits_, t);
         if (!mem.visibleNow) continue;
         for (std::size_t i = 0; i < g.tiles.size(); ++i) {
@@ -346,6 +355,11 @@ void World::updateGroups() {
         // Nothing standing: either waiting for a capture or respawning. Ask the engine only
         // when we do not already know the timer (state() costs ~0.3-3k fuel).
         if (mem.status == GroupStatus::respawning && round < mem.respawnAt) continue;
+        // Waiting for capture: it stays so until someone captures it. Ask every few rounds unless we
+        // are near it, where the capture matters now (lanes: ~2.6 state reads a turn, ~11k fuel).
+        if (tune::reward_recheck_every > 1 && mem.status == GroupStatus::reward && dist(g.center, pos) > 4 &&
+            (round + g.id) % tune::reward_recheck_every != 0)
+            continue;
         try {
             const auto state = g.handle->state();
             if (std::holds_alternative<bc::map::camp_group_reward_available>(state)) {

@@ -15,7 +15,11 @@ std::vector<Option> think(World& w, const Option* keptCamp) {
     bool skipFarm = tune::farm_floor > 0 && cambc::fuel_remaining() < tune::farm_floor;
     if (!skipFarm && tune::farm_skip_enemy_reach >= 0)
         for (const auto& e : w.enemies)
-            if (e.hp > 0 && dist(e.pos, w.pos) <= std::max(w.range, e.range) + tune::farm_skip_enemy_reach) skipFarm = true;
+            // An enemy on or by its own spawn heals there and is not fought: it must not stop us
+            // farming (rushbait-v2: spawns 4 tiles apart, all ten champions stood still all game).
+            if (e.hp > 0 && dist(e.pos, w.pos) <= std::max(w.range, e.range) + tune::farm_skip_enemy_reach &&
+                !(tune::farm_skip_ignore_spawn && dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius))
+                skipFarm = true;
     if (!skipFarm) scorers::farm(w, options);
     else if (keptCamp) {
         options.push_back(*keptCamp);

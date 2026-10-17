@@ -6,7 +6,6 @@
 #include "strategy/loop.h"
 #include "strategy/wards.h"
 #include "strategy/mapplan.h"
-#include "strategy/plan.h"
 #include "strategy/regroup.h"
 #include "core/comms.h"
 #include "core/config.h"
@@ -115,7 +114,7 @@ void Bot::play_turn() {
     const bool wasRegrouping = regroup::active();
     regroup::update(w);
     if (regroup::active() != wasRegrouping) w.forceReplan = true;
-    shop::refresh();
+    shop::refresh(w);
     shop::spend(w);
     shop::buyConsumables(w);
     fuel::mark("shop");
@@ -128,11 +127,6 @@ void Bot::play_turn() {
         trace().action(me.is_recalling() ? "ch:rc" : me.is_submitting_gems() ? "ch:t" : "ch:tp");
     } else {
         nav().beginTurn();
-        if (!strategy::plan().ready) {
-            strategy::step(w);
-            if (strategy::plan().ready) trace().forceFull();
-        }
-        fuel::mark("strategy");
         const int routeBefore = mapplan::routeGroup();
         mapplan::follow(w);
         if (mapplan::routeGroup() != routeBefore) w.forceReplan = true;
@@ -146,8 +140,16 @@ void Bot::play_turn() {
         fuel::mark("route");
         // Short of fuel already (a crowded fight, a big map): keep last turn's plan instead of
         // rescoring everything, unless we are in real danger. A turn that overruns loses the next.
+        // Never keep a farm plan whose camp is down (killed and waiting for capture, or respawning),
+        // and never for long: lanes' turns are tight every turn, and six champions kept "farm" on
+        // three dead wolf camps for 500 rounds, stepping on and off the tiles, never capturing.
+        static int tightStreak = 0;
+        const bool planStale = plan_ && plan_->kind == OptionKind::farm && plan_->target >= 0 &&
+                               plan_->target < static_cast<int>(w.groups.size()) &&
+                               w.groups[static_cast<std::size_t>(plan_->target)].status != GroupStatus::alive;
         const bool tight = tune::think_floor > 0 && plan_ && bc::fuel_remaining() < tune::think_floor &&
-                           w.hpFrac() >= tune::lock_emergency_hp;
+                           w.hpFrac() >= tune::lock_emergency_hp && !planStale && tightStreak < tune::think_floor_max_streak;
+        tightStreak = tight ? tightStreak + 1 : 0;
         if (tight) trace().note("fuel tight: kept plan");
         if (!tight && needsReplan(w)) {
             w.forceReplan = false;
@@ -207,6 +209,7 @@ void Bot::play_turn() {
 
         // Trace the chosen option, then the best option of each other kind (so a rejected fight
         // or bank is visible even when several farm options outscore it), then the best of the rest.
+        if constexpr (kTracing) {
         const Candidate* top[Trace::kMaxCandidates];
         int n = 0;
         if (chosen >= 0) top[n++] = &options[static_cast<std::size_t>(chosen)].c;
@@ -228,6 +231,9 @@ void Bot::play_turn() {
             }
         }
         trace().candidates(top, n, changed);
+        } else {
+            (void)changed;
+        }
         fuel::mark("trace");
     }
     // Every champion gets a turn every round (dead or channelling included), so a jump of more
@@ -237,7 +243,7 @@ void Bot::play_turn() {
     lastRound_ = roundAtStart;
     (void)fuelAtStart;
     trace().lostTurns(lostTurns_);
-    if (lostOne || round_ % 50 == 0) {
+    if (kTracing && (lostOne || round_ % 50 == 0)) {
         // The previous turn overran: say what it was doing so the lab can show the culprit.
         trace().note("LOST prev: " + fuel::keptReport() + " flushAt " + num(static_cast<long long>(prevFlushAt_ / 1000)) +
                      "k flushCost " + num(static_cast<long long>(prevFlushCost_ / 1000)) + "k" +
@@ -245,16 +251,18 @@ void Bot::play_turn() {
                      " bytes " + num(prevBytes_));
         trace().forceFull();
     }
-    if (tune::trace_fuel_profile) trace().note(fuel::report());
-    const auto beforeFlush = bc::fuel_remaining();
-    prevFullTrace_ = trace().willWriteFull();
-    trace().flush(fuel::split() ? 0 : fuel::used());
+    if constexpr (kTracing) {
+        if (tune::trace_fuel_profile) trace().note(fuel::report());
+        const auto beforeFlush = bc::fuel_remaining();
+        prevFullTrace_ = trace().willWriteFull();
+        trace().flush(fuel::split() ? 0 : fuel::used());
+        prevFlushAt_ = beforeFlush;
+        prevFlushCost_ = beforeFlush - bc::fuel_remaining();
+        prevBuild_ = trace().lastFullBuild_;
+        prevWrite_ = trace().lastFullWrite_;
+        prevBytes_ = trace().lastFullBytes_;
+    }
     fuel::mark("flush");
-    prevFlushAt_ = beforeFlush;
-    prevFlushCost_ = beforeFlush - bc::fuel_remaining();
-    prevBuild_ = trace().lastFullBuild_;
-    prevWrite_ = trace().lastFullWrite_;
-    prevBytes_ = trace().lastFullBytes_;
     // Spare fuel at the end of the turn builds the static distance fields scoring reads.
     if (!fuel::split()) fields::step(tune::fuel_reserve_fields);
     fuel::mark("fields");

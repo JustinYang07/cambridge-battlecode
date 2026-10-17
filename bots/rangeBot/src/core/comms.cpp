@@ -46,6 +46,18 @@ void claimRegroup(int slot) {
     if (slot < alert_byte) write(slot, regroup_code);
 }
 
+void claimRetreat(int slot) {
+    if (slot < alert_byte) write(slot, retreat_code);
+}
+
+bool retreating(int slot) { return slot >= 0 && slot < alert_byte && cache[static_cast<std::size_t>(slot)] == retreat_code; }
+
+bool fighting(int slot) {
+    if (slot < 0 || slot >= alert_byte) return false;
+    const auto v = cache[static_cast<std::size_t>(slot)];
+    return v >= enemy_code && v < regroup_code;
+}
+
 int regroupers(int exceptSlot) {
     int count = 0;
     for (int i = 0; i < alert_byte; ++i)
@@ -71,7 +83,9 @@ unsigned claimersMask(int groupId, int exceptSlot) {
     return mask;
 }
 
-bool active(int slot) { return slot >= 0 && slot < alert_byte && cache[static_cast<std::size_t>(slot)] != 0; }
+bool active(int slot) {
+    return slot >= 0 && slot < alert_byte && cache[static_cast<std::size_t>(slot)] != 0 && cache[static_cast<std::size_t>(slot)] != retreat_code;
+}
 
 int claimOf(int slot) {
     return slot >= 0 && slot < alert_byte ? groupOf(cache[static_cast<std::size_t>(slot)]) : -1;

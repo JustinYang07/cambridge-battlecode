@@ -1,6 +1,7 @@
 // Survival: heal (walk home or recall), flee from losing fights, and the idle fallback.
 #include <algorithm>
 #include "../combat/combat.h"
+#include "../core/comms.h"
 #include "../core/config.h"
 #include "../nav/navigator.h"
 #include "../shop/shop.h"
@@ -17,8 +18,16 @@ void survive(World& w, std::vector<Option>& out) {
     // growing every round the gold sits unspent (items are how we scale), and resets once bought.
     static int affordableSince = -1;
     const auto buy = shop::affordable(w);
-    const bool canShop = tune::shop_trips && (buy.completes || buy.shards >= tune::shop_min_shards) &&
-                         (!tune::shop_after_first_tribute || w.hasTributed);
+    bool canShop = tune::shop_trips && (buy.completes || buy.shards >= tune::shop_min_shards) &&
+                   (!tune::shop_after_first_tribute || w.hasTributed);
+    // A fight about to happen is no time to shop (collision: Varg recalled at full health to spend
+    // 90 gold as their team arrived, and the three left behind died). The gold keeps its urgency.
+    bool fightNear = false;
+    if (tune::shop_no_fight && canShop) {
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, w.pos) <= tune::shop_enemy_radius) fightNear = true;
+        if (regroup::active() && dist(regroup::at(), w.pos) <= tune::shop_alert_radius) fightNear = true;
+    }
     if (!canShop) affordableSince = -1;
     else if (affordableSince < 0) affordableSince = w.round;
     if (f < 0.999f || canShop) {
@@ -34,7 +43,7 @@ void survive(World& w, std::vector<Option>& out) {
         const float urgent = tune::heal_urgent_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
         const float urgency = std::clamp((start - f) / (start - urgent), 0.0f, 1.0f);
         o.add("low health", urgency * urgency * 60.0f);
-        if (canShop) {
+        if (canShop && !(fightNear && f >= tune::heal_start_frac)) {
             o.add("shopping", static_cast<float>(buy.shards) * tune::shop_shard_value * (buy.completes ? 1.5f : 1.0f));
             const float waited = static_cast<float>(w.round - affordableSince);
             o.mul("gold waiting to be spent", std::min(1.0f + waited * tune::shop_urgency_per_round, tune::shop_urgency_max));
@@ -111,9 +120,34 @@ void survive(World& w, std::vector<Option>& out) {
                 o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
                 o.turns("lost farming", 25.0f);
                 o.c.note << "die in " << static_cast<int>(toDie) << ", escape " << static_cast<int>(escape);
+                // Allies beside us still fighting: leaving them hands the enemy a 4v2 (collision:
+                // Ren left at 86% health, Cassi and Issac died, then Ren was chased down alone).
+                if (tune::retreat_hold && w.hpFrac() >= tune::retreat_hold_hp) {
+                    for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s)
+                        if (s != w.slot && comms::fighting(s) && w.allyPos(s).x >= 0 && dist(w.allyPos(s), w.pos) <= tune::retreat_team_radius) {
+                            o.mul("allies still fighting", tune::retreat_hold_factor);
+                            break;
+                        }
+                }
                 o.finish();
                 out.push_back(std::move(o));
             }
+        }
+    }
+    // An ally beside us is retreating from enemies here: go with it rather than be left outnumbered.
+    if (tune::retreat_follow && w.enemyPressure(w.pos, tune::regroup_enemy_radius) > 0) {
+        for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
+            if (s == w.slot || !comms::retreating(s) || w.allyPos(s).x < 0 || dist(w.allyPos(s), w.pos) > tune::retreat_team_radius) continue;
+            Option o;
+            o.kind = OptionKind::flee;
+            o.c.target << "retreat";
+            o.add("team retreats", 0.8f * tune::flee_value);
+            o.add("bag", static_cast<float>(w.gems) * 1.2f);
+            o.turns("lost farming", 25.0f);
+            o.c.note << "with slot " << s;
+            o.finish();
+            out.push_back(std::move(o));
+            break;
         }
     }
 }

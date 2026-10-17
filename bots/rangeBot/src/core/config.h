@@ -15,6 +15,9 @@ inline constexpr float centre_zone = 0.5f;          // the centre: radius below 
 
 // ---- party rotation: a party moves on together instead of waiting out its camp's respawn
 inline constexpr bool party_rotation = true;        // A/B switch
+inline constexpr bool capture_keeper_not_tank = true;  // rangeBot: the capture keeper is not the tank when another champion is on the tiles
+inline constexpr int rotate_capture_rounds = 150;  // rangeBot: ...only in the opening (all game: ~250 more lost turns a game)
+inline constexpr bool rotate_on_capture = true;     // rangeBot: a teammate capturing our party camp ends it for the rest of the party (rows: they walked back to the first wolves)
 inline constexpr int rotate_min_wait = 5;           // our party camp is down at least this long...
 inline constexpr float rotate_bonus = 1.5f;         // ...the next free party camp (leader) / the mates' new camp (followers)
 
@@ -93,6 +96,9 @@ inline constexpr int opening_rounds = 300;
 // Opening gem rush (Sneaky Bush Campers bank their first gems ~r50 and 100 by ~r73; we took ~68 / ~115):
 inline constexpr int early_gold_skip_round = 0;      // before this, gold-only camps are skipped unless right beside us
 inline constexpr bool shop_after_first_tribute = false;  // no shop trips before our first tribute
+inline constexpr bool shop_no_fight = false;         // rangeBot: no shop trip while healthy with an enemy champion near or an ally's alert near (off: +20 vs +30)
+inline constexpr int shop_enemy_radius = 10;         // ...an enemy this close
+inline constexpr int shop_alert_radius = 12;         // ...or an ally's enemy alert this close
 inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
 // Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
 inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (dash over a hole in, and out)
@@ -165,14 +171,17 @@ inline constexpr unsigned long long trace_fuel_per_byte = 36;          // stdout
 inline constexpr unsigned long long fuel_reserve_full_trace = 40000; // skip the detailed trace below this
 inline constexpr unsigned long long nav_safe_floor = 0;                // below this fuel, paths skip the avoid-danger search (0: always search)
 inline constexpr unsigned long long farm_floor = 0;                       // loopBot: skip farm scoring (keep the plan's camp) below this much fuel before thinking (0: off; 70k: +257 vs +361 off)
+inline constexpr bool farm_skip_ignore_spawn = true;   // rangeBot: enemies on their own spawn do not trigger the farm skip
+inline constexpr bool fight_skip_at_spawn = true;      // rangeBot: enemies on their own spawn are not scored as fights
 inline constexpr int farm_skip_enemy_reach = 3;                           // loopBot: skip farm scoring while an enemy champion is this close beyond our range (-1: off)
+inline constexpr bool scan_skip_far = true;        // rangeBot: the camp scan skips groups out of sight range
+inline constexpr int scan_sight = 9;               // ...vision 8 (+1 slack)
+inline constexpr int reward_recheck_every = 3;     // rangeBot: re-read a captured-waiting group's state every this many rounds when away from it
+inline constexpr int think_floor_max_streak = 3;            // rangeBot: ...at most this many turns in a row (a stale plan deadlocked lanes)
 inline constexpr unsigned long long think_floor = 60000;                  // keep last turn's plan when less fuel than this is left before thinking (0: off)
 inline constexpr unsigned long long fuel_for_full_scoring = 75000;   // score max_scored_groups only above this
 inline constexpr int bfs_radius = 48;
 inline constexpr int replan_every = 8;                               // rescore at least this often
-inline constexpr unsigned long long fuel_for_planning = 50000;      // advance the team plan only with this much left
-inline constexpr float home_region_bonus = 1.0f;                     // camps in our squad's region
-inline constexpr float other_region_factor = 1.0f;                   // camps in another squad's region
 inline constexpr unsigned long long fuel_per_scored_group = 6000;
 inline constexpr unsigned long long fuel_reserve_fields = 30000;     // build distance fields only above this (one costs <=12k)    // farm scoring cost per group
 inline constexpr unsigned long long fresh_turn_fuel = 90000;         // a fresh turn starts with ~96.8k                                // distance-from-us search cut-off
@@ -285,6 +294,11 @@ inline constexpr int chain_rounds = 30;              // how long the bonus lasts
 inline constexpr bool capture_handoff = true;        // one party member captures, the rest move on
 inline constexpr float handoff_factor = 0.1f;        // capture score when a teammate claiming it is nearer its tiles
 inline constexpr float capture_taken_factor = 0.01f; // capture score when a teammate already stands on its tiles (one capturer is enough)
+inline constexpr bool retreat_follow = false;       // rangeBot: an ally beside us retreating from enemies: retreat with it
+inline constexpr bool retreat_hold = false;         // rangeBot: allies beside us still fighting: our predicted retreat x retreat_hold_factor while healthy
+inline constexpr int retreat_team_radius = 6;       // ...allies this close count
+inline constexpr float retreat_hold_factor = 0.3f;
+inline constexpr float retreat_hold_hp = 0.5f;
 inline constexpr bool stand_together = false;       // allies here match the enemies: flee scores x stand_flee_factor...
 inline constexpr float stand_min_hp = 0.3f;         // ...while above this health
 inline constexpr float stand_flee_factor = 0.3f;

@@ -17,6 +17,15 @@ namespace {
 int shardsPer(Family f) { return f == Family::power ? 6 : 5; }
 
 std::optional<bc::enum_map<bc::item_type>> inventory;
+bool inventoryStale = true;
+
+// Tavi shops anywhere. A champion's passive never changes: ask the engine once (it is a host
+// call, and spend()/affordable() asked every turn).
+bool remoteShop() {
+    static int cached = -1;
+    if (cached < 0) cached = bc::self().passive() == bc::passive_type::remote_shop ? 1 : 0;
+    return cached == 1;
+}
 unsigned passiveMask = 0;  // bit p set when an emblem with item_passive p is owned
 
 bc::item_type shardOf(Step s) {
@@ -146,7 +155,11 @@ std::optional<std::pair<Step, int>> currentStep(bc::champion_type type) {
 
 } // namespace
 
-void refresh() {
+void refresh(const World& w) {
+    // Items change only when we buy, and we can buy only on spawn, while dead, or anywhere as Tavi:
+    // elsewhere the inventory read last time still holds (it is a host call every turn otherwise).
+    if (inventory && !inventoryStale && w.alive && !w.atSpawn && !remoteShop()) return;
+    inventoryStale = false;
     inventory = bc::self().item_count();
     passiveMask = 0;
     const std::pair<bc::item_passive, Family> families[] = {
@@ -166,7 +179,7 @@ bool hasPassive(bc::item_passive passive) { return passiveMask & (1u << static_c
 void spend(World& w) {
     auto& me = bc::self();
     // Shops are only open on our spawn or while dead (Tavi shops anywhere); skip the host calls otherwise.
-    if (w.alive && !w.atSpawn && me.passive() != bc::passive_type::remote_shop) return;
+    if (w.alive && !w.atSpawn && !remoteShop()) return;
     for (int guard = 0; guard < 4; ++guard) {
         const auto step = currentStep(w.type);
         if (!step) return;
@@ -184,13 +197,14 @@ void spend(World& w) {
         w.gold = static_cast<int>(me.gold_count());
         FixedStr<24> msg;
         trace().action((msg << 'b' << static_cast<int>(count) << familyName(step->first.family)).view());
-        refresh();
+        inventoryStale = true;
+        refresh(w);
     }
 }
 
 Affordable affordable(const World& w) {
     Affordable a;
-    if (w.atSpawn || bc::self().passive() == bc::passive_type::remote_shop) return a;
+    if (w.atSpawn || remoteShop()) return a;
     // The build order is rebuilt on every call: cache it for the round.
     static int cachedRound = -1;
     static Affordable cached;

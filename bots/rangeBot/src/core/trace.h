@@ -17,6 +17,14 @@
 // Define BB_NO_TRACE to compile tracing out for fuel-sensitive submissions.
 #include <array>
 #include <string_view>
+
+// Compile-time switch for the work that only feeds traces (choosing and copying the traced
+// options, diagnostics strings): with tracing compiled out it cost ~7k fuel a turn for nothing.
+#ifdef BB_NO_TRACE
+inline constexpr bool kTracing = false;
+#else
+inline constexpr bool kTracing = true;
+#endif
 #include <vector>
 #include "fixed_str.h"
 
