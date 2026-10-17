@@ -151,7 +151,8 @@ void Bot::play_turn() {
         if (tight) trace().note("fuel tight: kept plan");
         if (!tight && needsReplan(w)) {
             w.forceReplan = false;
-            options = brain::think(w);
+            const bool campPlan = plan_ && (plan_->kind == OptionKind::farm || plan_->kind == OptionKind::capture);
+            options = brain::think(w, campPlan ? &*plan_ : nullptr);
             // Vision changed (an enemy appeared or vanished, e.g. walking out of bushes): record the
             // full option breakdown even if the choice stays the same, or the decision explorer
             // keeps showing options scored before the new information.

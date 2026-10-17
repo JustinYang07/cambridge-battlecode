@@ -6,10 +6,22 @@
 
 namespace brain {
 
-std::vector<Option> think(World& w) {
+std::vector<Option> think(World& w, const Option* keptCamp) {
     std::vector<Option> options;
     options.reserve(Statics::get().groups.size() + 8);
-    scorers::farm(w, options);
+    // Farm scoring is the most expensive scorer (~10k bounds + ~6k per scored camp). In a fight
+    // the choice is fight, flee or the camp we were already on; a turn already short of fuel
+    // would overrun and lose the next (swirl: every champion lost every other turn for 50 rounds).
+    bool skipFarm = tune::farm_floor > 0 && cambc::fuel_remaining() < tune::farm_floor;
+    if (!skipFarm && tune::farm_skip_enemy_reach >= 0)
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, w.pos) <= std::max(w.range, e.range) + tune::farm_skip_enemy_reach) skipFarm = true;
+    if (!skipFarm) scorers::farm(w, options);
+    else if (keptCamp) {
+        options.push_back(*keptCamp);
+        options.back().c.note.clear();
+        options.back().c.note << "camp kept (farm not rescored)";
+    }
     fuel::mark("think.farm");
     scorers::bank(w, options);
     fuel::mark("think.bank");
