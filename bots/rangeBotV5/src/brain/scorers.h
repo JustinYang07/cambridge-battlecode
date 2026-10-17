@@ -1,0 +1,26 @@
+#pragma once
+// Each scorer proposes options of one kind. Add a new behaviour by writing a
+// scorer and registering it in brain.cpp.
+#include <vector>
+#include "../core/world.h"
+#include "option.h"
+
+namespace scorers {
+
+void farm(World& w, std::vector<Option>& out);      // farm.cpp: clear and capture camp groups
+void bank(World& w, std::vector<Option>& out);      // bank.cpp: tribute carried gems
+void survive(World& w, std::vector<Option>& out);   // survive.cpp: heal, flee
+void fight(World& w, std::vector<Option>& out);     // fight.cpp: attack enemy champions
+void idle(World& w, std::vector<Option>& out);      // survive.cpp: fallback positioning
+void regroupOption(World& w, std::vector<Option>& out);
+void hunt(World& w, std::vector<Option>& out);       // survive.cpp: after being stuck, go after enemies  // survive.cpp: join an ally who sees an enemy
+
+float goldValue(const World& w);
+float recallBankTurns(const World& w, int altarIdx);  // bank.cpp: recall-then-walk turns to this altar
+// Our factor for this group's capture (<1: a teammate keeps it), and a teammate stands on its tiles now.
+float captureShareOf(const World& w, int groupId);
+bool allyHoldingOf(const World& w, int groupId);
+// Value of one gem: above 1 while the enemy has tributed more than us.
+float gemValue(const World& w);
+
+} // namespace scorers
