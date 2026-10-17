@@ -132,7 +132,7 @@ void survive(World& w, std::vector<Option>& out) {
                 // Ren left at 86% health, Cassi and Issac died, then Ren was chased down alone).
                 if (tune::retreat_hold && w.hpFrac() >= tune::retreat_hold_hp) {
                     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s)
-                        if (s != w.slot && comms::fighting(s) && w.allyPos(s).x >= 0 && dist(w.allyPos(s), w.pos) <= tune::retreat_team_radius) {
+                        if (s != w.slot && comms::fighting(s) && w.allyPosCached(s).x >= 0 && dist(w.allyPosCached(s), w.pos) <= tune::retreat_team_radius) {
                             o.mul("allies still fighting", tune::retreat_hold_factor);
                             break;
                         }
@@ -145,7 +145,7 @@ void survive(World& w, std::vector<Option>& out) {
     // An ally beside us is retreating from enemies here: go with it rather than be left outnumbered.
     if (tune::retreat_follow && w.enemyPressure(w.pos, tune::regroup_enemy_radius) > 0) {
         for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
-            if (s == w.slot || !comms::retreating(s) || w.allyPos(s).x < 0 || dist(w.allyPos(s), w.pos) > tune::retreat_team_radius) continue;
+            if (s == w.slot || !comms::retreating(s) || w.allyPosCached(s).x < 0 || dist(w.allyPosCached(s), w.pos) > tune::retreat_team_radius) continue;
             Option o;
             o.kind = OptionKind::flee;
             o.c.target << "retreat";

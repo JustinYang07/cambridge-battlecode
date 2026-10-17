@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <vector>
 #include "../core/config.h"
 #include "../core/fixed_str.h"
 #include "../core/trace.h"
@@ -117,6 +118,18 @@ int Navigator::readyDash(World& w) const {
 }
 
 namespace {
+// Bush tiles as one byte per tile, exported once (bitboard reads cost ~30-300 fuel each).
+bool isBush(bc::vec2 t) {
+    static std::vector<std::uint8_t> bits;
+    const auto& st = Statics::get();
+    if (bits.empty()) {
+        bits.assign(static_cast<std::size_t>(st.width * st.height), 0);
+        for (auto b : bc::map::bushes().positions()) bits[static_cast<std::size_t>(b.y * st.width + b.x)] = 1;
+    }
+    if (t.x < 0 || t.y < 0 || t.x >= st.width || t.y >= st.height) return false;
+    return bits[static_cast<std::size_t>(t.y * st.width + t.x)] != 0;
+}
+
 bool dashTo(World& w, int slot, bc::vec2 to) {
     try {
         if (w.abilities()[static_cast<std::size_t>(slot)].use(to)) {
@@ -380,9 +393,17 @@ bool Navigator::stepHome(World& w) {
         const int home = fields::toSpawn(0, t);
         if (home < 0 || home >= unreachable) return 1 << 20;
         int c = home;
+        int nearest = 1 << 20;
         for (const auto& e : w.enemies)
-            if (e.hp > 0 && dist(e.pos, t) <= e.range + 1) c += tune::flee_reach_cost;
+            if (e.hp > 0) {
+                if (dist(e.pos, t) <= e.range + 1) c += tune::flee_reach_cost;
+                nearest = std::min(nearest, dist(e.pos, t));
+            }
         if (w.danger.is_set(t)) c += tune::flee_reach_cost;
+        // A bush hides us from enemies outside it: worth a few steps of home distance while they
+        // chase, unless one is close enough to be in or beside the same bush.
+        if (tune::flee_bush_bonus > 0 && nearest > 2 && nearest <= tune::flee_bush_chase && isBush(t))
+            c -= tune::flee_bush_bonus;
         return c;
     };
     const int here = cost(w.pos);
@@ -406,13 +427,15 @@ bool Navigator::stepHome(World& w) {
                 const int c = cost(t);
                 if (c < bestCost && st.dashLegal(w.pos, t)) { bestCost = c; best = t; }
             }
-        if (best.x >= 0 && bestCost + 2 <= walkCost && dashTo(w, slot, best)) {
+        if (best.x >= 0 && bestCost + tune::flee_dash_gain <= walkCost && dashTo(w, slot, best)) {
             trace().note("fleeing home: dash");
+            // The dash is a cast: the walk is still ours this turn (unless the dash used it).
+            if (tune::flee_dash_then_walk && bc::self().can_move()) stepHome(w);
             return true;
         }
     }
     if (walk.x < 0 || !bc::self().can_move()) return false;
-    trace().note("fleeing home");
+    trace().note(tune::flee_bush_bonus > 0 && isBush(walk) ? "fleeing home: into a bush" : "fleeing home");
     return tryMove(w, walk);
 }
 

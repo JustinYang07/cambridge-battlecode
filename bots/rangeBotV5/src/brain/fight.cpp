@@ -115,6 +115,22 @@ void fight(World& w, std::vector<Option>& out) {
         // An enemy on or near its own spawn heals fully every round: chasing it there only feeds
         // their team (casters chased retreating enemies into interlock's corner and died).
         if (dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius) o.mul("at their spawn", 0.05f);
+        // Party engage: allies with us and more of us here than of them around the target. Everyone
+        // there sees the same numbers, so the party commits together (focus fire keeps one target).
+        if (tune::party_engage && !atTheirSpawn) {
+            int withMe = 1, alliesNear = 0, them = 0;
+            for (int s = 0; s < w.allyCount; ++s) {
+                if (s == w.slot) continue;
+                const auto p = w.allyPos(s);
+                if (p.x >= 0 && dist(p, w.pos) <= tune::engage_radius) { ++withMe; ++alliesNear; }
+            }
+            for (const auto& x : w.enemies)
+                if (x.hp > 0 && dist(x.pos, e.pos) <= tune::engage_radius) ++them;
+            if (alliesNear > 0 && withMe > them) {
+                o.mul("party engage", tune::engage_bonus);
+                o.c.note << "engage " << withMe << "v" << them << "; ";
+            }
+        }
         o.mul("role appetite", w.role().fightAppetite);
         o.c.note << ours.count << "v" << theirCount << ": kill in " << static_cast<int>(turnsToKill) << ", edge x10 "
                  << static_cast<int>(edge * 10.0f);

@@ -35,6 +35,7 @@ struct EnemySeen {
     bool channeling = false;  // recalling / tributing: a stationary, interruptible target
     bool tributing = false;
     bool stun = false;        // has a crowd-control ability (Tavi, Ren, Cassi, ...)
+    bool stunned = false;     // stunned right now (read within tune::stun_check_radius)
 };
 
 // Where an enemy was last seen; vision is not shared, so remembering recent sightings
@@ -109,6 +110,8 @@ public:
     // Enemy (roster index) seen last round further from us than now... reversed: it is moving away
     // from us (its distance to our tile grew since we last saw it, within 2 rounds).
     bool enemyMovingAway(int index, cambc::vec2 now) const;
+    // The enemy got nearer to us since we last saw it (within 2 rounds).
+    bool enemyApproaching(int index, cambc::vec2 now) const;
     // Seen within the last two rounds and now nearer `target` than it was (combatBotv2).
     bool enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const;
     // Gems-only mode: from tune::gems_only_round, while the enemy has banked tune::gems_only_lag more gems.
@@ -223,6 +226,9 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
+    struct AllyHp { int round = -1; float hp = 0, maxHp = 1, strength = 0; bool alive = false; };
+    mutable std::array<AllyHp, 8> allyHpCache_{};
+    void readAllyHp(int s) const;
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};

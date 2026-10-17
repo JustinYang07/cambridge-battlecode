@@ -22,5 +22,7 @@ float captureShareOf(const World& w, int groupId);
 bool allyHoldingOf(const World& w, int groupId);
 // Value of one gem: above 1 while the enemy has tributed more than us.
 float gemValue(const World& w);
+// farm.cpp: a team rush is on for this group (the map's main gem camp, enough of us alive).
+bool teamRushOn(const World& w, int groupId);
 
 } // namespace scorers

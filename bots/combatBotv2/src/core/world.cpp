@@ -125,7 +125,7 @@ void World::refresh(bool firstTurn) {
         }
         // Our own team too (same cadence): the invasion rule compares the two. Only when it is on:
         // is_alive costs ~300 fuel per champion.
-        for (std::size_t k = 0; tune::invade_needs_lead && k < allyHandles_.size() && k < allyAlive_.size(); ++k) {
+        for (std::size_t k = 0; (tune::invade_needs_lead || tune::team_rush) && k < allyHandles_.size() && k < allyAlive_.size(); ++k) {
             if (static_cast<int>(k) == slot) continue;
             try {
                 allyAlive_[k] = allyHandles_[k].is_alive() ? 1 : 0;
@@ -179,6 +179,13 @@ void World::refresh(bool firstTurn) {
                 }
                 e.stun = known > 0;
             }
+            if ((tune::stun_target != 0 || tune::stunned_team_target) && dist(e.pos, pos) <= tune::stun_check_radius &&
+                bc::fuel_remaining() > tune::stun_check_fuel) {
+                try {
+                    e.stunned = c.buffs().has_stun();
+                } catch (const bc::error&) {
+                }
+            }
             enemies.push_back(e);
             const float dps = e.strength + e.focus * 1.5f / tune::spell_cooldown;
             auto it = std::find_if(ghosts.begin(), ghosts.end(), [&](const EnemyGhost& g) { return g.handle == c; });
@@ -220,6 +227,16 @@ void World::refresh(bool firstTurn) {
     if (teamTarget < 0 && hurt >= 0) {
         teamTarget = hurt;
         teamTargetSeen = round;
+    }
+    // A stunned enemy cannot hit back or walk away: everyone switches to it (the weakest if several).
+    if (tune::stunned_team_target) {
+        const EnemySeen* st = nullptr;
+        for (const auto& e : enemies)
+            if (e.stunned && e.hp > 0 && e.index >= 0 && (!st || e.hp < st->hp)) st = &e;
+        if (st) {
+            teamTarget = st->index;
+            teamTargetSeen = round;
+        }
     }
     fuel::mark("refresh.champs");
 
@@ -413,14 +430,8 @@ bool World::allyTanking(int groupId) const {
     if (!anyNear) return false;
     for (int i = 0; i < static_cast<int>(allyHandles_.size()); ++i) {
         if (i == slot) continue;
-        bc::vec2 at;
-        try {
-            const auto& h = allyHandles_[static_cast<std::size_t>(i)];
-            if (!h.is_visible() || !h.is_alive()) continue;
-            at = h.position();
-        } catch (const bc::error&) {
-            continue;
-        }
+        const bc::vec2 at = allyPosCached(i);  // read once per turn
+        if (at.x < 0) continue;
         for (const auto& c : camps) {
             if (c.groupId != groupId || c.hp <= 0 || c.strength <= 0) continue;
             const int d = dist(at, c.pos);
@@ -437,20 +448,20 @@ World::Side World::ourSide(bc::vec2 at, int radius, int enemyIndex, float myDps)
     bool anyNear = focusing != 0;
     for (const auto& a : allies) anyNear |= dist(a.pos, at) <= radius || dist(a.pos, pos) <= tune::fight_beside_radius;
     if (!anyNear) return side;
-    for (int i = 0; i < static_cast<int>(allyHandles_.size()); ++i) {
+    for (int i = 0; i < static_cast<int>(allyHandles_.size()) && i < 8; ++i) {
         if (i == slot) continue;
-        try {
-            const auto& h = allyHandles_[static_cast<std::size_t>(i)];
-            if (!h.is_visible() || !h.is_alive()) continue;
-            // In the fight: near the target, attacking it, or right beside us (we fight together).
-            const auto p = h.position();
-            if (!((focusing >> i) & 1u) && dist(p, at) > radius && dist(p, pos) > tune::fight_beside_radius) continue;
-            ++side.count;
-            side.hp += h.health();
-            // Allies' spells are unknown here: their basic attacks, plus the share spells add for us.
-            side.dps += h.strength() * (myDps / std::max(strength, 1.0f));
-        } catch (const bc::error&) {
-        }
+        // Position, health and strength read once per turn (fight scoring asks per enemy).
+        const auto p = allyPosCached(i);
+        if (p.x < 0) continue;
+        // In the fight: near the target, attacking it, or right beside us (we fight together).
+        if (!((focusing >> i) & 1u) && dist(p, at) > radius && dist(p, pos) > tune::fight_beside_radius) continue;
+        readAllyHp(i);
+        const auto& c = allyHpCache_[static_cast<std::size_t>(i)];
+        if (!c.alive) continue;
+        ++side.count;
+        side.hp += c.hp;
+        // Allies' spells are unknown here: their basic attacks, plus the share spells add for us.
+        side.dps += c.strength * (myDps / std::max(strength, 1.0f));
     }
     return side;
 }
@@ -487,36 +498,37 @@ cambc::vec2 World::allyPosCached(int s) const {
     return allyPosCache_[static_cast<std::size_t>(s)];
 }
 
-float World::allyHpFrac(int s) const {
-    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return -1.0f;
+// Ally health, read once per turn per ally (two or three host calls each; farm scoring asks per camp).
+void World::readAllyHp(int s) const {
+    auto& c = allyHpCache_[static_cast<std::size_t>(s)];
+    if (c.round == round) return;
+    c = {round, 0.0f, 0.0f, 0.0f, false};
     try {
         const auto& a = allyHandles_[static_cast<std::size_t>(s)];
-        if (!a.is_alive()) return -1.0f;
-        return a.health() / std::max(a.max_health(), 1.0f);
+        if (a.is_alive()) c = {round, a.health(), a.max_health(), a.strength(), true};
     } catch (const bc::error&) {
-        return -1.0f;
     }
+}
+
+float World::allyHpFrac(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size()) || s >= 8) return -1.0f;
+    readAllyHp(s);
+    const auto& c = allyHpCache_[static_cast<std::size_t>(s)];
+    return c.alive ? c.hp / std::max(c.maxHp, 1.0f) : -1.0f;
 }
 
 float World::allyHp(int s) const {
-    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return 0.0f;
-    try {
-        const auto& a = allyHandles_[static_cast<std::size_t>(s)];
-        return a.is_alive() ? a.health() : 0.0f;
-    } catch (const bc::error&) {
-        return 0.0f;
-    }
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size()) || s >= 8) return 0.0f;
+    readAllyHp(s);
+    const auto& c = allyHpCache_[static_cast<std::size_t>(s)];
+    return c.alive ? c.hp : 0.0f;
 }
 
 float World::allyMissingHp(int s) const {
-    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return 0.0f;
-    try {
-        const auto& a = allyHandles_[static_cast<std::size_t>(s)];
-        if (!a.is_alive()) return 0.0f;
-        return std::max(0.0f, a.max_health() - a.health());
-    } catch (const bc::error&) {
-        return 0.0f;
-    }
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size()) || s >= 8) return 0.0f;
+    readAllyHp(s);
+    const auto& c = allyHpCache_[static_cast<std::size_t>(s)];
+    return c.alive ? std::max(0.0f, c.maxHp - c.hp) : 0.0f;
 }
 
 float World::allyCampDps(int s, const GroupInfo& g) const {
@@ -647,6 +659,13 @@ bool World::enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const
     const auto k = static_cast<std::size_t>(index);
     if (enemyPrevRound_[k] < round - 2 || enemyPrevRound_[k] >= round) return false;
     return dist(now, target) < dist(enemyPrevPos_[k], target);
+}
+
+bool World::enemyApproaching(int index, cambc::vec2 now) const {
+    if (index < 0 || index >= static_cast<int>(enemyPrevPos_.size())) return false;
+    const auto k = static_cast<std::size_t>(index);
+    if (enemyPrevRound_[k] < round - 2 || enemyPrevRound_[k] >= round) return false;
+    return dist(now, pos) < dist(enemyPrevPos_[k], pos);
 }
 
 bool World::enemyMovingAway(int index, cambc::vec2 now) const {

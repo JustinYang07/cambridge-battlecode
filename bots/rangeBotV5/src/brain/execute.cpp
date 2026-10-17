@@ -595,7 +595,49 @@ bool rangedFight(World& w, const Option& o) {
     return true;
 }
 
+// Team up before the fight: the enemies we see are nearer to us, on average, than our living
+// allies are, and here they outnumber us. Step toward our allies (hitting whatever is in range)
+// until they are on average no farther than the enemies, then fight together.
+bool teamUp(World& w, const Option& o) {
+    // Only with a bag worth protecting: empty-handed, we fight as before (team-up cost kills).
+    if (!tune::team_up || w.gems < tune::team_up_min_gems) return false;
+    float enemySum = 0;
+    int enemies = 0, enemiesNear = 0;
+    for (const auto& e : w.enemies) {
+        if (e.hp <= 0) continue;
+        enemySum += static_cast<float>(dist(e.pos, w.pos));
+        ++enemies;
+        if (dist(e.pos, w.pos) <= tune::team_up_radius) ++enemiesNear;
+    }
+    if (enemies == 0) return false;
+    float allySum = 0, cx = 0, cy = 0;
+    int allies = 0, alliesNear = 0;
+    for (int s = 0; s < w.allyCount; ++s) {
+        if (s == w.slot) continue;
+        const auto p = w.allyPos(s);
+        if (p.x < 0 || dist(p, w.pos) > tune::team_up_ally_radius) continue;  // too far to team up with
+        allySum += static_cast<float>(dist(p, w.pos));
+        cx += static_cast<float>(p.x);
+        cy += static_cast<float>(p.y);
+        ++allies;
+        if (dist(p, w.pos) <= tune::team_up_radius) ++alliesNear;
+    }
+    if (allies == 0) return false;  // nobody near enough to team up with: fight or flee as before
+    const float enemyAvg = enemySum / static_cast<float>(enemies), allyAvg = allySum / static_cast<float>(allies);
+    const bool outnumbered = enemiesNear > 1 + alliesNear;
+    if (!outnumbered || enemyAvg >= allyAvg) return false;
+    const bc::vec2 centre{static_cast<int>(cx / static_cast<float>(allies) + 0.5f), static_cast<int>(cy / static_cast<float>(allies) + 0.5f)};
+    combat::Focus focus{.enemy = o.enemy, .anyEnemy = true};
+    nav().stepToward(w, centre, 1, true);
+    combat::act(w, focus, false);
+    FixedStr<64> msg;
+    trace().note((msg << "team up: " << enemiesNear << "v" << (1 + alliesNear) << ", enemies " << static_cast<int>(enemyAvg)
+                      << " allies " << static_cast<int>(allyAvg)).view());
+    return true;
+}
+
 void fight(World& w, const Option& o) {
+    if (teamUp(w, o)) return;
     if (rangedFight(w, o)) return;
     combat::Focus focus{.enemy = o.enemy};
     if (dist(w.pos, o.at) <= w.range) {

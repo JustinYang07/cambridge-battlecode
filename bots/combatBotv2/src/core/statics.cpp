@@ -298,6 +298,8 @@ void Statics::init() {
             if (tileCamps_.size() < 255) {
                 tileCamps_.push_back({g.id, health, strength, camp});
                 tileCampIndex_[static_cast<std::size_t>(p.y * width + p.x)] = static_cast<std::uint8_t>(tileCamps_.size());
+            } else {
+                campsCapped_ = true;
             }
             if (c.kind == static_cast<int>(bc::camp_type::monolith)) g.hasMonolith = true;
             if constexpr (kTracing) {  // labels are for traces only

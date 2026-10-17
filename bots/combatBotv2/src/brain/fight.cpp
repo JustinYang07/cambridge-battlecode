@@ -28,6 +28,26 @@ void fight(World& w, std::vector<Option>& out) {
                 theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
                 ++theirCount;
             }
+        // Enemies seen in the last few rounds but not now can still join (out of sight, in bushes,
+        // walking in): in 16 of 23 traced centre deaths after a fight we judged 3v1 to 5v2, four or
+        // five enemies took part in the kill. Count those that could have reached the target since.
+        int ghostsJoining = 0;
+        if (tune::fight_count_ghosts)
+            for (const auto& g : w.ghosts) {
+                const int age = w.round - g.round;
+                if (age <= 0 || age > tune::ghost_join_age || dist(g.pos, e.pos) > tune::fight_join_radius + age) continue;
+                theirHp += tune::ghost_hp;
+                theirDps += std::max(g.dps, 1.0f);
+                ++theirCount;
+                ++ghostsJoining;
+            }
+        // Monsters fight for them too: the camp hits we are already taking, or the camps around the
+        // target that whoever fights there may pull (35% of our deaths to champions came after
+        // monster hits in the 15 rounds before, 23% of theirs).
+        if (tune::fight_monster_damage) {
+            const float monsters = std::max(w.incoming, tune::fight_spot_camp_weight * w.incomingCampDamage(e.pos));
+            theirDps += monsters;
+        }
         auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
         // Measured on traced fights: the target loses ~0.2x the damage per round our side's
         // stats promise (allies not all on it, targets stepping out of range, lost turns).
@@ -48,7 +68,7 @@ void fight(World& w, std::vector<Option>& out) {
         // Standing on a cleared camp's spawn tiles, it blocks our capture: killing it frees the reward.
         for (const auto& g : Statics::get().groups)
             if (w.groups[static_cast<std::size_t>(g.id)].status == GroupStatus::reward && dist(g.center, e.pos) <= 3 &&
-                g.tileMask.is_set(e.pos)) {
+                Statics::get().onGroup(g, e.pos)) {
                 o.add("frees capture", static_cast<float>(g.gems) + static_cast<float>(g.gold) * goldValue(w));
                 break;
             }
@@ -56,6 +76,15 @@ void fight(World& w, std::vector<Option>& out) {
         // Do not chase: an enemy this far off is leaving, and the walk is time not farmed. A
         // channelling enemy (tribute, recall) is standing still, so it is still worth the walk.
         if (dist(w.pos, e.pos) > tune::chase_radius && !e.channeling) o.mul("too far to chase", tune::chase_factor);
+        // Commit only to a fight we can start soon: the target within a couple of steps of our reach,
+        // hitting us, or coming at us. Otherwise keep farming (in traced fights two thirds of our
+        // fight turns were spent 4+ tiles from the target, and 77-87% of fight turns hit nothing).
+        if (tune::fight_commit_gap >= 0 && !e.channeling) {
+            const int gap = dist(w.pos, e.pos) - w.range;
+            const bool hittingUs = dist(e.pos, w.pos) <= e.range + 1;
+            if (gap > tune::fight_commit_gap && !hittingUs && !w.enemyApproaching(e.index, e.pos))
+                o.mul("out of reach: keep farming", tune::fight_far_factor);
+        }
         o.turns("kill time", turnsToKill);
         // Never exactly zero: a losing fight still shows up (with a tiny score) when you inspect
         // the decision, so it is visibly considered and rejected.
@@ -104,6 +133,7 @@ void fight(World& w, std::vector<Option>& out) {
             if (dist(a.pos, e.pos) <= tune::favour_radius) ++near;
         for (const auto& x : w.enemies)
             if (x.hp > 0 && dist(x.pos, e.pos) <= tune::favour_radius) ++enemiesNear;
+        enemiesNear += ghostsJoining;
         const int onTheWay = regroup::alertNear(e.pos, tune::regroup_leash + tune::favour_radius) ? comms::regroupers(w.slot) : 0;
         const int bodies = 1 + std::max(near, onTheWay);  // visible ones may be among those on the way
         const bool atTheirSpawn = dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius;
@@ -121,7 +151,7 @@ void fight(World& w, std::vector<Option>& out) {
             int withMe = 1, alliesNear = 0, them = 0;
             for (int s = 0; s < w.allyCount; ++s) {
                 if (s == w.slot) continue;
-                const auto p = w.allyPos(s);
+                const auto p = w.allyPosCached(s);
                 if (p.x >= 0 && dist(p, w.pos) <= tune::engage_radius) { ++withMe; ++alliesNear; }
             }
             for (const auto& x : w.enemies)

@@ -142,8 +142,8 @@ bool allyHolding(const World& w, int groupId) {
         const auto& g = Statics::get().groups[static_cast<std::size_t>(groupId)];
         for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !c; ++sl) {
             if (sl == w.slot) continue;
-            const auto p = w.allyPos(sl);
-            if (p.x >= 0 && dist(p, g.center) <= 3 && g.tileMask.is_set(p)) c = 1;
+            const auto p = w.allyPosCached(sl);
+            if (p.x >= 0 && dist(p, g.center) <= 3 && Statics::get().onGroup(g, p)) c = 1;
         }
     }
     return c == 1;
@@ -215,7 +215,7 @@ float captureShareUncached(const World& w, int groupId) {
         for (auto t : g.tiles) best = std::min(best, dist(p, t));
         return best;
     };
-    const bool meOn = g.tileMask.is_set(w.pos);
+    const bool meOn = Statics::get().onGroup(g, w.pos);
     // A tank only "walks on with the party" while it is fit to: a hurt tank is going home next, so it
     // competes on damage taken like everyone else (rows: Ryth at 58% recalled empty-handed right
     // after the wolves died, and Ren held the capture and recalled too, leaving two to farm on).
@@ -234,7 +234,7 @@ float captureShareUncached(const World& w, int groupId) {
     bool designatedOther = false;                                 // a teammate here is
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
         if (sl == w.slot) continue;
-        const auto p = w.allyPos(sl);
+        const auto p = w.allyPosCached(sl);
         if (p.x < 0 || dist(p, g.center) > 8) continue;
         const auto type = w.allyTypes[static_cast<std::size_t>(sl)];
         const float allyHp = w.allyHpFrac(sl);
@@ -244,7 +244,7 @@ float captureShareUncached(const World& w, int groupId) {
             designated = false;
             designatedOther = true;
         }
-        if (g.tileMask.is_set(p)) {
+        if (Statics::get().onGroup(g, p)) {
             allyOnTiles = true;
             if (meOn && keeps(them, me)) allyKeeps = true;
         } else if (!meOn && comms::claimOf(sl) == groupId) {
@@ -286,6 +286,31 @@ int dashTravel(const World& w, const GroupInfo& g, bc::vec2& nearest) {
         if (dist(from, t) < best) { best = dist(from, t); nearest = t; }
     if (g.inPocket(w.pos)) return best;
     return static_cast<int>(static_cast<float>(dist(w.pos, g.dashFrom)) * 1.25f) + 1 + best;
+}
+
+// The map's gem camp for a team rush: one group holding at least team_rush_share of all the gems
+// (stampede: the elk camp holds all of them). Worked out once; -1 when no group qualifies.
+int rushGroup() {
+    static int cached = -2;
+    if (cached != -2) return cached;
+    cached = -1;
+    const auto& st = Statics::get();
+    int total = 0, best = -1, bestGems = 0;
+    for (const auto& g : st.groups) {
+        if (g.hasMonolith) continue;
+        total += g.gems;
+        if (g.gems > bestGems && g.reachable) { bestGems = g.gems; best = g.id; }
+    }
+    if (tune::team_rush && best >= 0 && total > 0 && static_cast<float>(bestGems) >= tune::team_rush_share * static_cast<float>(total))
+        cached = best;
+    return cached;
+}
+
+// Rush now: it is the rush camp, the opening is over, and enough of us are alive to take it.
+bool teamRush(const World& w, const GroupInfo& g) {
+    if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
+    // alliesAlive works out of sight (ally positions do not: an unseen ally reads as absent).
+    return w.alliesAlive >= tune::team_rush_min_alive;
 }
 
 Option scoreGroup(World& w, const Candidate& c) {
@@ -359,9 +384,9 @@ Option scoreGroup(World& w, const Candidate& c) {
         const auto& from = statics.groups[static_cast<std::size_t>(w.lastTarget)];
         for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
             if (sl == w.slot || !((w.partyMates >> sl) & 1u)) continue;
-            const auto p = w.allyPos(sl);
+            const auto p = w.allyPosCached(sl);
             const int claim = comms::claimOf(sl);
-            if (p.x < 0 || from.tileMask.is_set(p)) continue;
+            if (p.x < 0 || Statics::get().onGroup(from, p)) continue;
             if (tune::moving_on_real && (dist(p, w.pos) > tune::moving_on_radius || (claim != w.lastTarget && claim != g.id))) continue;
             movingMates |= 1u << sl;
         }
@@ -387,7 +412,7 @@ Option scoreGroup(World& w, const Candidate& c) {
             const unsigned claimers = comms::claimersMask(g.id, w.slot);
             for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !tankLeads; ++sl) {
                 if (sl == w.slot || !((claimers >> sl) & 1u) || !isTank(w.allyTypes[static_cast<std::size_t>(sl)])) continue;
-                const auto p = w.allyPos(sl);
+                const auto p = w.allyPosCached(sl);
                 tankLeads = !tune::tank_cover_near || (p.x >= 0 && dist(p, g.center) <= dist(w.pos, g.center) + tune::tank_cover_slack);
             }
         }
@@ -477,10 +502,23 @@ Option scoreGroup(World& w, const Candidate& c) {
                 o.c.note << "tank first, then leave; ";
             }
         }
+        // Team rush: on maps where one camp holds most of the gems (stampede's elk camp), the whole
+        // team takes it together from the early game. Top teams cleared it at r122-133 with five
+        // champions; we judged it too strong for four and farmed gold-only clusters until r800+.
+        const bool rush = teamRush(w, g);
+        if (rush) {
+            tooStrong = false;
+            // Gather most of the team before the pull (arriving one at a time, each melee champion
+            // died within 4 rounds of stepping in: the elks hit for ~360 a round).
+            need = std::max(need, std::min(w.alliesAlive, tune::team_rush_party));
+            o.need = need;
+            o.mul("team rush", tune::team_rush_bonus);
+            o.c.note << "team rush; ";
+        }
         if (tooStrong) {
             o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
-        } else if (!partialTank && fight.damage + reserve + escapeCost > w.hp) {
+        } else if (!partialTank && !rush && fight.damage + reserve + escapeCost > w.hp) {
             if (engaged) o.mul("would not survive", 0.02f);  // disengage now; heal will win
             else {
                 // Not doable at this health: this is really a reason to go home first.
@@ -541,7 +579,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         }
         if (need > 1 && claims > 0 && !partyFull) o.mul("join ally", 1.3f);
         // Under-levelled: build strength on wolves and clusters before taking elks.
-        if (need > 1 && shop::shardsOwned() < tune::underpowered_shards) o.mul("underpowered", tune::underpowered_factor);
+        if (need > 1 && shop::shardsOwned() < tune::underpowered_shards && !teamRush(w, g)) o.mul("underpowered", tune::underpowered_factor);
         if (need == 1 && owners) o.mul("nearer ally claimed", tune::ally_claim_factor);
         if (w.gems > 0 && fight.damage > 0)
             o.mul("bag at risk", std::max(0.4f, 1.0f - tune::carry_risk_per_gem * w.gems * fight.damage / std::max(w.hp, 1.0f)));
@@ -559,7 +597,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         // reward is not 5 turns away (both teams' Vargs sat on packs' cluster trading hits for 14
         // turns, scoring capture 2109 until one died). Winning the fight is the way to the reward.
         for (const auto& e : w.enemies)
-            if (e.hp > 0 && g.tileMask.is_set(e.pos)) {
+            if (e.hp > 0 && Statics::get().onGroup(g, e.pos)) {
                 o.mul("contested by enemy", tune::contested_capture_factor);
                 o.c.note << "contested";
                 break;
@@ -611,6 +649,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     const bool waiting = c.wait > 0;
     if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
+    // While a team rush is on (its camp is up), every other camp waits: the team converges on it.
+    if (const int rg = rushGroup(); rg >= 0 && g.id != rg && teamRush(w, Statics::get().groups[static_cast<std::size_t>(rg)]) &&
+        w.groups[static_cast<std::size_t>(rg)].status != GroupStatus::respawning)
+        o.mul("team rushing", tune::team_rush_other_factor);
     if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4 && mapplan::skipGoldOnly())
@@ -674,6 +716,11 @@ Option scoreGroup(World& w, const Candidate& c) {
 
 float captureShareOf(const World& w, int groupId) { return captureShare(w, groupId); }
 bool allyHoldingOf(const World& w, int groupId) { return allyHolding(w, groupId); }
+
+bool teamRushOn(const World& w, int groupId) {
+    const int rg = rushGroup();
+    return rg >= 0 && rg == groupId && teamRush(w, Statics::get().groups[static_cast<std::size_t>(rg)]);
+}
 
 void farm(World& w, std::vector<Option>& out) {
     // Branch and bound: an optimistic bound per group (Chebyshev distance never exceeds
@@ -821,7 +868,9 @@ void farm(World& w, std::vector<Option>& out) {
         auto c = pre[static_cast<std::size_t>(pick)];
         pre[static_cast<std::size_t>(pick)].group = nullptr;
         // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
-        if ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored) break;
+        // Traced builds score a few more so the trace can show runners-up; submissions stop as soon
+        // as no bound can beat the best (a bound is an upper limit on the score).
+        if ((c.bound < best && scored >= (kTracing ? tune::trace_candidates : 1)) || scored >= maxScored) break;
 
         scoreOne(c);
     }
