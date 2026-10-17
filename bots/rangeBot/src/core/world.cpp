@@ -47,6 +47,12 @@ void World::refresh(bool firstTurn) {
                 }
             }
         }
+        // Cassi and Issac share one life: find our partner's slot.
+        if (type == bc::champion_type::cassi || type == bc::champion_type::issac) {
+            const auto partner = type == bc::champion_type::cassi ? bc::champion_type::issac : bc::champion_type::cassi;
+            for (int i = 0; i < allyCount; ++i)
+                if (i != slot && allyTypes[static_cast<std::size_t>(i)] == partner) twinSlot = i;
+        }
         abilities_ = me.abilities();
         kit.splash = me.passive() == bc::passive_type::splash_attack;
         kit.goldBonus = me.passive() == bc::passive_type::bonus_gold;
@@ -176,6 +182,17 @@ void World::refresh(bool firstTurn) {
                     }
                 }
                 e.stun = known > 0;
+                auto& twin = enemyTwin_[static_cast<std::size_t>(e.index)];
+                if (twin < 0) {
+                    twin = 0;
+                    try {
+                        const auto t = c.champion_name();
+                        twin = t == bc::champion_type::cassi || t == bc::champion_type::issac ? 1 : 0;
+                    } catch (const bc::error&) {
+                        twin = -1;
+                    }
+                }
+                e.twin = twin > 0;
             }
             enemies.push_back(e);
             const float dps = e.strength + e.focus * 1.5f / tune::spell_cooldown;

@@ -35,6 +35,7 @@ struct EnemySeen {
     bool channeling = false;  // recalling / tributing: a stationary, interruptible target
     bool tributing = false;
     bool stun = false;        // has a crowd-control ability (Tavi, Ren, Cassi, ...)
+    bool twin = false;        // Cassi or Issac: when either dies, both do
 };
 
 // Where an enemy was last seen; vision is not shared, so remembering recent sightings
@@ -79,6 +80,8 @@ public:
     Kit kit;
     std::array<cambc::champion_type, 8> allyTypes{};  // champion in each allied slot
     int allyCount = 0;
+    int twinSlot = -1;             // we are Cassi or Issac: the other one's slot (either dies, both die)
+    float twinHpFrac() const { return twinSlot >= 0 ? allyHpFrac(twinSlot) : -1.0f; }
     const Tuning& role() const { return tuning(type); }
     // Another allied slot in `mask` (bit per slot) is a tank that will lead the pull.
     bool tankAmong(unsigned mask) const;
@@ -206,7 +209,8 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
-    std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
+    std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};
+    std::array<signed char, 8> enemyTwin_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: Cassi or Issac (-1 unknown)  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};
     std::array<cambc::vec2, 8> enemyPrevPos_{};          // where each enemy stood when last seen

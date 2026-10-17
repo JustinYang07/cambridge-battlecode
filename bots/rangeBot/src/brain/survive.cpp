@@ -40,7 +40,9 @@ void survive(World& w, std::vector<Option>& out) {
         // enemies about we head home while we still have the health to get there.
         const bool enemiesAbout = w.enemyPressure(w.pos, tune::enemy_watch_radius + 3) > 0;
         const float start = tune::heal_start_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
-        const float urgent = tune::heal_urgent_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f);
+        // Cassi or Issac: our death is two bodies, so head home earlier.
+        const float twinMargin = tune::twin_care && w.twinSlot >= 0 ? tune::twin_heal_margin : 0.0f;
+        const float urgent = std::min(tune::heal_urgent_frac + (enemiesAbout ? tune::heal_enemy_margin : 0.0f) + twinMargin, start - 0.05f);
         const float urgency = std::clamp((start - f) / (start - urgent), 0.0f, 1.0f);
         o.add("low health", urgency * urgency * 60.0f);
         if (canShop && !(fightNear && f >= tune::heal_start_frac)) {
@@ -82,7 +84,7 @@ void survive(World& w, std::vector<Option>& out) {
         const float outnumbered = pressure / std::max(w.alliedPower(w.pos, 5), 1.0f);
         // Danger rises as death gets close, and with a bag when we are outnumbered.
         const float bagRisk = w.gems >= tune::bag_avoid_gems ? (outnumbered - 1.0f) * 0.8f : 0.0f;
-        const float horizon = tune::flee_horizon_turns;
+        const float horizon = tune::flee_horizon_turns * (tune::twin_care && w.twinSlot >= 0 ? tune::twin_flee_horizon : 1.0f);
         const float danger = std::clamp(std::max((horizon - turnsToDie) / horizon, bagRisk), 0.0f, 1.0f);
         Option o;
         o.kind = OptionKind::flee;

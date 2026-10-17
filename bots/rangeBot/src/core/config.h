@@ -60,6 +60,15 @@ inline constexpr int monster_range = 3;
 // ---- team fights (attackBot)
 inline constexpr int fight_join_radius = 4;        // enemies this close to the target join its side
 inline constexpr int fight_beside_radius = 3;      // allies this close to us fight (and draw fire) with us
+// Cassi & Issac share one life (either dies, both die).
+inline constexpr bool twin_care = true;              // our twins: heal and flee earlier, fight less while either is low
+inline constexpr float twin_heal_margin = 0.15f;     // ...healing dominates this much higher up
+inline constexpr float twin_flee_horizon = 1.5f;     // ...flee danger starts this much earlier
+inline constexpr float twin_low_hp = 0.5f;           // ...either twin below this: fights scaled by twin_low_fight
+inline constexpr float twin_low_fight = 0.5f;
+inline constexpr bool twin_focus = true;             // their twins: count the pair as the weaker one's health, hit that one
+inline constexpr float twin_weaker_bonus = 1.5f;     // fight the weaker (or only visible) twin: kills both
+inline constexpr float twin_stronger_factor = 0.6f;  // fight the healthier twin while its partner is in view
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
 // Early retreat (ladder losses: retreats began at a median 393 HP, 70% died within 3 turns):
 // flee while the enemies near us would need longer than our escape plus this margin to kill us.

@@ -13,6 +13,12 @@ namespace scorers {
 
 void fight(World& w, std::vector<Option>& out) {
     const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
+    // Cassi or Issac: while either of us is low, a fight risks both bodies.
+    bool twinLow = false;
+    if (tune::twin_care && w.twinSlot >= 0) {
+        const float t = w.twinHpFrac();
+        twinLow = std::min(w.hpFrac(), t < 0 ? 1.0f : t) < tune::twin_low_hp;
+    }
     for (const auto& e : w.enemies) {
         // On or by its own spawn it heals every round: scored at x0.05 anyway, so skip the work
         // (rushbait-v2: scoring five enemies standing on their spawn cost ~30k fuel every turn).
@@ -21,13 +27,17 @@ void fight(World& w, std::vector<Option>& out) {
         // us plus allies near it or already attacking it (shared focus). Each side's time to wipe
         // the other decides who wins; we all hit the target, so it falls in e.hp / our damage.
         float theirHp = 0, theirDps = 0;
-        int theirCount = 0;
+        int theirCount = 0, twinsHere = 0;
+        float twinMax = 0;
         for (const auto& o : w.enemies)
             if (o.hp > 0 && dist(o.pos, e.pos) <= tune::fight_join_radius) {
                 theirHp += o.hp;
                 theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
                 ++theirCount;
+                if (o.twin) { ++twinsHere; twinMax = std::max(twinMax, o.hp); }
             }
+        // Their Cassi and Issac die together: the pair lasts only as long as the weaker one.
+        if (tune::twin_focus && twinsHere >= 2) theirHp -= twinMax;
         auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
         // Measured on traced fights: the target loses ~0.2x the damage per round our side's
         // stats promise (allies not all on it, targets stepping out of range, lost turns).
@@ -68,6 +78,15 @@ void fight(World& w, std::vector<Option>& out) {
         const float missing = std::clamp(1.0f - e.hp / std::max(e.maxHp, 1.0f), 0.0f, 1.0f);
         if (missing > 0.05f) o.mul("enemy hurt", 1.0f + tune::fight_hurt_bonus * missing);
         if (e.channeling) o.mul("interrupt channel", 1.5f);
+        // Their twins: the weaker one (or the only one in view) is the target, killing it kills both.
+        if (tune::twin_focus && e.twin) {
+            const EnemySeen* partner = nullptr;
+            for (const auto& x : w.enemies)
+                if (x.twin && x.hp > 0 && !(x.handle == e.handle)) partner = &x;
+            if (partner && partner->hp < e.hp) o.mul("its twin is weaker", tune::twin_stronger_factor);
+            else o.mul("kills both twins", tune::twin_weaker_bonus);
+        }
+        if (twinLow && !e.channeling) o.mul("twin low", tune::twin_low_fight);
         // Gems-only mode (we are behind): fight harder, but only as a group: 2+ of us near the target
         // and at least as many of us as of them there. A lone champion's fights are unchanged.
         if (w.gemsOnly() && tune::gems_only_group_fight != 1.0f) {
