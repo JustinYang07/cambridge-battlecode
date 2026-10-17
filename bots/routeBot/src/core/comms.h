@@ -46,6 +46,9 @@ unsigned claimersMask(int groupId, int exceptSlot);
 // Bit per ally whose claim on this group outranks ours from `tiles` away: nearer bracket, or the
 // same bracket and an earlier slot. These are the claims that should keep us off a solo camp.
 unsigned ownersMask(int groupId, int mySlot, int tiles);
+// The ally in `slot` is out working (claims a camp, an enemy or an alert): not banking, healing,
+// channelling or dead (those clear the claim).
+bool active(int slot);
 // Camp group the ally in `slot` claims (-1: none, or not a camp claim) and its distance bracket.
 int claimOf(int slot);
 int claimBracket(int slot);

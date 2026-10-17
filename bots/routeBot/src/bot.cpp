@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
+#include "strategy/cohesion.h"
 #include "strategy/loop.h"
+#include "strategy/wards.h"
 #include "strategy/mapplan.h"
 #include "strategy/plan.h"
 #include "strategy/regroup.h"
@@ -51,6 +53,12 @@ void Bot::play_turn() {
     if (first) {
         trace().configure(static_cast<int>(bc::champions(bc::team::ally).size()), w.slot, name(w.type));
         if (w.slot == 0) trace().legend();
+        if (w.slot == 0) {
+            std::string sealed;
+            for (const auto& g : Statics::get().groups)
+                if (!g.reachable) sealed += " " + g.label;
+            w.pendingNotes.push_back("unreachable groups:" + (sealed.empty() ? std::string(" none") : sealed));
+        }
     }
     trace().beginTurn(w.round, w.slot, name(w.type));
     trace().state(w.pos.x, w.pos.y, w.hp, w.maxHp, w.gems, w.gold, w.alive);
@@ -60,7 +68,33 @@ void Bot::play_turn() {
         trace().forceFull();
     }
 
+    // First tribute done: the bag emptied while we were banking (alive, so not a death).
+    if (w.alive && w.prevGems > 0 && w.gems == 0 && w.lastOption == static_cast<int>(OptionKind::bank)) w.hasTributed = true;
+    w.prevGems = w.gems;
+    // Stuck watchdog: standing still while idle or holding for help (lanes: all six idle at spawn
+    // for 1,700 rounds; stampede: one champion held an elk camp alone for 750).
+    if (w.alive && !me.is_recalling() && !me.is_submitting_gems() && !me.is_teleporting()) {
+        // Not stuck while there is something to hit, or while banking or healing.
+        bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal);
+        for (const auto& c : w.camps) busy = busy || (c.hp > 0 && dist(c.pos, w.pos) <= w.range);
+        for (const auto& e : w.enemies) busy = busy || (e.hp > 0 && dist(e.pos, w.pos) <= w.range + 1);
+        if (!busy && w.pos.x == w.stillPos.x && w.pos.y == w.stillPos.y) {
+            if (++w.stillTurns >= (w.waitingTurns > 0 ? tune::still_hold_turns : tune::still_turns)) {
+                if (w.lastOption == static_cast<int>(OptionKind::farm) || w.lastOption == static_cast<int>(OptionKind::capture))
+                    w.stuckGroup = w.lastTarget;
+                w.stuckUntil = w.round + tune::stuck_cooloff;
+                w.huntUntil = w.round + tune::hunt_turns;
+                w.stillTurns = 0;
+                w.forceReplan = true;
+                w.pendingNotes.push_back("stuck: dropping camp, hunting");
+            }
+        } else {
+            w.stillTurns = 0;
+            w.stillPos = w.pos;
+        }
+    }
     comms::refresh();
+    cohesion::update(w);
     const bool wasRegrouping = regroup::active();
     regroup::update(w);
     if (regroup::active() != wasRegrouping) w.forceReplan = true;
@@ -142,6 +176,7 @@ void Bot::play_turn() {
             }
             brain::execute(w, pick);
             brain::noteMovement(w);
+            wards::update(w);
         }
         fuel::mark("execute");
 

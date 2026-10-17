@@ -23,6 +23,12 @@ struct GroupInfo {
     float totalStrength = 0;          // sum of members' base strength (damage per round when awake)
     bool harmless = false;            // only gem/gold clusters
     bool hasMonolith = false;
+    bool reachable = true;            // some tile is connected to our spawn on foot (false: sealed off, e.g. behind holes)
+    // Sealed groups a dash can get into: the pocket around them (walkable inside), and one legal dash
+    // from dashFrom (reachable on foot) to dashTo (inside the pocket). The way out is the reverse.
+    bool dashIn = false;
+    cambc::bitboard pocket;
+    cambc::vec2 dashFrom{-1, -1}, dashTo{-1, -1};
     int campCount = 0;
     int adjacentPairs = 0;            // members within 1 tile of each other (splash value)
     std::string label;                // e.g. "wolf+wolf@(8,2)"
@@ -31,6 +37,7 @@ struct GroupInfo {
 struct Statics {
     int width = 0, height = 0;
     cambc::bitboard terrain;          // walls | holes | altars | enemy spawn: never walkable
+    cambc::bitboard reach;            // tiles walkable from our spawn (all set if the fill failed)
     cambc::bitboard allySpawn, enemySpawn;
     cambc::vec2 spawnCenter;
     cambc::vec2 enemySpawnCenter;
@@ -40,6 +47,12 @@ struct Statics {
 
     static Statics& get();            // lazily initialised singleton
     const GroupInfo* groupAt(cambc::vec2 tile) const;
+    // A dash of up to 2 tiles may pass over holes but not walls (probed on ambush: the engine
+    // refused every dash across a wall row, allowed one over a hole).
+    bool dashLegal(cambc::vec2 from, cambc::vec2 to) const;
+    // The dash-in group whose pocket holds this tile, if any.
+    const GroupInfo* pocketAt(cambc::vec2 tile) const;
+    cambc::bitboard dashBlock;        // tiles a dash cannot pass over: terrain except holes
     // Per camp spawn tile: owning group and base stats (camps never leave their spawn).
     struct TileCamp {
         int groupId = -1;

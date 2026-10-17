@@ -72,7 +72,7 @@ private:
         FixedStr<120> actions;
         FixedStr<240> notes;
     };
-    void writeFull(const FullSnapshot& s);
+    bool writeFull(const FullSnapshot& s);
     FullSnapshot pending_;
     bool hasPending_ = false;
 

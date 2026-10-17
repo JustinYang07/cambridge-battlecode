@@ -102,6 +102,20 @@ public:
     int teamGems = 0, enemyGems = 0;
     // Enemy deaths are visible out of vision (champion::is_alive). Bodies: Cassi & Issac are two.
     int enemyBodies = 0, enemiesAlive = 0;
+    int alliesAlive = 0;           // our bodies alive (us included), checked on the same cadence
+    // Invading (farming, fighting or banking on their half) only with a numbers lead: more of us
+    // alive than of them (tune::invade_needs_lead).
+    bool mayInvade() const { return !tune::invade_needs_lead || alliesAlive > enemiesAlive; }
+    // Enemy (roster index) seen last round further from us than now... reversed: it is moving away
+    // from us (its distance to our tile grew since we last saw it, within 2 rounds).
+    bool enemyMovingAway(int index, cambc::vec2 now) const;
+    // Gems-only mode: from tune::gems_only_round, while the enemy has banked tune::gems_only_lag more gems.
+    bool gemsOnly() const {
+        return round >= tune::gems_only_round &&
+               (enemyGems - teamGems >= tune::gems_only_lag || (tune::gems_only_when_none && teamGems == 0));
+    }
+    // The tile is on their half (nearer their spawn than ours).
+    bool theirHalf(cambc::vec2 p) const;
     int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
     cambc::bitboard visible, occupied;
     cambc::bitboard danger;        // tiles within reach of live, damaging monsters we can see
@@ -122,7 +136,15 @@ public:
     int lastTarget = -1;           // group/altar id of last turn's choice
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
+    // Stuck watchdog: turns standing on one tile while idle or holding for a party; when it trips,
+    // the camp we held is dropped until stuckUntil and we hunt enemies until huntUntil.
+    cambc::vec2 stillPos{-1, -1};
+    int stillTurns = 0;
+    int stuckGroup = -1, stuckUntil = -1, huntUntil = -1;
+    bool hunting() const { return round < huntUntil; }
     int captureTurns = 0;          // consecutive turns standing on the current capture
+    bool hasTributed = false;      // we have banked at least once this game (opening shop rule)
+    int prevGems = 0;
     cambc::vec2 lastAttacked{-1, -1};  // camp we hit last turn: keep hitting it until it dies
     // Recent decisions (kind, target; newest first) for hysteresis and flip detection.
     std::array<std::pair<int, std::string>, 4> history{};
@@ -180,6 +202,11 @@ private:
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
+    std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};
+    std::array<cambc::vec2, 8> enemyPrevPos_{};          // where each enemy stood when last seen
+    std::array<int, 8> enemyPrevRound_{-1, -1, -1, -1, -1, -1, -1, -1};
+    std::array<cambc::vec2, 8> lastSeenPos_{};
+    std::array<int, 8> lastSeenRound_{-1, -1, -1, -1, -1, -1, -1, -1};
     std::array<float, 8> enemyHpSeen_{-1, -1, -1, -1, -1, -1, -1, -1};   // health when last seen
     std::array<int, 8> enemyHpRound_{-1, -1, -1, -1, -1, -1, -1, -1};    // round of that sighting
     std::optional<std::array<cambc::ability, 2>> abilities_;

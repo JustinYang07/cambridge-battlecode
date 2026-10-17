@@ -105,10 +105,71 @@ bool Navigator::tryDash(World& w, const bc::distance_field& field, const bc::bit
     return false;
 }
 
+int Navigator::readyDash(World& w) const {
+    if (!bc::self().can_cast()) return -1;
+    for (int slot = 0; slot < 2; ++slot)
+        if (w.abilities()[static_cast<std::size_t>(slot)].is_dash() && w.abilityReady(slot)) return slot;
+    return -1;
+}
+
+namespace {
+bool dashTo(World& w, int slot, bc::vec2 to) {
+    try {
+        if (w.abilities()[static_cast<std::size_t>(slot)].use(to)) {
+            w.spentAbility(slot);
+            FixedStr<16> msg;
+            trace().action((msg << 'd' << to.x << ',' << to.y).view());
+            w.pos = to;
+            return true;
+        }
+    } catch (const bc::error& e) {
+        trace().note(std::string("dash failed: ") + e.message());
+    }
+    return false;
+}
+}  // namespace
+
+bool Navigator::enterPocket(World& w, const GroupInfo& g) {
+    if (w.pos == g.dashFrom) {
+        if (const int slot = readyDash(w); slot >= 0 && !w.occupied.is_set(g.dashTo)) return dashTo(w, slot, g.dashTo);
+        trace().action("hold");  // waiting for the dash cooldown
+        return true;
+    }
+    bc::bitboard goal;
+    goal.clear();
+    goal.set(g.dashFrom);
+    return stepToward(w, goal, false, &w.danger);
+}
+
+bool Navigator::leavePocket(World& w, const GroupInfo& g) {
+    const auto& st = Statics::get();
+    if (const int slot = readyDash(w); slot >= 0) {
+        // Any legal dash out from here, else walk to the landing tile first.
+        bc::vec2 best{-1, -1};
+        for (int dx = -2; dx <= 2; ++dx)
+            for (int dy = -2; dy <= 2; ++dy) {
+                const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
+                if (!st.reach.is_set(t) || w.occupied.is_set(t) || !st.dashLegal(w.pos, t)) continue;
+                if (best.x < 0 || dist(t, st.spawnCenter) < dist(best, st.spawnCenter)) best = t;
+            }
+        if (best.x >= 0) return dashTo(w, slot, best);
+    }
+    if (w.pos == g.dashTo) {
+        trace().action("hold");  // waiting for the dash cooldown
+        return true;
+    }
+    bc::bitboard goal;
+    goal.clear();
+    goal.set(g.dashTo);
+    return stepToward(w, goal, false);
+}
+
 bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash, const bc::bitboard* avoid,
                            bc::vec2 aim) {
     auto& me = bc::self();
     if (goalsIn.is_set(w.pos)) return false;
+    // Inside a sealed pocket with somewhere to go outside it: out the way we came (a dash).
+    if (const auto* pg = Statics::get().pocketAt(w.pos); pg && (goalsIn & pg->pocket).is_empty()) return leavePocket(w, *pg);
     auto blockedNow = blocked(w);
     auto goals = goalsIn & ~blockedNow;
     if (goals.is_empty()) {
@@ -121,7 +182,8 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     here.set(w.pos);
     // While a decision is marked stuck (we were bouncing between two tiles), ignore the avoid
     // layer: a safe route and the plain fallback pointing opposite ways caused exactly that.
-    if (avoid && w.stuckTurns == 0) {
+    // Short of fuel: skip the safe-route search (one path search fewer) rather than overrun.
+    if (avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
         // First try a route that never enters the avoided zones. If we are already inside one,
         // free a small bubble around us so the safe route can lead out of it; otherwise every
         // step from in here fell back to the plain route, which pointed back the way we came.

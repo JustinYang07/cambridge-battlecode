@@ -29,6 +29,12 @@ public:
     bool stepToward(World& w, const cambc::bitboard& goals, bool allowDash, const cambc::bitboard* avoid = nullptr,
                     cambc::vec2 aim = {-1, -1});
     bool stepToward(World& w, cambc::vec2 target, int range, bool allowDash, const cambc::bitboard* avoid = nullptr);
+    // Sealed pockets (dash-in groups): walk to the group's dash tile and dash in, or, from inside,
+    // walk to the landing tile and dash back out. Returns true if we moved (or are waiting to dash).
+    bool enterPocket(World& w, const GroupInfo& g);
+    bool leavePocket(World& w, const GroupInfo& g);
+    // A dash ability ready now: its slot, else -1.
+    int readyDash(World& w) const;
     // Step to the neighbouring tile that maximises distance from the given threats.
     bool stepAway(World& w, const std::vector<cambc::vec2>& threats, int keepRange);
 
