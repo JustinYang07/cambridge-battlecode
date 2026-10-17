@@ -149,6 +149,38 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     return true;
 }
 
+// Team rush pull: gather first, then the ranged hit from just outside the monsters' reach (spells
+// reach monster_range + 1; monsters do not chase) while the melee wait at that ring until the camp
+// is low. Returns true if it handled the turn; false lets the normal farm execution run.
+bool rushPull(World& w, const GroupInfo& g, int need) {
+    if (waitForParty(w, g, need)) return true;
+    const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+    if (!w.ranged && mem.healthLeft < tune::team_rush_melee_join) return false;  // finish it together
+    bc::bitboard inner, reach;
+    inner.clear();
+    reach.clear();
+    bool live = false;
+    for (const auto& c : w.camps)
+        if (c.groupId == g.id && c.hp > 0) {
+            inner.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+            reach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range + 1));
+            live = true;
+        }
+    if (!live)
+        for (auto t : g.tiles) {
+            inner.draw_chebyshev(t, static_cast<float>(tune::monster_range));
+            reach.draw_chebyshev(t, static_cast<float>(tune::monster_range + 1));
+        }
+    const combat::Focus focus{.groupId = g.id};
+    if (w.ranged) combat::castFromRange(w, focus);
+    const auto goals = reach & ~inner;
+    if (!goals.is_empty() && !goals.is_set(w.pos)) nav().stepToward(w, goals, false, nullptr, g.center);
+    else trace().action("hold");
+    combat::act(w, focus, false);  // a basic attack only lands if a member is in range from here
+    trace().note(w.ranged ? "rush: outranging" : "rush: melee waits");
+    return true;
+}
+
 void farmGroup(World& w, const GroupInfo& g, int need) {
     combat::Focus focus{.groupId = g.id};
     const auto status = w.groups[static_cast<std::size_t>(g.id)].status;
@@ -158,6 +190,7 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         nav().stepToward(w, goals, false);
         return;
     }
+    if (scorers::teamRushOn(w, g.id) && rushPull(w, g, need)) return;
     if (waitForParty(w, g, need)) return;
     const bool holdFire = holdForTank(w, g);
     if (groupMemberInRange(w, g.id)) {
@@ -235,6 +268,29 @@ void capture(World& w, const GroupInfo& g) {
         // a tribute timed to finish just as the capture does, and the reward is banked with it.
         if (w.lastTarget == g.id && w.lastOption == static_cast<int>(OptionKind::capture)) ++w.captureTurns;
         else w.captureTurns = 1;
+        // combatBotv2 (as Fish): the keeper recalls from the tile a round before the capture
+        // completes. The reward lands during the 5-turn channel, so it is on its way home (spawn,
+        // shop, the altar by spawn) instead of walking the bag over. Only when banking via spawn is
+        // about as quick as walking to an altar, or we want the heal anyway, and nobody is about.
+        if (tune::recall_on_capture && w.captureTurns >= static_cast<int>(tune::capture_turns) - 1 &&
+            w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0 && !w.beingHit && w.incoming <= 0 &&
+            scorers::captureShareOf(w, g.id) >= 1.0f) {
+            float viaHome = 1e9f, walk = 1e9f;
+            for (int i = 0; i < static_cast<int>(Statics::get().altars.size()); ++i) {
+                viaHome = std::min(viaHome, scorers::recallBankTurns(w, i));
+                if (const int d = fields::toAltar(i, w.pos); d >= 0 && d < Navigator::unreachable) walk = std::min(walk, w.walkTurns(static_cast<float>(d)));
+            }
+            if (viaHome <= walk + tune::capture_recall_margin || w.hpFrac() < tune::capture_recall_hp) {
+                try {
+                    bc::self().recall();
+                    trace().action("rc");
+                    trace().note("recall timed with the capture");
+                    return;
+                } catch (const bc::error& e) {
+                    trace().note(std::string("recall failed: ") + e.message());
+                }
+            }
+        }
         const int ticks = std::max(1, (w.gems + 9) / 10);
         if (w.gems > 0 && w.captureTurns + ticks >= static_cast<int>(tune::capture_turns)) {
             for (auto a : Statics::get().altars)
@@ -251,6 +307,8 @@ void capture(World& w, const GroupInfo& g) {
     }
     combat::act(w, combat::Focus{}, false);
 }
+
+void offTeammateCapture(World& w);
 
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
@@ -273,6 +331,7 @@ void bank(World& w, int altarIdx) {
         w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0) {
         const int walk = fields::toAltar(altarIdx, w.pos);
         if (walk > 0 && scorers::recallBankTurns(w, altarIdx) + tune::bank_recall_margin < w.walkTurns(static_cast<float>(walk))) {
+            offTeammateCapture(w);
             try {
                 me.recall();
                 trace().action("rc");
@@ -334,6 +393,22 @@ bc::vec2 retreatTarget(const World& w) {
     return best;
 }
 
+// combatBotv2: before a recall, step off the tiles of a dead camp a teammate is capturing. The
+// recall's 5 turns match the capture's, so a champion recalling on the tiles is still there when it
+// completes and takes half the reward (rows: Ryth, the tank, recalled on the wolves' tiles and
+// split the capture with Cassi, the keeper). Moves one tile; the recall can follow this turn.
+void offTeammateCapture(World& w) {
+    if (!tune::recall_off_capture) return;
+    const auto* g = Statics::get().groupAt(w.pos);
+    if (!g || w.groups[static_cast<std::size_t>(g->id)].status != GroupStatus::reward || !scorers::allyHoldingOf(w, g->id)) return;
+    bc::bitboard ring;
+    ring.clear();
+    ring.draw_chebyshev(w.pos, 1.0f);
+    const auto goals = ring & ~g->tileMask & ~nav().blocked(w);
+    if (goals.is_empty()) return;
+    if (nav().stepToward(w, goals, false, nullptr, Statics::get().spawnCenter)) trace().note("off a teammate's capture before recalling");
+}
+
 void heal(World& w) {
     auto& me = bc::self();
     if (w.atSpawn) {
@@ -378,6 +453,7 @@ void heal(World& w) {
             return;
         }
     }
+    offTeammateCapture(w);
     try {
         me.recall();
         trace().action("rc");

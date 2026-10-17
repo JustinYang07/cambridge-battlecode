@@ -119,8 +119,19 @@ bool capturer(const World& w, int groupId) {
     // Enemies about: the party holds the capture together.
     if (w.enemyPressure(Statics::get().groups[static_cast<std::size_t>(groupId)].center, tune::route_enemy_radius) > 0) return true;
     const float myPower = profile(w.type).farmPower;
+    const float myMissing = w.maxHp - w.hp;
     for (int sl = 0; sl < comms::alert_byte; ++sl) {
         if (!((mates >> sl) & 1u) || comms::claimOf(sl) != groupId || comms::claimBracket(sl) != 0) continue;
+        if (tune::keeper_tank_first && isTank(w.type) != isTank(w.allyTypes[static_cast<std::size_t>(sl)])) {
+            if (isTank(w.type)) continue;  // we are the tank: we keep it
+            return false;                  // the tank keeps it
+        }
+        // combatBotv2: the most damaged mate stays (its recall home banks the reward and heals it).
+        if (tune::keeper_most_damaged) {
+            const float theirs = w.allyMissingHp(sl);
+            if (theirs > myMissing + tune::keeper_missing_margin) return false;
+            if (myMissing > theirs + tune::keeper_missing_margin) continue;
+        }
         const float theirs = profile(w.allyTypes[static_cast<std::size_t>(sl)]).farmPower;
         // The weakest damage dealer stays (ties: the later slot).
         if (theirs < myPower || (theirs == myPower && sl > w.slot)) return false;

@@ -1,6 +1,7 @@
 #include "world.h"
 #include "fixed_str.h"
 #include <algorithm>
+#include <array>
 #include <variant>
 #include "comms.h"
 #include "config.h"
@@ -124,7 +125,7 @@ void World::refresh(bool firstTurn) {
         }
         // Our own team too (same cadence): the invasion rule compares the two. Only when it is on:
         // is_alive costs ~300 fuel per champion.
-        for (std::size_t k = 0; tune::invade_needs_lead && k < allyHandles_.size() && k < allyAlive_.size(); ++k) {
+        for (std::size_t k = 0; (tune::invade_needs_lead || tune::team_rush) && k < allyHandles_.size() && k < allyAlive_.size(); ++k) {
             if (static_cast<int>(k) == slot) continue;
             try {
                 allyAlive_[k] = allyHandles_[k].is_alive() ? 1 : 0;
@@ -257,6 +258,11 @@ void World::refresh(bool firstTurn) {
     int engagedDist = 1 << 20;
     int lastGroup = -1;
     beingHit = prevHp > 0 && hp < prevHp - 0.5f;
+    {
+        const float loss = beingHit ? (prevHp - hp) / static_cast<float>(std::max(1, round - prevHpRound)) : 0.0f;
+        hitRate = beingHit ? (hitRate > 0 ? 0.5f * hitRate + 0.5f * loss : loss) : hitRate * 0.5f;
+        prevHpRound = round;
+    }
     // loopBot: only awake camps act (rules: "Awake camps then perform their actions"; damage wakes
     // the group, two rounds without a champion in range put it back to sleep). A sleeping camp is
     // safe to walk past, so it is neither danger nor incoming damage: paths stop detouring around
@@ -490,6 +496,55 @@ float World::allyHpFrac(int s) const {
     } catch (const bc::error&) {
         return -1.0f;
     }
+}
+
+float World::allyHp(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return 0.0f;
+    try {
+        const auto& a = allyHandles_[static_cast<std::size_t>(s)];
+        return a.is_alive() ? a.health() : 0.0f;
+    } catch (const bc::error&) {
+        return 0.0f;
+    }
+}
+
+float World::allyMissingHp(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return 0.0f;
+    try {
+        const auto& a = allyHandles_[static_cast<std::size_t>(s)];
+        if (!a.is_alive()) return 0.0f;
+        return std::max(0.0f, a.max_health() - a.health());
+    } catch (const bc::error&) {
+        return 0.0f;
+    }
+}
+
+float World::allyCampDps(int s, const GroupInfo& g) const {
+    struct Read { int round = -1; float strength = 0, focus = 0; bool splash = false; };
+    static std::array<Read, 8> cache;
+    static int forSlot = -1;
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size()) || s >= static_cast<int>(cache.size())) return 0.0f;
+    if (forSlot != slot) {
+        cache = {};
+        forSlot = slot;
+    }
+    auto& r = cache[static_cast<std::size_t>(s)];
+    if (r.round != round) {
+        r = {round, 0, 0, false};
+        try {
+            const auto& a = allyHandles_[static_cast<std::size_t>(s)];
+            if (a.is_alive()) {
+                r.strength = a.strength();
+                r.focus = a.focus();
+                r.splash = a.passive() == bc::passive_type::splash_attack;
+            }
+        } catch (const bc::error&) {
+        }
+    }
+    float basic = r.strength;
+    if (r.splash && g.campCount > 1)
+        basic *= std::min<float>(static_cast<float>(g.campCount), 1.0f + 2.0f * g.adjacentPairs / g.campCount);
+    return basic + r.focus * 1.5f / tune::spell_cooldown;  // spells as for enemies (threatPerTurn)
 }
 
 bool World::abilityReady(int slot) {

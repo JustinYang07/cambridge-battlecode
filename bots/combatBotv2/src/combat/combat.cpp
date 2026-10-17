@@ -209,7 +209,7 @@ float campDamagePerTurn(const World& w, const GroupInfo& g) {
     return total * (shop::hasPassive(bc::item_passive::monster) ? 1.10f : 1.0f);
 }
 
-FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share) {
+FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share, unsigned mates) {
     // Remaining members in kill order, from live vision when we can see the group.
     // Fixed buffer (groups have a handful of members): heap allocation is expensive under fuel metering.
     std::array<CampMember, 8> left{};
@@ -236,7 +236,19 @@ FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, in
     }
 
     FightEstimate e;
-    const float dps = std::max(campDamagePerTurn(w, g), 1.0f) * static_cast<float>(std::max(party, 1));
+    // combatBotv2: a party's damage is its members' damage, not ours times its size (rows: Ren, weak
+    // early, judged the third wolves too strong beside Stellar, whose splash does most of the work).
+    const float mine = std::max(campDamagePerTurn(w, g), 1.0f);
+    float dps = mine;
+    int counted = 1;
+    if (tune::party_real_dps)
+        for (int sl = 0; sl < w.allyCount && sl < 8 && counted < party; ++sl)
+            if (sl != w.slot && ((mates >> sl) & 1u))
+                if (const float d = w.allyCampDps(sl, g); d > 0) {
+                    dps += d;
+                    ++counted;
+                }
+    dps += mine * static_cast<float>(std::max(party - counted, 0));
     float strength = 0;
     for (int i = 0; i < n; ++i) strength += left[static_cast<std::size_t>(i)].strength;
     float mitigation = party > 1 ? (share >= 0 ? share : w.role().partyAbsorb) : 1.0f;

@@ -165,6 +165,18 @@ float captureShare(const World& w, int groupId) {
     return c;
 }
 
+// We are the designated keeper of this group's capture this turn (set by captureShareUncached).
+char& designatedKeeper(const World& w, int groupId) {
+    static int round = -1, slot = -1;
+    static std::vector<char> flags;
+    if (round != w.round || slot != w.slot) {
+        round = w.round;
+        slot = w.slot;
+        flags.assign(Statics::get().groups.size() + 1, 0);
+    }
+    return groupId >= 0 && groupId < static_cast<int>(flags.size()) - 1 ? flags[static_cast<std::size_t>(groupId)] : flags.back();
+}
+
 float captureShareUncached(const World& w, int groupId) {
     if (!tune::capture_handoff) return 1.0f;
     const auto& g = Statics::get().groups[static_cast<std::size_t>(groupId)];
@@ -175,6 +187,8 @@ float captureShareUncached(const World& w, int groupId) {
         int slot;
         bool tank = false;
         bool mobile = false;  // a dash: walks the reward to an altar sooner
+        float missing = 0;    // health lost: a recall home after the capture heals all of it
+        bool tankType = false; // combatBotv2: a tank at any health (tune::keeper_tank_first)
     };
     // Only what every teammate can read about every other: health. (A bag test made it one-sided:
     // a teammate's bag may not be readable, so both champions on the tiles decided they kept it.)
@@ -183,10 +197,16 @@ float captureShareUncached(const World& w, int groupId) {
         if (a.homeward != b.homeward) return a.homeward;
         // The tank walks on with the party (rows: Varg kept the first wolves' capture, the second
         // wolves were too strong without it, and three of us stood on the tiles splitting it).
-        if (tune::capture_keeper_not_tank && a.tank != b.tank) return !a.tank;
+        // combatBotv2 (as Fish): a tank at the camp keeps it and recalls with it; the rest walk on, a
+        // melee champion fronting the next camp (rows: Varg kept 5 of the 6 captures he was at).
+        if (tune::keeper_tank_first && a.tankType != b.tankType) return a.tankType;
+        if (!tune::keeper_tank_first && tune::capture_keeper_not_tank && a.tank != b.tank) return !a.tank;
+        // combatBotv2: whoever took the most damage keeps it, then recalls: the trip home banks the
+        // reward and heals it (rows: Ren captured, and Issac, hurt, recalled with an empty bag).
+        if (tune::keeper_most_damaged && std::abs(a.missing - b.missing) > tune::keeper_missing_margin) return a.missing > b.missing;
         // Then a champion with a dash keeps it (rows: Issac banks the reward faster).
         if (tune::capture_keeper_mobile && a.mobile != b.mobile) return a.mobile;
-        if (std::abs(a.hp - b.hp) > 0.02f) return a.hp < b.hp;
+        if (!tune::keeper_most_damaged && std::abs(a.hp - b.hp) > 0.02f) return a.hp < b.hp;
         if (a.power != b.power) return a.power < b.power;
         return a.slot > b.slot;
     };
@@ -196,28 +216,51 @@ float captureShareUncached(const World& w, int groupId) {
         return best;
     };
     const bool meOn = g.tileMask.is_set(w.pos);
-    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, isTank(w.type), hasDash(w.type)};
+    // A tank only "walks on with the party" while it is fit to: a hurt tank is going home next, so it
+    // competes on damage taken like everyone else (rows: Ryth at 58% recalled empty-handed right
+    // after the wolves died, and Ren held the capture and recalled too, leaving two to farm on).
+    auto walksOn = [&](bc::champion_type t, float hp) { return isTank(t) && hp >= tune::keeper_tank_fit; };
+    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, walksOn(w.type, w.hpFrac()), hasDash(w.type), w.maxHp - w.hp,
+                 isTank(w.type)};
     const int myDist = nearestTile(w.pos);
     bool allyOnTiles = false, allyKeeps = false, allyNearer = false;
+    // combatBotv2: the keeper is chosen among everyone at the camp, not only those already on its
+    // tiles (the first to step on used to keep it). Every teammate reads the same positions and
+    // health, so all reach the same answer.
+    // A champion heading home is the best keeper of all: it captures, then recalls with the reward
+    // (rows: Ryth at 42% went home empty-handed while Ren, at 84%, held the capture and recalled too).
+    // (Earlier this counted it only once on the tiles; one tile off, the capture went to Ren.)
+    bool designated = tune::keeper_most_damaged;  // we are the one to hold it
+    bool designatedOther = false;                                 // a teammate here is
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
         if (sl == w.slot) continue;
         const auto p = w.allyPos(sl);
         if (p.x < 0 || dist(p, g.center) > 8) continue;
         const auto type = w.allyTypes[static_cast<std::size_t>(sl)];
+        const float allyHp = w.allyHpFrac(sl);
+        const Key them{allyHp >= 0 && homeward(allyHp), allyHp >= 0 ? allyHp : 1.0f, profile(type).farmPower, sl, walksOn(type, allyHp >= 0 ? allyHp : 1.0f), hasDash(type),
+                       w.allyMissingHp(sl), isTank(type)};
+        if (tune::keeper_most_damaged && dist(p, g.center) <= tune::keeper_near_radius && keeps(them, me)) {
+            designated = false;
+            designatedOther = true;
+        }
         if (g.tileMask.is_set(p)) {
             allyOnTiles = true;
-            if (meOn) {
-                const float hp = w.allyHpFrac(sl);
-                const Key them{hp >= 0 && homeward(hp), hp >= 0 ? hp : 1.0f, profile(type).farmPower, sl, isTank(type), hasDash(type)};
-                if (keeps(them, me)) allyKeeps = true;
-            }
+            if (meOn && keeps(them, me)) allyKeeps = true;
         } else if (!meOn && comms::claimOf(sl) == groupId) {
             const int d = nearestTile(p);
             if (d < myDist || (d == myDist && sl < w.slot)) allyNearer = true;
         }
     }
-    if (meOn) return allyKeeps ? tune::capture_taken_factor : 1.0f;  // two of us on it: the keeper stays
+    // Only from near the camp, and once a teammate is already capturing, only from beside its tiles:
+    // arriving late adds nothing and splits the reward (rows: Issac walked back 7 tiles to a capture
+    // Ren had started and stepped on as it completed: 33 gems each).
+    if (designated && (dist(w.pos, g.center) > tune::keeper_near_radius || (allyOnTiles && !meOn && myDist > 1))) designated = false;
+    designatedKeeper(w, groupId) = designated;
+    if (designated) return 1.0f;                                      // ours to take, whoever is on it now
+    if (meOn) return allyKeeps ? tune::capture_taken_factor : 1.0f;  // two of us on it: the keeper stays (we hold it until it is on)
     if (allyOnTiles) return tune::capture_taken_factor;               // a teammate is already capturing
+    if (designatedOther) return tune::handoff_factor;                 // the keeper is coming
     if (allyNearer) return tune::handoff_factor;                      // a teammate will get there first
     return 1.0f;
 }
@@ -243,6 +286,31 @@ int dashTravel(const World& w, const GroupInfo& g, bc::vec2& nearest) {
         if (dist(from, t) < best) { best = dist(from, t); nearest = t; }
     if (g.inPocket(w.pos)) return best;
     return static_cast<int>(static_cast<float>(dist(w.pos, g.dashFrom)) * 1.25f) + 1 + best;
+}
+
+// The map's gem camp for a team rush: one group holding at least team_rush_share of all the gems
+// (stampede: the elk camp holds all of them). Worked out once; -1 when no group qualifies.
+int rushGroup() {
+    static int cached = -2;
+    if (cached != -2) return cached;
+    cached = -1;
+    const auto& st = Statics::get();
+    int total = 0, best = -1, bestGems = 0;
+    for (const auto& g : st.groups) {
+        if (g.hasMonolith) continue;
+        total += g.gems;
+        if (g.gems > bestGems && g.reachable) { bestGems = g.gems; best = g.id; }
+    }
+    if (tune::team_rush && best >= 0 && total > 0 && static_cast<float>(bestGems) >= tune::team_rush_share * static_cast<float>(total))
+        cached = best;
+    return cached;
+}
+
+// Rush now: it is the rush camp, the opening is over, and enough of us are alive to take it.
+bool teamRush(const World& w, const GroupInfo& g) {
+    if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
+    // alliesAlive works out of sight (ally positions do not: an unseen ally reads as absent).
+    return w.alliesAlive >= tune::team_rush_min_alive;
 }
 
 Option scoreGroup(World& w, const Candidate& c) {
@@ -289,6 +357,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     bool awaiting = false;  // holding outside a party camp for allies
     float killTurns = 0;    // estimated fight length (farm options)
     int claims = comms::claimsOn(g.id, w.slot);
+    unsigned movingMates = 0;  // party mates walking on with us to this camp (see below)
     // The draft's opening camp: the champions without a route are all coming, so judge it with
     // them (not "too strong" / "awaiting help" before anyone has had a turn to claim it).
     const bool opening = g.id == mapplan::read().openingCamp && mapplan::openingActive(w);
@@ -307,7 +376,22 @@ Option scoreGroup(World& w, const Candidate& c) {
         w.lastTarget < static_cast<int>(w.groups.size()) &&
         mapplan::isNeighbour(w.lastTarget, g.id) &&  // only where the party moves on to (every camp: +200 lost turns)
         w.groups[static_cast<std::size_t>(w.lastTarget)].status == GroupStatus::reward && allyHolding(w, w.lastTarget)) {
-        const int movingOn = std::max(0, __builtin_popcount(w.partyMates) - 1);  // less the keeper
+        // combatBotv2: only the mates actually walking on with us count: near us, off the old camp's
+        // tiles (the keeper), and still claiming the old camp or this one (a mate that started a
+        // recall has cleared its claim). Rows: Stellar judged the third wolves as a party of four
+        // ("lose ~78 hp") while Ren recalled, Ryth held the capture and Issac was at spawn; she and
+        // Cassi fought them alone and lost ~900 health between them.
+        const auto& from = statics.groups[static_cast<std::size_t>(w.lastTarget)];
+        for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
+            if (sl == w.slot || !((w.partyMates >> sl) & 1u)) continue;
+            const auto p = w.allyPos(sl);
+            const int claim = comms::claimOf(sl);
+            if (p.x < 0 || from.tileMask.is_set(p)) continue;
+            if (tune::moving_on_real && (dist(p, w.pos) > tune::moving_on_radius || (claim != w.lastTarget && claim != g.id))) continue;
+            movingMates |= 1u << sl;
+        }
+        const int movingOn = tune::moving_on_real ? __builtin_popcount(movingMates)
+                                                  : std::max(0, __builtin_popcount(w.partyMates) - 1);  // less the keeper
         claims = std::max(claims, std::min(tune::max_team_per_camp - 1, movingOn));
     }
     if (o.kind == OptionKind::farm) {
@@ -320,7 +404,18 @@ Option scoreGroup(World& w, const Candidate& c) {
         // Monsters hit the nearest champion, ties going to the earliest draft slot (measured from
         // 727 party fights). A tank stands adjacent and was drafted first, so it takes nearly every
         // hit while the rest of the party, ranged allies at full range especially, takes almost none.
-        const bool tankLeads = !role.leadsPull && w.tankAmong(comms::claimersMask(g.id, w.slot));
+        // combatBotv2: only a tank that gets there no later than we do covers us (rows: Ren claimed
+        // the third wolves from spawn, 35 tiles off, so Stellar and Cassi fought them "behind the
+        // tank" alone, lost ~900 health between them and recalled, and Ren then picked another camp).
+        bool tankLeads = false;
+        if (!role.leadsPull) {
+            const unsigned claimers = comms::claimersMask(g.id, w.slot);
+            for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !tankLeads; ++sl) {
+                if (sl == w.slot || !((claimers >> sl) & 1u) || !isTank(w.allyTypes[static_cast<std::size_t>(sl)])) continue;
+                const auto p = w.allyPos(sl);
+                tankLeads = !tune::tank_cover_near || (p.x >= 0 && dist(p, g.center) <= dist(w.pos, g.center) + tune::tank_cover_slack);
+            }
+        }
         // Seen, not assumed: an ally is already beside the fight and the monsters are not hitting
         // us, so they are on it. Vendetta used to recall from lanes' elk at half health while Varg
         // took over the hits right behind it.
@@ -330,7 +425,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         // the third wolves as needing four of us and the camp sat untouched for 200 rounds).
         bool meleeCover = false;
         if (tune::ranged_cover_share > 0 && w.ranged && !role.leadsPull) {
-            const unsigned mates = comms::claimersMask(g.id, w.slot);
+            const unsigned mates = comms::claimersMask(g.id, w.slot) | movingMates;
             for (int sl = 0; sl < w.allyCount && sl < comms::alert_byte; ++sl)
                 if ((mates >> sl) & 1u) meleeCover = meleeCover || meleeChampion(w.allyTypes[static_cast<std::size_t>(sl)]);
         }
@@ -344,7 +439,8 @@ Option scoreGroup(World& w, const Candidate& c) {
         int need = 1;
         while (need < tune::max_team_per_camp && damageFor(need) > budget) ++need;
         const int k = std::max(need, 1 + claims);
-        const auto fight = k == 1 ? solo : combat::campFight(w, g, left, k, share);
+        const unsigned mates = comms::claimersMask(g.id, w.slot) | movingMates;
+        const auto fight = k == 1 ? solo : combat::campFight(w, g, left, k, share, mates);
         if (allyTanks) o.c.note << "ally tanking";
         else if (tankLeads) o.c.note << "tank soaks";
         if (role.followsParty && claims > 0) o.mul("support joins party", 1.5f);
@@ -370,12 +466,59 @@ Option scoreGroup(World& w, const Candidate& c) {
         // 750 turns while the rest farmed gold, each judging it too strong for two).
         const bool gemRally = tune::gem_rally_bonus != 1.0f && g.gems > 0 && claims > 0 && need > 1;
         bool tooStrong = fight.damage > budget;
-        if (tooStrong && gemRally) tooStrong = combat::campFight(w, g, left, tune::max_team_per_camp, share).damage > budget;
+        if (tooStrong && gemRally) tooStrong = combat::campFight(w, g, left, tune::max_team_per_camp, share, mates).damage > budget;
         if (gemRally && !tooStrong) o.mul("rally: ally holds gems", tune::gem_rally_bonus);
+        // combatBotv2: partial tank. Leading the pull we need not survive the whole fight: we take
+        // the hits until our retreat point and leave, and the allies with us finish it (Fish on rows:
+        // Ren tanked the third wolves from 660 to 260, recalled, and Cassi and Stellar killed them).
+        // Doable when what we can spend plus what they can spend after us covers the fight.
+        bool partialTank = false;
+        // The front is whoever takes the hits: the tank, or a melee champion when no tank leads.
+        const bool front = role.leadsPull || (meleeChampion(w.type) && !tankLeads && !allyTanks);
+        if (tune::partial_tank && front && k > 1 && mates != 0 && (tooStrong || fight.damage + reserve + escapeCost > w.hp)) {
+            // All of the camp's hits land on the front, us first, then them once we leave.
+            const float total = combat::campFight(w, g, left, k, 1.0f, mates).damage;
+            // What we can spend before leaving: down to a few turns of hits (and the walk out) left.
+            const float perTurn = w.hitRate > 1.0f ? w.hitRate : solo.hitting;
+            const float mine = tune::late_heal
+                                   ? w.hp - perTurn * (static_cast<float>(nav().escapeTurns(w)) + tune::death_margin_turns)
+                                   : w.hp - tune::partial_tank_floor * w.maxHp - escapeCost;
+            float theirs = 0;
+            for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl)
+                if (sl != w.slot && ((mates >> sl) & 1u)) {
+                    const float hp = w.allyHp(sl), frac = w.allyHpFrac(sl);
+                    if (hp > 0 && frac > 0) theirs += std::max(0.0f, hp - tune::partial_tank_floor * hp / frac);
+                }
+            // Joining: worth it for a real share of the fight. Already tanking: stay while we can.
+            const bool worth = engaged ? mine > 0 : mine >= tune::partial_tank_min_share * total;
+            if (worth && mine + theirs >= total) {
+                partialTank = true;
+                tooStrong = false;
+                // The plan is with the allies coming, not a full party: wait for no one else
+                // (rows: Ren held outside the wolves' reach 4 turns, "need 3 more", until Stellar opened).
+                need = std::min(need, 1 + __builtin_popcount(mates));
+                o.need = need;
+                o.expectDamage = std::min(total, mine);
+                o.c.note << "tank first, then leave; ";
+            }
+        }
+        // Team rush: on maps where one camp holds most of the gems (stampede's elk camp), the whole
+        // team takes it together from the early game. Top teams cleared it at r122-133 with five
+        // champions; we judged it too strong for four and farmed gold-only clusters until r800+.
+        const bool rush = teamRush(w, g);
+        if (rush) {
+            tooStrong = false;
+            // Gather most of the team before the pull (arriving one at a time, each melee champion
+            // died within 4 rounds of stepping in: the elks hit for ~360 a round).
+            need = std::max(need, std::min(w.alliesAlive, tune::team_rush_party));
+            o.need = need;
+            o.mul("team rush", tune::team_rush_bonus);
+            o.c.note << "team rush; ";
+        }
         if (tooStrong) {
             o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
-        } else if (fight.damage + reserve + escapeCost > w.hp) {
+        } else if (!partialTank && !rush && fight.damage + reserve + escapeCost > w.hp) {
             if (engaged) o.mul("would not survive", 0.02f);  // disengage now; heal will win
             else {
                 // Not doable at this health: this is really a reason to go home first.
@@ -436,13 +579,13 @@ Option scoreGroup(World& w, const Candidate& c) {
         }
         if (need > 1 && claims > 0 && !partyFull) o.mul("join ally", 1.3f);
         // Under-levelled: build strength on wolves and clusters before taking elks.
-        if (need > 1 && shop::shardsOwned() < tune::underpowered_shards) o.mul("underpowered", tune::underpowered_factor);
+        if (need > 1 && shop::shardsOwned() < tune::underpowered_shards && !teamRush(w, g)) o.mul("underpowered", tune::underpowered_factor);
         if (need == 1 && owners) o.mul("nearer ally claimed", tune::ally_claim_factor);
         if (w.gems > 0 && fight.damage > 0)
             o.mul("bag at risk", std::max(0.4f, 1.0f - tune::carry_risk_per_gem * w.gems * fight.damage / std::max(w.hp, 1.0f)));
     } else {
         o.turns("capture", tune::capture_turns);
-        if (owners) o.mul("nearer ally capturing", tune::ally_claim_factor);
+        if (owners && !(captureShare(w, g.id) >= 1.0f && designatedKeeper(w, g.id))) o.mul("nearer ally capturing", tune::ally_claim_factor);
         // Capture hand-off: a loop mate stays for this one, we walk on to the next camp.
         if (const float share = captureShare(w, g.id); share < 1.0f) {
             o.mul(share <= tune::capture_taken_factor ? "teammate is capturing" : "teammate capturing first", share);
@@ -506,6 +649,10 @@ Option scoreGroup(World& w, const Candidate& c) {
     const bool waiting = c.wait > 0;
     if (g.harmless && c.travel <= tune::safe_camp_radius && !waiting) o.mul("safe camp nearby", tune::safe_camp_bonus);
     if (c.wait > tune::idle_wait_turns) o.mul("idle wait", tune::idle_wait_factor);
+    // While a team rush is on (its camp is up), every other camp waits: the team converges on it.
+    if (const int rg = rushGroup(); rg >= 0 && g.id != rg && teamRush(w, Statics::get().groups[static_cast<std::size_t>(rg)]) &&
+        w.groups[static_cast<std::size_t>(rg)].status != GroupStatus::respawning)
+        o.mul("team rushing", tune::team_rush_other_factor);
     if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4 && mapplan::skipGoldOnly())
@@ -569,6 +716,11 @@ Option scoreGroup(World& w, const Candidate& c) {
 
 float captureShareOf(const World& w, int groupId) { return captureShare(w, groupId); }
 bool allyHoldingOf(const World& w, int groupId) { return allyHolding(w, groupId); }
+
+bool teamRushOn(const World& w, int groupId) {
+    const int rg = rushGroup();
+    return rg >= 0 && rg == groupId && teamRush(w, Statics::get().groups[static_cast<std::size_t>(rg)]);
+}
 
 void farm(World& w, std::vector<Option>& out) {
     // Branch and bound: an optimistic bound per group (Chebyshev distance never exceeds
