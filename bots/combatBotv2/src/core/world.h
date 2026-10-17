@@ -121,6 +121,9 @@ public:
     int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
     cambc::bitboard visible, occupied;
     cambc::bitboard danger;        // tiles within reach of live, damaging monsters we can see
+    bool reserveDash = false;
+    mutable std::array<cambc::vec2, 8> allyPosCache_{};
+    mutable int allyPosRound_ = -1;     // combatBotv2: outnumbered here, so no dash on ordinary moves this turn
     int engagedGroup = -1;         // awake group whose monsters can hit us right now (closest)
     float incoming = 0;            // monster strength able to hit our tile this turn (awake groups)
     bool beingHit = false;         // we lost health since our previous turn
@@ -198,6 +201,8 @@ public:
     float allyHpFrac(int slot) const;
     // An ally's tile by draft slot ({-1,-1} when unknown or dead).
     cambc::vec2 allyPos(int slot) const;
+    // Same, read once per turn (two host calls per ally otherwise; combatBotv2's checks ask often).
+    cambc::vec2 allyPosCached(int slot) const;
     // An ally's carried gems by draft slot (-1 when unknown or dead).
     int allyGems(int slot) const;
     void spentAbility(int slot) { ready_[slot] = 0; }

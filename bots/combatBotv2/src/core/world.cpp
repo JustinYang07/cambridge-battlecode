@@ -5,6 +5,7 @@
 #include "comms.h"
 #include "config.h"
 #include "fuel.h"
+#include "trace.h"
 
 namespace bc = cambc;
 
@@ -303,9 +304,10 @@ void World::loadNearbyCamps() {
     // Regeneration guard: a monster's health going up between two of our readings, too soon for a
     // respawn (groups respawn 40+ rounds after capture), is logged. None seen so far: 342 re-reads
     // of damaged monsters after 3-39 rounds were all the same or lower.
+    // Trace-only: the two per-tile tables cost ~20k (lanes) to ~40k (expanse) on the first turn.
     static std::vector<float> lastHp;
     static std::vector<int> lastRound;
-    if (lastHp.empty()) {
+    if (kTracing && lastHp.empty()) {
         lastHp.assign(static_cast<std::size_t>(statics.width * statics.height), -1.0f);
         lastRound.assign(lastHp.size(), -1000);
     }
@@ -317,6 +319,7 @@ void World::loadNearbyCamps() {
             c.hp = info->handle->health();
             c.hpKnown = true;
             c.handle = info->handle;
+            if constexpr (!kTracing) continue;
             const auto k = static_cast<std::size_t>(c.pos.y * statics.width + c.pos.x);
             if (lastHp[k] > 0 && c.hp > lastHp[k] + 0.5f && round - lastRound[k] < 30) {
                 FixedStr<64> msg;
@@ -468,6 +471,16 @@ cambc::vec2 World::allyPos(int s) const {
     }
 }
 
+cambc::vec2 World::allyPosCached(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyPosCache_.size())) return {-1, -1};
+    if (allyPosRound_ != round) {
+        allyPosRound_ = round;
+        for (int k = 0; k < static_cast<int>(allyPosCache_.size()); ++k)
+            allyPosCache_[static_cast<std::size_t>(k)] = k < allyCount && k != slot ? allyPos(k) : bc::vec2{-1, -1};
+    }
+    return allyPosCache_[static_cast<std::size_t>(s)];
+}
+
 float World::allyHpFrac(int s) const {
     if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return -1.0f;
     try {
@@ -498,7 +511,16 @@ float World::enemyPressure(bc::vec2 at, int radius) const {
 
 float World::alliedPower(bc::vec2 at, int radius) const {
     const float mine = strength * (1.0f + (kit.hasReset ? tune::reset_attack_bonus : 0.0f)) + kit.spellDps;
-    return mine * static_cast<float>(1 + alliesWithin(at, radius));
+    if (!tune::power_fighting_only) return mine * static_cast<float>(1 + alliesWithin(at, radius));
+    // combatBotv2: only allies actually fighting an enemy champion count (71% of our deaths in the
+    // Fish games had no ally hit its attackers, while "allies near" said we were ahead).
+    int fighters = 0;
+    for (int s = 0; s < comms::alert_byte && s < allyCount; ++s) {
+        if (s == slot || !comms::fighting(s)) continue;
+        const auto p = allyPosCached(s);
+        if (p.x >= 0 && dist(p, at) <= radius) ++fighters;
+    }
+    return mine * static_cast<float>(1 + fighters);
 }
 
 int World::alliesWithin(bc::vec2 at, int radius) const {

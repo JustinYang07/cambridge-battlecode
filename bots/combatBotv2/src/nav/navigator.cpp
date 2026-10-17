@@ -227,10 +227,12 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
 
 bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash, const bc::bitboard* avoid,
                            bc::vec2 aim, FarField far) {
+    // combatBotv2: outnumbered, keep the dash for the way out (fleeing dashes via stepHome/stepEscape).
+    if (allowDash && w.reserveDash) allowDash = false;
     auto& me = bc::self();
     if (goalsIn.is_set(w.pos)) return false;
     // Inside a sealed pocket with somewhere to go outside it: out the way we came (a dash).
-    if (const auto* pg = Statics::get().pocketAt(w.pos); pg && (goalsIn & pg->pocket).is_empty()) return leavePocket(w, *pg);
+    if (const auto* pg = Statics::get().pocketAt(w.pos); pg && pg->pocket && (goalsIn & *pg->pocket).is_empty()) return leavePocket(w, *pg);
     auto blockedNow = blocked(w);
     auto goals = goalsIn & ~blockedNow;
     if (goals.is_empty()) {

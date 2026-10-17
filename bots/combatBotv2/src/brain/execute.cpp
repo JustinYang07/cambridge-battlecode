@@ -548,6 +548,51 @@ bool bodyguard(World& w, const Option& o) {
     return true;
 }
 
+// combatBotv2: team defence. An enemy champion that can hit one of our allies and that we can hit
+// this turn gets hit (ranged: in range; melee: adjacent, or one step). In the Fish games our allies
+// near a dying champion were idle (39%) or hitting monsters (31%); nobody hit its attackers in 71%.
+bool defendAlly(World& w) {
+    if (!tune::defend_ally || w.hpFrac() < tune::defend_min_hp) return false;
+    const auto& st = Statics::get();
+    const EnemySeen* best = nullptr;
+    for (const auto& e : w.enemies) {
+        if (e.hp <= 0 || dist(e.pos, st.enemySpawnCenter) <= tune::enemy_spawn_radius) continue;
+        const int d = dist(w.pos, e.pos);
+        // In reach now, or a short walk from it (the allies near a dying champion stood 3-6 away).
+        if (d > w.range + tune::defend_approach) continue;
+        bool threatens = false;
+        for (int s = 0; s < comms::alert_byte && s < w.allyCount && !threatens; ++s) {
+            if (s == w.slot) continue;
+            const auto p = w.allyPosCached(s);
+            threatens = p.x >= 0 && dist(p, w.pos) <= tune::defend_ally_radius && dist(p, e.pos) <= e.range;
+        }
+        if (!threatens) continue;
+        // Only where we at least match them (everyone near, not just fighters): joining fights we
+        // were losing is what the fight-score version of this did.
+        int ours = 1, theirs = 0;
+        for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
+            if (s == w.slot) continue;
+            const auto p = w.allyPosCached(s);
+            ours += p.x >= 0 && dist(p, e.pos) <= tune::favour_radius;
+        }
+        for (const auto& x : w.enemies) theirs += x.hp > 0 && dist(x.pos, e.pos) <= tune::favour_radius;
+        if (ours < theirs) continue;
+        if (!best || e.hp < best->hp) best = &e;
+    }
+    if (!best) return false;
+    comms::claimEnemy(w.slot, best->index);
+    combat::Focus focus{.enemy = best->handle};
+    if (dist(w.pos, best->pos) > w.range) {
+        // Walk into reach; melee may still hit this turn, ranged shoots from next turn.
+        nav().stepToward(w, best->pos, w.range, !w.ranged);
+        combat::act(w, focus, false);
+    } else {
+        combat::act(w, focus, true);
+    }
+    trace().note("defending an ally");
+    return true;
+}
+
 // rangeBot: the hold and front rules outside fights (farm walks, regroups, hunts, idling): an
 // enemy champion in range is shot rather than stepping on, and ahead of our melee front we step
 // back behind it. Returns true if the turn is spent.
@@ -558,7 +603,30 @@ bool rangedHold(World& w) {
     int nd = kNoFront;
     for (const auto& e : w.enemies)
         if (e.hp > 0 && dist(e.pos, w.pos) < nd) { nd = dist(e.pos, w.pos); near = e.pos; }
-    if (near.x < 0 || nd > w.range + 2) return false;
+    if (near.x < 0 || nd > (tune::front_enforce_radius > 0 ? std::max(w.range + 2, tune::front_enforce_radius) : w.range + 2)) return false;
+    // combatBotv2: enemies about and no melee teammate near: fall back to the nearest one (Stellar
+    // stood near enemies with no melee within 6 for 10-45% of contact on eight / interlock / fragment).
+    if (tune::ranged_no_cover_fall_back && w.ranged) {
+        bc::vec2 refuge = Statics::get().spawnCenter;
+        int refugeD = kNoFront;
+        bool covered = false;
+        for (int s = 0; s < comms::alert_byte && s < w.allyCount && !covered; ++s) {
+            if (s == w.slot || !meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;
+            const auto p = w.allyPos(s);
+            if (p.x < 0) continue;
+            if (dist(p, w.pos) <= tune::ranged_front_radius) covered = true;
+            else if (dist(p, w.pos) < refugeD) { refugeD = dist(p, w.pos); refuge = p; }
+        }
+        if (!covered) {
+            std::vector<bc::vec2> threats;
+            for (const auto& e : w.enemies)
+                if (e.hp > 0) threats.push_back(e.pos);
+            if (!nav().stepToward(w, refuge, 1, true)) nav().stepAway(w, threats, 4);
+            combat::act(w, combat::Focus{.anyEnemy = true}, false);
+            trace().note("ranged: no melee near, falling back");
+            return true;
+        }
+    }
     const int front = frontLine(w, near);
     if (front < kNoFront && nd < front) {
         std::vector<bc::vec2> threats;
@@ -700,6 +768,11 @@ void fight(World& w, const Option& o) {
 } // namespace
 
 void execute(World& w, const Option& o) {
+    // combatBotv2: outnumbered where we stand, a dasher keeps its dash for escaping (eight: Issac
+    // dashed in, then had none left to get out while four of them beat him down).
+    w.reserveDash = tune::dash_reserve && w.kit.dashRange > 0 && o.kind != OptionKind::flee && o.kind != OptionKind::heal &&
+                    !w.enemies.empty() && w.enemyPressure(w.pos, tune::regroup_enemy_radius) > w.alliedPower(w.pos, tune::fight_beside_radius + 2);
+    if (w.reserveDash) trace().note("outnumbered: keeping the dash");
     // Whatever we are doing, cancelling an enemy tribute or recall is worth a stun.
     combat::interruptChannels(w);
     combat::useAltarLock(w);
@@ -713,7 +786,9 @@ void execute(World& w, const Option& o) {
 
     // rangeBot: an enemy in range or our front behind us outranks the walk (not captures,
     // banking, healing or fleeing: those have their own reasons to be where they are).
-    const bool held = (o.kind == OptionKind::farm || o.kind == OptionKind::wait || o.kind == OptionKind::fight) && bodyguard(w, o)
+    const bool held = (o.kind == OptionKind::farm || o.kind == OptionKind::wait) && defendAlly(w)
+                      ? true
+                      : (o.kind == OptionKind::farm || o.kind == OptionKind::wait || o.kind == OptionKind::fight) && bodyguard(w, o)
                       ? true
                       : (o.kind == OptionKind::farm || o.kind == OptionKind::wait) && rangedHold(w);
     if (!held) switch (o.kind) {
@@ -721,7 +796,7 @@ void execute(World& w, const Option& o) {
     case OptionKind::capture: {
         const auto& g = statics.groups[static_cast<std::size_t>(o.target)];
         // A sealed group: dash into its pocket first.
-        if (!g.reachable && g.dashIn && !g.pocket.is_set(w.pos)) {
+        if (!g.reachable && g.dashIn && !g.inPocket(w.pos)) {
             nav().enterPocket(w, g);
             combat::act(w, combat::Focus{.groupId = g.id}, false);
         } else if (o.kind == OptionKind::farm) {

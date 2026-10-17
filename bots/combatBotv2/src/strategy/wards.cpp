@@ -5,6 +5,8 @@
 #include <vector>
 #include <cambc.h>
 #include "../core/config.h"
+#include "../core/fuel.h"
+#include "../core/rawbuf.h"
 #include "../core/fixed_str.h"
 #include "../core/statics.h"
 #include "../core/trace.h"
@@ -55,8 +57,9 @@ void setup(const World& w) {
 } // namespace
 
 namespace {
-std::vector<std::uint8_t> bushB;  // per tile: a bush
-std::vector<std::uint8_t> bushNear;  // per tile: a bush within ward placement reach
+RawBuf<std::uint8_t> bushB;  // per tile: a bush
+RawBuf<std::uint16_t> bushDist;  // per tile: Chebyshev distance to the nearest bush
+bool noBushes = false;
 bc::vec2 lastPos{-1, -1}, lastWard{-100, -100};
 
 // Bushes hide whoever stands in them (bushes block line of sight; from inside one you see out).
@@ -64,28 +67,40 @@ bc::vec2 lastPos{-1, -1}, lastWard{-100, -100};
 // forever and recharge in a round, so each champion's single ward moves ahead of it. The ward's
 // vision is ours from the next turn, so the danger checks see whoever waits there before we step
 // beside them. Kept cheap (the first version lost ~600 turns a game to fuel): byte tables, this
-// turn's exported vision, no hypothetical-vision queries.
+// turn's exported vision, no hypothetical-vision queries. combatBotv2: the tables come from the bush
+// list and one obstacle-free distance field seeded at every bush (a per-tile pass stamping "bush
+// within reach" cost ~200k on the first turn, losing rounds 2-4 for every champion).
 void scoutBushes(World& w) {
     const auto& s = Statics::get();
-    if (bushNear.empty()) {
-        bushNear.assign(static_cast<std::size_t>(s.width * s.height), 0);
-        bushB.assign(static_cast<std::size_t>(s.width * s.height), 0);
-        const auto bits = bc::map::bushes().export_linear_buffer();
-        const int r = static_cast<int>(bc::constants::ward_placement_radius);
-        for (int y = 0; y < s.height; ++y)
-            for (int x = 0; x < s.width; ++x) {
-                const auto i = static_cast<std::size_t>(y * s.width + x);
-                if (!((bits[i >> 3] >> (i & 7)) & 1)) continue;
-                bushB[i] = 1;
-                for (int yy = std::max(0, y - r); yy <= std::min(s.height - 1, y + r); ++yy)
-                    for (int xx = std::max(0, x - r); xx <= std::min(s.width - 1, x + r); ++xx)
-                        bushNear[static_cast<std::size_t>(yy * s.width + xx)] = 1;
-            }
+    if (noBushes) return;
+    // Built on a turn with fuel to spare (~20k on lanes): the first turn has none, and nobody needs
+    // a bush ward at spawn.
+    if (bushB.empty() && (fuel::split() || bc::fuel_remaining() < tune::ward_table_fuel)) return;
+    if (bushB.empty()) {
+        const auto& bushes = bc::map::bushes();  // a cached board: copying it is a host call
+        bushB.alloc(static_cast<std::size_t>(s.width * s.height));
+        bushB.zero();
+        const auto list = bushes.positions();
+        if (list.empty()) {
+            noBushes = true;
+            return;
+        }
+        for (auto b : list) bushB[static_cast<std::size_t>(b.y * s.width + b.x)] = 1;
+        try {
+            bc::distance_field field;
+            bc::bitboard none, visited;
+            field.compute(none, bushes, visited);
+            bushDist.alloc(static_cast<std::size_t>(s.width * s.height));
+            field.export_linear_buffer(bushDist.span());
+        } catch (const bc::error&) {
+            bushDist.alloc(static_cast<std::size_t>(s.width * s.height));
+            bushDist.zero();  // scan everywhere
+        }
     }
     const bc::vec2 pos = w.pos;
     const bc::vec2 from = lastPos.x < 0 ? pos : lastPos;
     lastPos = pos;
-    if (!bushNear[static_cast<std::size_t>(pos.y * s.width + pos.x)]) return;
+    if (bushDist[static_cast<std::size_t>(pos.y * s.width + pos.x)] > static_cast<std::uint16_t>(bc::constants::ward_placement_radius)) return;
     const int dx = pos.x - from.x, dy = pos.y - from.y;
     // Moving toward bushes only, unless any bush in range will do (tune::ward_any_bush).
     if (!tune::ward_any_bush && dx == 0 && dy == 0) return;

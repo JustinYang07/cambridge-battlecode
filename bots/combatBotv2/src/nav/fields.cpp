@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include "../core/rawbuf.h"
 #include "../core/statics.h"
 #include "navigator.h"
 
@@ -13,7 +14,7 @@ namespace {
 
 struct Field {
     bool ready = false;
-    std::vector<std::uint16_t> dist;   // row-major; meaningless where not reached
+    RawBuf<std::uint16_t> dist;        // row-major; meaningless where not reached (not zeroed: the export fills it)
     std::vector<std::uint8_t> reached; // bit-packed, LSB first
 };
 
@@ -26,8 +27,8 @@ void compute(Field& f, const bc::bitboard& roots) {
     bc::distance_field field;
     bc::bitboard visited;
     field.compute(s.terrain, roots, visited);
-    f.dist.resize(static_cast<std::size_t>(s.width * s.height));
-    field.export_linear_buffer(f.dist);
+    f.dist.alloc(static_cast<std::size_t>(s.width * s.height));
+    field.export_linear_buffer(f.dist.span());
     f.reached = visited.export_linear_buffer();
     f.ready = true;
 }

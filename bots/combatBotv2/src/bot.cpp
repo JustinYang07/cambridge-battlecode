@@ -73,7 +73,8 @@ void Bot::play_turn() {
             std::string sealed;
             for (const auto& g : Statics::get().groups)
                 if (!g.reachable) sealed += " " + g.label;
-            w.pendingNotes.push_back("unreachable groups:" + (sealed.empty() ? std::string(" none") : sealed));
+            w.pendingNotes.push_back("unreachable groups:" + (sealed.empty() ? std::string(" none") : sealed) +
+                                     (Statics::get().usedDraftBlock ? "; statics from draft" : "; statics computed"));
         }
     }
     trace().beginTurn(w.round, w.slot, name(w.type));
@@ -174,7 +175,41 @@ void Bot::play_turn() {
                            w.hpFrac() >= tune::lock_emergency_hp && !planStale && tightStreak < tune::think_floor_max_streak;
         tightStreak = tight ? tightStreak + 1 : 0;
         if (tight) trace().note("fuel tight: kept plan");
-        if (!tight && needsReplan(w)) {
+        // combatBotv2: the first turn builds the static map; scoring every option on top of it
+        // overran the 200k budget on big maps and lost rounds 2-3. With the fuel short, take the
+        // draft plan's camp for this champion (route, loop or opening camp) and score from turn 2.
+        int planned = -1;
+        bool idleFirst = false;
+        if (first && !plan_ && tune::first_turn_plan_floor > 0 && bc::fuel_remaining() < tune::first_turn_plan_floor) {
+            const bool opening = mapplan::openingActive(w);
+            planned = mapplan::routeGroup() >= 0 ? mapplan::routeGroup()
+                      : loop::target() >= 0      ? loop::target()
+                      : opening                  ? mapplan::read().openingCamp
+                                                 : -1;
+            if (planned >= 0 && planned < static_cast<int>(w.groups.size())) {
+                Option o;
+                o.kind = OptionKind::farm;
+                o.target = planned;
+                o.at = Statics::get().groups[static_cast<std::size_t>(planned)].center;
+                o.need = opening && planned == mapplan::read().openingCamp ? std::max(1, mapplan::read().openingParty) : 1;
+                o.c.note << "first turn: draft plan";
+                options.push_back(o);
+                chosen = 0;
+                plan_ = o;
+                planAge_ = 0;
+                planGems_ = w.gems;
+                planStatus_ = w.groups[static_cast<std::size_t>(planned)].status;
+                w.forceReplan = true;  // score properly next turn
+            } else {
+                // No draft camp for us: wait this round and score next turn. Overrunning instead
+                // finishes the same turn a round late, so nothing is lost, and the lost turn goes.
+                planned = -1;
+                idleFirst = true;
+                w.forceReplan = true;
+                trace().note("first turn: no plan camp, wait");
+            }
+        }
+        if (planned < 0 && !idleFirst && !tight && needsReplan(w)) {
             w.forceReplan = false;
             const bool campPlan = plan_ && (plan_->kind == OptionKind::farm || plan_->kind == OptionKind::capture);
             options = brain::think(w, campPlan ? &*plan_ : nullptr);
@@ -204,7 +239,7 @@ void Bot::play_turn() {
                                   ? w.groups[static_cast<std::size_t>(plan_->target)].status
                                   : GroupStatus::unknown;
             }
-        } else {
+        } else if (planned < 0 && !idleFirst) {
             ++planAge_;
             options.push_back(*plan_);
             options.back().c.note.clear();

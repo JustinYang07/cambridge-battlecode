@@ -15,14 +15,7 @@ const char* to_string(OptionKind kind) {
 }
 
 float Option::finish() {
-    float reward = 0, time = 0, mult = 1;
-    for (int i = 0; i < c.factorCount; ++i) {
-        const auto& f = c.factors[static_cast<std::size_t>(i)];
-        if (f.op == '+') reward += f.value;
-        else if (f.op == 't') time += f.value;
-        else mult *= f.value;
-    }
-    score = reward / std::max(time, 1.0f) * 100.0f * mult;
+    score = c.reward / std::max(c.time, 1.0f) * 100.0f * c.mult;
     c.kind = to_string(kind);
     c.x = at.x;
     c.y = at.y;

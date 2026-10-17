@@ -1,7 +1,10 @@
 #pragma once
+#include <cstdint>
 // Map facts that never change during a match, computed once on the first turn
 // (which has a doubled fuel budget) and reused by every module.
 #include <cambc.h>
+#include "rawbuf.h"
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,7 +30,8 @@ struct GroupInfo {
     // Sealed groups a dash can get into: the pocket around them (walkable inside), and one legal dash
     // from dashFrom (reachable on foot) to dashTo (inside the pocket). The way out is the reverse.
     bool dashIn = false;
-    cambc::bitboard pocket;
+    std::optional<cambc::bitboard> pocket;  // dash-in groups only (a bitboard per group cost ~150 fuel to build)
+    bool inPocket(cambc::vec2 p) const { return pocket && pocket->is_set(p); }
     cambc::vec2 dashFrom{-1, -1}, dashTo{-1, -1};
     int campCount = 0;
     int adjacentPairs = 0;            // members within 1 tile of each other (splash value)
@@ -60,10 +64,19 @@ struct Statics {
         std::optional<cambc::camp> handle;  // from map::camp_groups(); live reads cost ~50 fuel
     };
     const TileCamp* campAt(cambc::vec2 tile) const;
+    // Draft: append the packed camp facts (and their offset in the last two bytes) to the plan
+    // bytes, padding to the full 1024. Champions read it back in init().
+    void appendPacked(std::vector<std::uint8_t>& bytes) const;
+    bool usedDraftBlock = false;      // champion: camp facts came from draft memory
+
+    static constexpr std::uint8_t kPackMagic = 0x5D, kPackVersion = 3;
 
 private:
+    std::vector<std::uint8_t> packed_;               // draft: the block encode() appends
     void init();
-    std::vector<TileCamp> tileCamps_;  // width*height, groupId -1 where there is no camp
+    std::vector<TileCamp> tileCamps_;            // one per camp
+    RawBuf<std::uint8_t> tileCampIndex_;    // width*height: index into tileCamps_ + 1, 0 where there is no camp
+                                                 // (a dense TileCamp table cost ~60k fuel to fill on the first turn)
     bool ready_ = false;
 };
 

@@ -237,11 +237,11 @@ bool dashable(const World& w, const GroupInfo& g) {
 // Walking + dashing distance to a sealed group's nearest tile (from outside: to the dash tile,
 // one dash, then on from the landing tile; from inside: straight there).
 int dashTravel(const World& w, const GroupInfo& g, bc::vec2& nearest) {
-    const bc::vec2 from = g.pocket.is_set(w.pos) ? w.pos : g.dashTo;
+    const bc::vec2 from = g.inPocket(w.pos) ? w.pos : g.dashTo;
     int best = 1 << 20;
     for (auto t : g.tiles)
         if (dist(from, t) < best) { best = dist(from, t); nearest = t; }
-    if (g.pocket.is_set(w.pos)) return best;
+    if (g.inPocket(w.pos)) return best;
     return static_cast<int>(static_cast<float>(dist(w.pos, g.dashFrom)) * 1.25f) + 1 + best;
 }
 
@@ -637,6 +637,8 @@ void farm(World& w, std::vector<Option>& out) {
     int nearestOut = -1, nearestTravel = 1 << 20;
     // Fully score one candidate (walking distance, fight estimate) and add it to the options.
     auto scoreOne = [&](Candidate c) {
+        // combatBotv2: past the first camp, stop before the rest of the turn runs out of fuel.
+        if (scored > 0 && tune::farm_reserve > 0 && bc::fuel_remaining() < tune::farm_reserve) return;
         const auto& g = *c.group;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;

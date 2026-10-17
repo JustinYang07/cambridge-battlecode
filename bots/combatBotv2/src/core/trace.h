@@ -17,6 +17,7 @@
 // Define BB_NO_TRACE to compile tracing out for fuel-sensitive submissions.
 #include <array>
 #include <string_view>
+#include <type_traits>
 
 // Compile-time switch for the work that only feeds traces (choosing and copying the traced
 // options, diagnostics strings): with tracing compiled out it cost ~7k fuel a turn for nothing.
@@ -34,15 +35,33 @@ struct Factor {
     char op;           // '+' adds points, '*' multiplies, 't' is turns (divides the reward)
 };
 
-// Plain data (no heap) so options can be built and copied cheaply every turn.
+// A note that is dropped: no-trace builds keep options small (see Candidate).
+struct NullStr {
+    template <class T>
+    NullStr& operator<<(const T&) { return *this; }
+    NullStr& clear() { return *this; }
+    NullStr& sanitized(std::string_view) { return *this; }
+    NullStr& point(int, int) { return *this; }
+    bool empty() const { return true; }
+    std::string_view view() const { return {}; }
+    const char* c_str() const { return ""; }
+};
+
+// Plain data (no heap) so options can be built and copied cheaply every turn. combatBotv2: the
+// factor list and note only feed traces; no-trace builds keep running totals instead (the same
+// sums in the same order, so identical scores). An Option was 496 bytes, and the runner charges
+// ~1 fuel per byte copied: building, moving and keeping ~20 options a turn cost thousands.
 struct Candidate {
+    static constexpr int kMaxFactors = 14;
     const char* kind = "";
     FixedStr<24> target;   // short code: g<group>, a<altar>, e(x,y), home, ...
     int x = -1, y = -1;
     float score = 0;
-    std::array<Factor, 14> factors{};
-    int factorCount = 0;
-    FixedStr<48> note;
+    float reward = 0, time = 0, mult = 1;  // '+', 't' and '*' factors so far
+    int added = 0;                         // factors counted (at most kMaxFactors, as the list holds)
+    std::array<Factor, kTracing ? kMaxFactors : 0> factors{};
+    int factorCount = 0;                   // factors listed (tracing only)
+    std::conditional_t<kTracing, FixedStr<48>, NullStr> note;
 };
 
 class Trace {

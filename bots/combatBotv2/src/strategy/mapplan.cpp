@@ -1008,11 +1008,16 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
             if (g1 < 0 || A.dOur[static_cast<std::size_t>(g1)] > tune::opening_camp_radius) crew.push_back(static_cast<int>(c));
         }
         if (static_cast<int>(crew.size()) >= 2) {
-            float dps = 0, tankHp = 0;
+            float dps = 0, tankHp = 0, poolHp = 0;
             for (int c : crew) {
                 dps += champs[static_cast<std::size_t>(c)].dps;
                 tankHp = std::max(tankHp, champs[static_cast<std::size_t>(c)].hp);
+                poolHp += champs[static_cast<std::size_t>(c)].hp;
             }
+            // combatBotv2: monsters hit the nearest champion, and a melee-heavy crew spreads the hits
+            // over several tanks: budget the whole crew's health, not one tank's (eight: our 2-elk
+            // camp was rejected at 3,665 vs 684 while their same comp took theirs first).
+            if (tune::opening_hp_pool) tankHp = std::max(tankHp, poolHp);
             float bestScore = 0;
             for (int g = 0; g < n; ++g) {
                 const auto gi = static_cast<std::size_t>(g);
@@ -1075,6 +1080,7 @@ void write(const Plan& p) {
     bytes.push_back(kOpeningMarker);
     bytes.push_back(p.openingCamp >= 0 ? static_cast<std::uint8_t>(p.openingCamp) : 255);
     bytes.push_back(static_cast<std::uint8_t>(p.openingParty));
+    Statics::get().appendPacked(bytes);
     bc::draft_memory = bytes;
 }
 

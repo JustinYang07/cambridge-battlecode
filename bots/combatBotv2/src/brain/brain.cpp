@@ -20,6 +20,19 @@ std::vector<Option> think(World& w, const Option* keptCamp) {
             if (e.hp > 0 && dist(e.pos, w.pos) <= std::max(w.range, e.range) + tune::farm_skip_enemy_reach &&
                 !(tune::farm_skip_ignore_spawn && dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius))
                 skipFarm = true;
+    // combatBotv2: with an enemy about, survival and fight scoring go first and farm scoring gets
+    // what is left (it stops at tune::farm_reserve): overrunning turns in fights spent ~25k on
+    // farm scoring before reaching the fight. (No scorer reads another's options.)
+    bool fighting = false;
+    if (tune::fight_first)
+        for (const auto& e : w.enemies)
+            fighting = fighting || (e.hp > 0 && dist(e.pos, Statics::get().enemySpawnCenter) > tune::enemy_spawn_radius);
+    if (fighting) {
+        scorers::survive(w, options);
+        fuel::mark("think.survive");
+        scorers::fight(w, options);
+        fuel::mark("think.fight");
+    }
     if (!skipFarm) scorers::farm(w, options);
     else if (keptCamp) {
         options.push_back(*keptCamp);
@@ -29,10 +42,12 @@ std::vector<Option> think(World& w, const Option* keptCamp) {
     fuel::mark("think.farm");
     scorers::bank(w, options);
     fuel::mark("think.bank");
-    scorers::survive(w, options);
-    fuel::mark("think.survive");
-    scorers::fight(w, options);
-    fuel::mark("think.fight");
+    if (!fighting) {
+        scorers::survive(w, options);
+        fuel::mark("think.survive");
+        scorers::fight(w, options);
+        fuel::mark("think.fight");
+    }
     scorers::idle(w, options);
     scorers::regroupOption(w, options);
     scorers::hunt(w, options);

@@ -31,8 +31,13 @@ struct Option {
 
 private:
     Option& factor(const char* name, float value, char op) {
-        if (c.factorCount < static_cast<int>(c.factors.size()))
-            c.factors[static_cast<std::size_t>(c.factorCount++)] = {name, value, op};
+        if (c.added < Candidate::kMaxFactors) {
+            ++c.added;
+            if (op == '+') c.reward += value;
+            else if (op == 't') c.time += value;
+            else c.mult *= value;
+            if constexpr (kTracing) c.factors[static_cast<std::size_t>(c.factorCount++)] = {name, value, op};
+        }
         return *this;
     }
 };
