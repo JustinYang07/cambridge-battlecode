@@ -214,6 +214,8 @@ pub mod __private {
     #[cfg(cambc_debug)]
     impl Drop for DebugGuard {
         fn drop(&mut self) {
+            // Refund the guard's own call overhead before restoring.
+            unsafe { crate::sys::fuel_adjust(1) };
             unsafe { crate::sys::fuel_resume() }
         }
     }

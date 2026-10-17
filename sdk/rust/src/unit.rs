@@ -295,12 +295,16 @@ impl Champion {
         let h = self.handle()?;
         query(|p| unsafe { sys::champion(h.0, p) })
     }
-    /// Return this champion's type; live champions require a host query.
+    fn identity(&self) -> Result<sys::ChampionIdentity> {
+        let h = self.handle()?;
+        query(|p| unsafe { sys::champion_identity(h.0, p) })
+    }
+    /// Return this champion's type; live champions read it without vision.
     pub fn champion_name(&self) -> Result<ChampionType> {
         if let UnitIdentity::Design(t) = self.unit.identity {
             Ok(t)
         } else {
-            ChampionType::try_from(self.info()?.kind)
+            ChampionType::try_from(self.identity()?.kind)
         }
     }
     /// Query the checked champion passive from its engine design.
@@ -309,9 +313,9 @@ impl Champion {
         let d = query(|p| unsafe { sys::champion_design(kind as i32, p) })?;
         PassiveType::try_from(d.definition.passive_type)
     }
-    /// Query the champion's team relative to the guest perspective.
+    /// Query the champion's team relative to the guest perspective; no vision required.
     pub fn team(&self) -> Result<Team> {
-        Team::from_absolute(self.info()?.team)
+        Team::from_absolute(self.identity()?.team)
     }
     /// Check whether this champion belongs to the observing team.
     pub fn is_ally(&self) -> Result<bool> {

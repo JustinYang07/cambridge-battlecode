@@ -135,6 +135,15 @@ pub(crate) struct ChampionInfo {
     /// Packed engine state flags.
     pub state: i32,
 }
+/// Immutable champion team and design tag, readable without vision.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ChampionIdentity {
+    /// Absolute engine team ID, decoded into a relative team by typed wrappers.
+    pub team: i32,
+    /// Raw engine type tag, validated before exposure as a typed value.
+    pub kind: i32,
+}
 /// Immutable champion design stats in the engine C layout, not current combat stats.
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
@@ -340,6 +349,9 @@ unsafe extern "C" {
     /// Resume fuel accounting after a `fuel_pause` window.
     #[link_name = "fuel_resume"]
     pub(crate) fn fuel_resume();
+    /// Adjust charged fuel by `delta` (negative removes), saturating at 0.
+    #[link_name = "fuel_adjust"]
+    pub(crate) fn fuel_adjust(delta: i64);
 }
 #[cfg(all(cambc_debug, test))]
 pub(crate) unsafe fn fuel_pause() -> i32 {
@@ -348,6 +360,10 @@ pub(crate) unsafe fn fuel_pause() -> i32 {
 #[cfg(all(cambc_debug, test))]
 pub(crate) unsafe fn fuel_resume() {
     let _ = crate::fake::call("fuel_resume", &[]);
+}
+#[cfg(all(cambc_debug, test))]
+pub(crate) unsafe fn fuel_adjust(_delta: i64) {
+    let _ = crate::fake::call("fuel_adjust", &[]);
 }
 #[cfg(not(test))]
 #[link(wasm_import_module = "env")]
@@ -496,6 +512,8 @@ unsafe extern "C" {
     ) -> i32;
     #[link_name = "champion"]
     pub(crate) fn champion(champion: u32, out_info: *mut ChampionInfo) -> i32;
+    #[link_name = "champion_identity"]
+    pub(crate) fn champion_identity(champion: u32, out_identity: *mut ChampionIdentity) -> i32;
     #[link_name = "champion_design"]
     pub(crate) fn champion_design(kind: i32, out_design: *mut ChampionDesign) -> i32;
     #[link_name = "champion_restrictions"]
@@ -1287,6 +1305,14 @@ pub(crate) unsafe fn write_shared_memory(
 #[cfg(test)]
 pub(crate) unsafe fn champion(champion: u32, out_info: *mut ChampionInfo) -> i32 {
     crate::fake::call("champion", &[champion as usize, out_info as usize]) as i32
+}
+/// Exact C-ABI `champion_identity` host operation; pointer buffers obey the module safety contract.
+#[cfg(test)]
+pub(crate) unsafe fn champion_identity(champion: u32, out_identity: *mut ChampionIdentity) -> i32 {
+    crate::fake::call(
+        "champion_identity",
+        &[champion as usize, out_identity as usize],
+    ) as i32
 }
 /// Exact C-ABI `champion_design` host operation; pointer buffers obey the module safety contract.
 #[cfg(test)]

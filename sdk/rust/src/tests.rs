@@ -425,21 +425,34 @@ fn all_ability_payloads_decode_without_transmute() {
     assert_eq!((p.range, p.radius, p.modifier, p.duration), (2., 3., 4., 5));
 }
 #[test]
-fn hidden_roster_keeps_cached_visibility_error_and_has_never_throws() {
+fn hidden_roster_reads_ability_props_and_has_never_throws() {
     setup();
     crate::init().unwrap();
     fake::edit(|s| s.hidden = true);
     let enemies = crate::champions(Some(Team::Enemy)).unwrap();
     assert_eq!(enemies.len(), 1);
     assert!(!enemies[0].is_visible().unwrap());
-    assert!(!enemies[0].abilities()[0].is(AbilityKind::Damage));
-    assert_eq!(
-        enemies[0].abilities()[0].info().err().unwrap().code(),
-        Some(ErrorCode::ApiNotInVision)
-    );
+    assert!(enemies[0].abilities()[0].is(AbilityKind::Damage));
+    assert!(enemies[0].abilities()[0].info().unwrap().is_some());
     fake::edit(|s| s.hidden = false);
     assert!(enemies[0].is_visible().unwrap());
-    assert!(!enemies[0].abilities()[0].is(AbilityKind::Damage));
+    assert!(enemies[0].abilities()[0].is(AbilityKind::Damage));
+}
+#[test]
+fn hidden_champion_identity_reads_team_and_type_without_vision() {
+    setup();
+    crate::init().unwrap();
+    fake::edit(|s| s.hidden = true);
+    let enemies = crate::champions(Some(Team::Enemy)).unwrap();
+    assert_eq!(enemies.len(), 1);
+    assert!(!enemies[0].is_visible().unwrap());
+    assert_eq!(enemies[0].champion_name().unwrap(), ChampionType::Ryth);
+    assert_eq!(enemies[0].team().unwrap(), Team::Enemy);
+    assert!(enemies[0].is_enemy().unwrap() && !enemies[0].is_ally().unwrap());
+    assert_eq!(
+        enemies[0].health().unwrap_err().code(),
+        Some(ErrorCode::ApiNotInVision)
+    );
 }
 #[test]
 fn design_champions_are_draft_safe_but_not_live() {

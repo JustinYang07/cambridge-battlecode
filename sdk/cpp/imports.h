@@ -88,6 +88,12 @@ struct champion_info
 	std::int32_t move_speed, attack_range, state;
 };
 
+/// Immutable champion team and design, readable without vision.
+struct champion_identity
+{
+	std::int32_t team, type;
+};
+
 using champion_base_stats = cambc::champion_stats;
 
 inline constexpr std::uint32_t ability_target_camps = 1u << 0;
@@ -350,6 +356,7 @@ extern "C"
 
 	/// Champion inspection and inventory queries.
 	BC_IMPORT("champion") std::int32_t sdk_champion(std::uint32_t, champion_info*);
+	BC_IMPORT("champion_identity") std::int32_t sdk_champion_identity(std::uint32_t, champion_identity*);
 	BC_IMPORT("champion_design") std::int32_t sdk_champion_design(std::int32_t, champion_design*);
 	BC_IMPORT("champion_restrictions") std::int32_t sdk_champion_restrictions(std::uint32_t, std::uint8_t*);
 	BC_IMPORT("champion_ability_props") std::int32_t sdk_champion_ability_props(std::uint32_t, std::uint32_t, ability_props*);
@@ -417,6 +424,9 @@ extern "C"
 
 	/// Resume fuel accounting after a `fuel_pause` window.
 	BC_IMPORT("fuel_resume") void sdk_fuel_resume();
+
+	/// Adjust charged fuel by `delta` (negative removes), saturating at 0.
+	BC_IMPORT("fuel_adjust") void sdk_fuel_adjust(std::int64_t delta);
 #endif
 
 	/// Initialise engine-chunked bitboard storage.

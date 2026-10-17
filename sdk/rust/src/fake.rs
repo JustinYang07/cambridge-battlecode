@@ -181,9 +181,6 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                     msg.len() as i64
                 }
                 "champion_ability_props" => {
-                    if s.hidden && a[0] == 2 {
-                        return 97;
-                    }
                     put(a[2], props(if a[1] == 0 { 2 } else { 7 }));
                     0
                 }
@@ -216,6 +213,16 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                                 ..Default::default()
                             },
                             ..Default::default()
+                        },
+                    );
+                    0
+                }
+                "champion_identity" => {
+                    put(
+                        a[1],
+                        sys::ChampionIdentity {
+                            team: if a[0] == 2 { 1 } else { 0 },
+                            kind: 0,
                         },
                     );
                     0
@@ -562,6 +569,7 @@ pub fn call(name: &str, a: &[usize]) -> i64 {
                 | "resign"
                 | "fuel_pause"
                 | "fuel_resume"
+                | "fuel_adjust"
                 | "yield" => 0,
                 "bc_Bitboard_One" => {
                     put(a[0], u64::MAX);

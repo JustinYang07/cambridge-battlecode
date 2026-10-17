@@ -339,6 +339,8 @@ BC_ENUM(cambc::error_code::invalid_action_sell_not_owned, e_ErrorCode_invalidAct
 BC_ENUM(cambc::error_code::invalid_action_sell_already_sold, e_ErrorCode_invalidAction_sell_alreadySold);
 BC_ENUM(cambc::error_code::invalid_action_sell_gold_overflow, e_ErrorCode_invalidAction_sell_goldOverflow);
 BC_ENUM(cambc::error_code::invalid_action_sell_not_on_spawn, e_ErrorCode_invalidAction_sell_notOnSpawn);
+BC_ENUM(cambc::error_code::draft_already_picked, e_ErrorCode_draft_alreadyPicked);
+BC_ENUM(cambc::error_code::draft_no_champion_selected, e_ErrorCode_draft_noChampionSelected);
 
 BC_LAYOUT(cambc::detail::aabb, Aabb);
 BC_FIELD(cambc::detail::aabb, min_x, Aabb, m_minX);
@@ -378,6 +380,10 @@ BC_FIELD(cambc::detail::camp_base_stats, focus_growth, Game_CampBaseStats, m_foc
 BC_LAYOUT(cambc::detail::camp_design, Game_CampDesign);
 BC_FIELD(cambc::detail::camp_design, definition, Game_CampDesign, m_definition);
 BC_FIELD(cambc::detail::camp_design, base_stats, Game_CampDesign, m_baseStats);
+
+BC_LAYOUT(cambc::detail::champion_identity, Game_ChampionIdentity);
+BC_FIELD(cambc::detail::champion_identity, team, Game_ChampionIdentity, m_team);
+BC_FIELD(cambc::detail::champion_identity, type, Game_ChampionIdentity, m_champion);
 
 BC_LAYOUT(cambc::detail::champion_info, Game_Champion);
 BC_FIELD(cambc::detail::champion_info, team, Game_Champion, m_team);

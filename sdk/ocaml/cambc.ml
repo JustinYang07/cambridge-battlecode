@@ -64,6 +64,7 @@ module Sys = struct
   external read_shared_memory : int -> int -> int -> int = "cambc_read_shared_memory"
   external write_shared_memory : int -> int -> int -> int = "cambc_write_shared_memory"
   external champion : int -> int -> int = "cambc_champion"
+  external champion_identity : int -> int -> int = "cambc_champion_identity"
   external champion_design : int -> int -> int = "cambc_champion_design"
   external champion_restrictions : int -> int -> int = "cambc_champion_restrictions"
   external champion_ability_props : int -> int -> int -> int = "cambc_champion_ability_props"
@@ -780,9 +781,11 @@ module Error_code = struct
     | Invalid_action_sell_already_sold
     | Invalid_action_sell_gold_overflow
     | Invalid_action_sell_not_on_spawn
+    | Draft_already_picked
+    | Draft_no_champion_selected
     | Unknown of int
 
-  let all = [ Success; Invalid_handle; Out_of_memory; File_not_found; Null_pointer; Invalid_argument; Map_parse_error; Invalid_map_file; Invalid_map_version; Replay_parse_error; Invalid_replay_file; Invalid_replay_version; Invalid_draft; Draft_not_drafting; Draft_duplicate_champion; Draft_invalid_round; Draft_unavailable; Already_initialized; Invalid_action; Invalid_action_memory_bad_range; Invalid_action_memory_draft_frozen; Invalid_action_move_cant_move; Invalid_action_move_bad_destination; Invalid_action_spell_cast_invalid_source; Invalid_action_spell_cast_invalid_slot; Invalid_action_spell_cast_no_ability; Invalid_action_spell_cast_cant_cast; Invalid_action_spell_cast_already_cast; Invalid_action_spell_cast_on_cooldown; Invalid_action_spell_cast_no_charges; Invalid_action_spell_cast_bad_target; Invalid_action_spell_cast_out_of_range; Invalid_action_spell_cast_bad_destination; Invalid_action_cant_act; Invalid_action_is_recalling; Invalid_action_is_submitting_gems; Invalid_action_move_already_moved; Invalid_action_move_out_of_range; Invalid_action_move_unreachable; Invalid_action_attack_invalid_source; Invalid_action_attack_cant_attack; Invalid_action_attack_already_attacked; Invalid_action_attack_bad_target; Invalid_action_attack_out_of_range; Invalid_action_recall_cant_channel; Invalid_action_submit_gems_cant_channel; Invalid_action_submit_gems_no_gems; Invalid_action_submit_gems_bad_altar; Invalid_action_submit_gems_out_of_range; Invalid_action_buy_item_not_on_spawn; Invalid_action_buy_item_invalid_item; Invalid_action_buy_item_invalid_count; Invalid_action_buy_item_not_enough_gold; Invalid_action_buy_item_inventory_full; Invalid_action_buy_item_stats_overflow; Invalid_action_buy_consumable_not_on_spawn; Invalid_action_buy_consumable_invalid_type; Invalid_action_buy_consumable_invalid_count; Invalid_action_buy_consumable_inventory_full; Invalid_action_buy_consumable_not_enough_gold; Invalid_action_use_consumable_invalid_type; Invalid_action_use_consumable_not_owned; Invalid_action_place_ward_no_charges; Invalid_action_place_ward_cant_place; Invalid_action_place_ward_bad_destination; Invalid_action_place_ward_out_of_range; Map_set_team_aspawn_area_bad_position; Map_add_bush_bad_position; Map_remove_bush_bad_position; Map_add_wall_bad_position; Map_remove_wall_bad_position; Map_add_hole_bad_position; Map_remove_hole_bad_position; Map_add_altar_bad_position; Map_remove_altar_bad_position; Map_get_bush_bad_position; Map_get_wall_bad_position; Map_get_hole_bad_position; Map_get_altar_bad_position; Map_get_camp_handle_at_bad_position; Map_add_camp_bad_position; Map_set_camp_bad_position; Invalid_action_champion_teleport_bad_destination; Invalid_action_respawn_group_blocked_spawn; Invalid_action_camp_teleport_bad_destination; Timeline_bad_seek_position; Timeline_bad_seek_substep; Api_no_map; Managed_resources_bad_position; Managed_resources_bad_radius; Managed_resources_aliasing; Managed_resources_metadata_mismatch; Managed_resources_opaque_origin; Api_invalid_team; Api_invalid_perspective; Api_not_initialized; Api_bad_position; Api_not_in_vision; Api_not_found; Api_invalid_camp_group; Api_invalid_camp_info; Api_invalid_camp; Api_invalid_champion; Api_invalid_ward; Api_invalid_ability; Api_not_teammate; Api_camp_group_not_waiting_to_respawn; Api_champion_alive; Api_invalid_champion_type; Api_invalid_camp_type; Api_value_out_of_range; Api_buffer_too_small; Api_not_owner; Invalid_action_recall_already_used; Invalid_action_submit_gems_already_used; Invalid_action_cancel_channel_not_channeling; Invalid_action_cancel_channel_already_used; Invalid_action_place_ward_ally_ward_present; Invalid_action_altar_lock_bad_altar; Invalid_action_altar_lock_out_of_range; Invalid_action_altar_lock_already_locked; Invalid_action_is_teleporting; Invalid_action_cancel_channel_not_cancellable; Invalid_action_submit_gems_altar_locked; Invalid_action_spell_cast_already_moved; Invalid_action_move_exclusive_spell_cast; Invalid_action_sell_not_tavi; Invalid_action_sell_invalid_item; Invalid_action_sell_not_owned; Invalid_action_sell_already_sold; Invalid_action_sell_gold_overflow; Invalid_action_sell_not_on_spawn ]
+  let all = [ Success; Invalid_handle; Out_of_memory; File_not_found; Null_pointer; Invalid_argument; Map_parse_error; Invalid_map_file; Invalid_map_version; Replay_parse_error; Invalid_replay_file; Invalid_replay_version; Invalid_draft; Draft_not_drafting; Draft_duplicate_champion; Draft_invalid_round; Draft_unavailable; Already_initialized; Invalid_action; Invalid_action_memory_bad_range; Invalid_action_memory_draft_frozen; Invalid_action_move_cant_move; Invalid_action_move_bad_destination; Invalid_action_spell_cast_invalid_source; Invalid_action_spell_cast_invalid_slot; Invalid_action_spell_cast_no_ability; Invalid_action_spell_cast_cant_cast; Invalid_action_spell_cast_already_cast; Invalid_action_spell_cast_on_cooldown; Invalid_action_spell_cast_no_charges; Invalid_action_spell_cast_bad_target; Invalid_action_spell_cast_out_of_range; Invalid_action_spell_cast_bad_destination; Invalid_action_cant_act; Invalid_action_is_recalling; Invalid_action_is_submitting_gems; Invalid_action_move_already_moved; Invalid_action_move_out_of_range; Invalid_action_move_unreachable; Invalid_action_attack_invalid_source; Invalid_action_attack_cant_attack; Invalid_action_attack_already_attacked; Invalid_action_attack_bad_target; Invalid_action_attack_out_of_range; Invalid_action_recall_cant_channel; Invalid_action_submit_gems_cant_channel; Invalid_action_submit_gems_no_gems; Invalid_action_submit_gems_bad_altar; Invalid_action_submit_gems_out_of_range; Invalid_action_buy_item_not_on_spawn; Invalid_action_buy_item_invalid_item; Invalid_action_buy_item_invalid_count; Invalid_action_buy_item_not_enough_gold; Invalid_action_buy_item_inventory_full; Invalid_action_buy_item_stats_overflow; Invalid_action_buy_consumable_not_on_spawn; Invalid_action_buy_consumable_invalid_type; Invalid_action_buy_consumable_invalid_count; Invalid_action_buy_consumable_inventory_full; Invalid_action_buy_consumable_not_enough_gold; Invalid_action_use_consumable_invalid_type; Invalid_action_use_consumable_not_owned; Invalid_action_place_ward_no_charges; Invalid_action_place_ward_cant_place; Invalid_action_place_ward_bad_destination; Invalid_action_place_ward_out_of_range; Map_set_team_aspawn_area_bad_position; Map_add_bush_bad_position; Map_remove_bush_bad_position; Map_add_wall_bad_position; Map_remove_wall_bad_position; Map_add_hole_bad_position; Map_remove_hole_bad_position; Map_add_altar_bad_position; Map_remove_altar_bad_position; Map_get_bush_bad_position; Map_get_wall_bad_position; Map_get_hole_bad_position; Map_get_altar_bad_position; Map_get_camp_handle_at_bad_position; Map_add_camp_bad_position; Map_set_camp_bad_position; Invalid_action_champion_teleport_bad_destination; Invalid_action_respawn_group_blocked_spawn; Invalid_action_camp_teleport_bad_destination; Timeline_bad_seek_position; Timeline_bad_seek_substep; Api_no_map; Managed_resources_bad_position; Managed_resources_bad_radius; Managed_resources_aliasing; Managed_resources_metadata_mismatch; Managed_resources_opaque_origin; Api_invalid_team; Api_invalid_perspective; Api_not_initialized; Api_bad_position; Api_not_in_vision; Api_not_found; Api_invalid_camp_group; Api_invalid_camp_info; Api_invalid_camp; Api_invalid_champion; Api_invalid_ward; Api_invalid_ability; Api_not_teammate; Api_camp_group_not_waiting_to_respawn; Api_champion_alive; Api_invalid_champion_type; Api_invalid_camp_type; Api_value_out_of_range; Api_buffer_too_small; Api_not_owner; Invalid_action_recall_already_used; Invalid_action_submit_gems_already_used; Invalid_action_cancel_channel_not_channeling; Invalid_action_cancel_channel_already_used; Invalid_action_place_ward_ally_ward_present; Invalid_action_altar_lock_bad_altar; Invalid_action_altar_lock_out_of_range; Invalid_action_altar_lock_already_locked; Invalid_action_is_teleporting; Invalid_action_cancel_channel_not_cancellable; Invalid_action_submit_gems_altar_locked; Invalid_action_spell_cast_already_moved; Invalid_action_move_exclusive_spell_cast; Invalid_action_sell_not_tavi; Invalid_action_sell_invalid_item; Invalid_action_sell_not_owned; Invalid_action_sell_already_sold; Invalid_action_sell_gold_overflow; Invalid_action_sell_not_on_spawn; Draft_already_picked; Draft_no_champion_selected ]
   let of_int = function
     | 0 -> Success
     | 1 -> Invalid_handle
@@ -916,6 +919,8 @@ module Error_code = struct
     | 131 -> Invalid_action_sell_already_sold
     | 132 -> Invalid_action_sell_gold_overflow
     | 133 -> Invalid_action_sell_not_on_spawn
+    | 134 -> Draft_already_picked
+    | 135 -> Draft_no_champion_selected
     | n -> Unknown n
   let to_string = function
     | Success -> "Success"
@@ -1050,6 +1055,8 @@ module Error_code = struct
     | Invalid_action_sell_already_sold -> "Invalid_action_sell_already_sold"
     | Invalid_action_sell_gold_overflow -> "Invalid_action_sell_gold_overflow"
     | Invalid_action_sell_not_on_spawn -> "Invalid_action_sell_not_on_spawn"
+    | Draft_already_picked -> "Draft_already_picked"
+    | Draft_no_champion_selected -> "Draft_no_champion_selected"
     | Unknown n -> "Unknown " ^ string_of_int n
 end
 
@@ -1655,6 +1662,7 @@ let design_error () = raise Missing_identity
 let owner_of = function Some h -> h | None -> design_error ()
 
 let champion_raw h = check (Sys.champion h rec_); rec_
+let champion_identity_raw h = check (Sys.champion_identity h rec_); rec_
 
 let live_champion_state h = Champion_state.of_bits (i32 (champion_raw h + 40))
 
@@ -1680,7 +1688,7 @@ let draw_cheb p r =
 let champion_name c =
   match c with
   | { design = Some k; _ } | { known = Some k; _ } -> k
-  | { handle = Some h; _ } -> Champion_type.of_int (i32 (champion_raw h + 4))
+  | { handle = Some h; _ } -> Champion_type.of_int (i32 (champion_identity_raw h + 4))
   | _ -> design_error ()
 
 let hypothetical_vision_into kind (p : Vec2.t) out =
@@ -2053,7 +2061,7 @@ module Champion = struct
   let h c = owner_of c.handle
   let champion_name = champion_name
   let passive c = Passive.of_int (Sys.ld8 (champion_design_raw (champion_name c) + 8))
-  let team c = team_of_abs (i32 (champion_raw (h c)))
+  let team c = team_of_abs (i32 (champion_identity_raw (h c)))
   let is_ally c = team c = Team.Ally
   let is_enemy c = team c = Team.Enemy
 

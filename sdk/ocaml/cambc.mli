@@ -418,6 +418,8 @@ module Error_code : sig
       | Invalid_action_sell_already_sold
       | Invalid_action_sell_gold_overflow
       | Invalid_action_sell_not_on_spawn
+      | Draft_already_picked
+      | Draft_no_champion_selected
       | Unknown of int
 
   (** Every value, in declaration order. *)

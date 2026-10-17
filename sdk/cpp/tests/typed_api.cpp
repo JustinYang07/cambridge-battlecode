@@ -533,6 +533,14 @@ extern "C"
 		return query_error;
 	}
 
+	std::int32_t sdk_champion_identity(std::uint32_t handle, champion_identity* out)
+	{
+		assert(handle == 0);
+		*out = {};
+		out->team = mock_champion_team;
+		return query_error;
+	}
+
 	std::int32_t sdk_move_to(std::int32_t x, std::int32_t y, std::int32_t* out)
 	{
 		++move_calls;

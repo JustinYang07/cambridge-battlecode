@@ -584,6 +584,8 @@ if TYPE_CHECKING:
         INVALID_ACTION_SELL_ALREADY_SOLD = 131
         INVALID_ACTION_SELL_GOLD_OVERFLOW = 132
         INVALID_ACTION_SELL_NOT_ON_SPAWN = 133
+        DRAFT_ALREADY_PICKED = 134
+        DRAFT_NO_CHAMPION_SELECTED = 135
 
 else:
 
@@ -722,6 +724,8 @@ else:
         INVALID_ACTION_SELL_ALREADY_SOLD = 131
         INVALID_ACTION_SELL_GOLD_OVERFLOW = 132
         INVALID_ACTION_SELL_NOT_ON_SPAWN = 133
+        DRAFT_ALREADY_PICKED = 134
+        DRAFT_NO_CHAMPION_SELECTED = 135
 
 
 
@@ -1759,20 +1763,20 @@ class Champion(Unit):
         return _bc.champion_get(self._handle, 4)
 
     def champion_name(self) -> ChampionType:
-        """Return the champion's type."""
+        """Return the champion's type; readable without vision."""
         if self._design_type is not None:
             return self._design_type
-        return _bc.champion_get(self._handle, 1)
+        return _bc.champion_identity(self._handle, 1)
 
     def passive(self) -> PassiveType:
         """Return the champion's passive."""
         return _cache.champion_designs[self.champion_name()][1]
 
     def team(self) -> Team:
-        """Return the champion's team."""
+        """Return the champion's team; readable without vision."""
         if self._design_type is not None:
             raise Error(ErrorCode.API_NOT_IN_VISION, "design champion has no live state")
-        return _bc.champion_get(self._handle, 0)
+        return _bc.champion_identity(self._handle, 0)
 
     def is_ally(self) -> bool:
         """Check whether this champion belongs to the observing team."""

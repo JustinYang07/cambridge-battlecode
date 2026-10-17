@@ -551,6 +551,10 @@ enum class error_code : std::int32_t
 	invalid_action_sell_gold_overflow = 132,
 	/// Items can only be sold on spawn.
 	invalid_action_sell_not_on_spawn = 133,
+	/// A champion has already been selected this draft turn.
+	draft_already_picked = 134,
+	/// Select a champion before ending the draft turn.
+	draft_no_champion_selected = 135,
 };
 
 /// Engine failure with its error code and a copied diagnostic.
@@ -2050,6 +2054,8 @@ enum class item_passive : std::uint32_t { monster = 1, durability, treasure, jun
 	case error_code::invalid_action_sell_already_sold: return "invalid_action_sell_already_sold";
 	case error_code::invalid_action_sell_gold_overflow: return "invalid_action_sell_gold_overflow";
 	case error_code::invalid_action_sell_not_on_spawn: return "invalid_action_sell_not_on_spawn";
+	case error_code::draft_already_picked: return "draft_already_picked";
+	case error_code::draft_no_champion_selected: return "draft_no_champion_selected";
 	default: break;
 	}
 	return "error_code(" + std::to_string(static_cast<std::int32_t>(value)) + ")";
@@ -3447,12 +3453,12 @@ public:
 	/// Query current maximum health; live state requires a visible runtime identity.
 	[[nodiscard]] float max_health() const override { return info().max_health; }
 
-	/// Get the entity or inventory entry kind.
-	[[nodiscard]] champion_type champion_name() const { return design_type_ ? *design_type_ : static_cast<champion_type>(info().type); }
+	/// Get the entity or inventory entry kind; live champions read it without vision.
+	[[nodiscard]] champion_type champion_name() const { return design_type_ ? *design_type_ : static_cast<champion_type>(identity().type); }
 	/// Get the passive effect tag from the champion's immutable design.
 	[[nodiscard]] passive_type passive() const { return static_cast<passive_type>(load_design(champion_name()).definition.passive_type); }
-	/// Get the owning team relative to the authenticated bot.
-	[[nodiscard]] team team() const { return info().team == detail::sdk_my_team() ? team::ally : team::enemy; }
+	/// Get the owning team relative to the authenticated bot; live champions read it without vision.
+	[[nodiscard]] team team() const { return (design_type_ ? info().team : identity().team) == detail::sdk_my_team() ? team::ally : team::enemy; }
 	/// Check whether this champion belongs to the observing team.
 	[[nodiscard]] bool is_ally() const { return team() == cambc::team::ally; }
 	/// Check whether this champion belongs to the opposing team.
@@ -3868,6 +3874,14 @@ private:
 			throw error{ error_code::api_not_in_vision, "design champion has no live state" };
 		detail::champion_info result{};
 		detail::check(detail::sdk_champion(handle_, &result));
+		return result;
+	}
+
+	/// Query the immutable team and design; works for hidden and dead champions.
+	[[nodiscard]] detail::champion_identity identity() const
+	{
+		detail::champion_identity result{};
+		detail::check(detail::sdk_champion_identity(handle_, &result));
 		return result;
 	}
 
@@ -5137,7 +5151,8 @@ namespace cambc::detail
 struct DebugGuard
 {
 	DebugGuard() { sdk_fuel_pause(); }
-	~DebugGuard() { sdk_fuel_resume(); }
+	// Refund the guard's own call overhead before restoring the saved fuel.
+	~DebugGuard() { sdk_fuel_adjust(2); sdk_fuel_resume(); }
 	DebugGuard(const DebugGuard&) = delete;
 	DebugGuard& operator=(const DebugGuard&) = delete;
 };
