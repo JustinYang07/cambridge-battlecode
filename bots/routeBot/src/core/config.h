@@ -32,6 +32,7 @@ inline constexpr int race_end_gems = 850;          // enemy banked this many: ba
 inline constexpr float race_end_bank_boost = 6.0f;
 inline constexpr int enemy_spawn_radius = 7;       // fights this close to the enemy spawn are not worth taking
 inline constexpr float travel_weight = 3.0f;       // walking turns count this much in farm scores
+inline constexpr int min_bound_scored = 0;          // ...and at least this many in bound order beyond the forced ones (1: -118 +/- 105 on 17 maps)
 inline constexpr int max_scored_groups = 6;        // fully score at most this many camp groups per turn
 inline constexpr int max_team_per_camp = 4;
 inline constexpr int max_party_wait_claimed = 10;  // ...also when allies have claimed it (was 30: 100-turn holds)

@@ -537,6 +537,10 @@ void farm(World& w, std::vector<Option>& out) {
                     scoreOne(c);
                     break;
                 }
+    // The forced camps above used up the scoring budget on tight turns, so the best-bound camp was
+    // never scored at all (pilgrimage's inner gem camp: bound ~3,000, pruned every turn with one
+    // slot). Always score at least min_bound_scored camps in bound order.
+    const int forcedScored = scored;
     for (int round = 0; round < n; ++round) {
         // Selection instead of a full sort: we usually stop after a handful.
         int pick = -1;
@@ -547,7 +551,9 @@ void farm(World& w, std::vector<Option>& out) {
         auto c = pre[static_cast<std::size_t>(pick)];
         pre[static_cast<std::size_t>(pick)].group = nullptr;
         // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
-        if ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored) break;
+        const bool owed = scored - forcedScored < tune::min_bound_scored;
+        if (!owed && ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored)) break;
+        if (owed && c.bound < best) break;  // nothing left can win anyway
 
         scoreOne(c);
     }
