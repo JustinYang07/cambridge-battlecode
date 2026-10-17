@@ -139,6 +139,9 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
+inline constexpr float altar_exposure_tiles = 0.0f;  // (unfinished: off)  // bank: an altar at the enemy's end costs this many extra tiles (centre ~half)
+inline constexpr float altar_enemy_tiles = 0.0f;  // (unfinished: off)     // ...enemies seen near it add this
+inline constexpr float altar_exposure_bag = 50.0f;    // ...both grow by x1 per this many gems carried
 inline constexpr bool fixed_draft = true;            // draft a fixed comp, first N picks: Ren, Stellar, Cassi & Issac, Ryth, Varg
 inline constexpr float gold_draft_share = 0.95f;     // ...maps with at least this share of camps gold-only: Stellar, Tavi, Prism, Cassi & Issac, Ren
 inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
@@ -292,6 +295,7 @@ inline constexpr bool ranged_kite = false;        // alone with an enemy melee n
 inline constexpr int ranged_kite_from = 2;        // ...when it is this close (2: it could step in and hit us this turn)
 inline constexpr int ranged_kite_ally_radius = 3; // a melee ally this close means we are not alone: keep shooting
 inline constexpr bool ranged_hold_always = true;  // the same hold and front rules on farm walks, regroups, hunts and idling
+inline constexpr bool ward_any_bush = true;           // ward any hidden bush in placement range, whichever way we move
 inline constexpr bool ward_bushes = true;             // moving toward an unseen bush: one ward on it (wards last forever, recharge in a round)
 inline constexpr int ward_line_width = 1;            // halfway line: |dist to our spawn - dist to theirs| <= this
 inline constexpr bool ward_once = false;             // one ward per champion, then stop trying
