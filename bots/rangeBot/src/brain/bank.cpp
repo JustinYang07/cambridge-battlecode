@@ -14,6 +14,16 @@ namespace bc = cambc;
 
 namespace scorers {
 
+// Turns to bank at `altarIdx` by recalling home and walking from spawn (a large number when not
+// worth considering: off, already home, or the altar's field is not built yet).
+float recallBankTurns(const World& w, int altarIdx) {
+    if (!tune::bank_by_recall || w.atSpawn || altarIdx < 0) return 1e9f;
+    const int fromSpawn = fields::toAltar(altarIdx, Statics::get().spawnCenter);
+    if (fromSpawn < 0 || fromSpawn >= Navigator::unreachable) return 1e9f;
+    return tune::recall_turns + w.walkTurns(static_cast<float>(fromSpawn));
+}
+
+
 void bank(World& w, std::vector<Option>& out) {
     if (w.gems < tune::bank_min_gems) return;
     const auto& altars = Statics::get().altars;
@@ -59,7 +69,14 @@ void bank(World& w, std::vector<Option>& out) {
     o.c.target << 'a' << bestIdx;
     const float gems = static_cast<float>(w.gems);
     o.add("bag", gems * gemValue(w));
-    o.turns("travel", w.walkTurns(static_cast<float>(bestTravel)));
+    // Recall first when that is quicker: 5 turns home, then the walk from spawn (rows: walking the
+    // bag from the far wolves took ~40 rounds; their team recalled and banked in ~25).
+    float travel = w.walkTurns(static_cast<float>(bestTravel));
+    if (const float viaHome = recallBankTurns(w, bestIdx); viaHome + tune::bank_recall_margin < travel) {
+        travel = viaHome;
+        o.c.note << "recall first; ";
+    }
+    o.turns("travel", travel);
     if (bestLocked) {
         o.turns("break their lock", static_cast<float>(tune::lock_break_turns));
         o.c.note << "locked: breaking it";

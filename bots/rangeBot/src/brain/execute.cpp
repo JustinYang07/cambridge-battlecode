@@ -8,6 +8,7 @@
 #include "../core/trace.h"
 #include "../nav/fields.h"
 #include "../nav/navigator.h"
+#include "scorers.h"
 #include "brain.h"
 
 namespace bc = cambc;
@@ -209,6 +210,21 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
 }
 
 void capture(World& w, const GroupInfo& g) {
+    // A teammate keeps this capture: never stand on its tiles too (the reward is split between
+    // everyone on them; rows split its wolves 33/33 all game once the opening rotation ended).
+    if (tune::capture_step_off && scorers::allyHoldingOf(w, g.id) && scorers::captureShareOf(w, g.id) < 1.0f) {
+        if (g.tileMask.is_set(w.pos)) {
+            const auto blocked = nav().blocked(w);
+            bc::bitboard off;
+            off.clear();
+            off.draw_chebyshev(w.pos, 1.0f);
+            off = off & ~g.tileMask & ~blocked & Statics::get().reach;
+            if (!off.is_empty()) nav().stepToward(w, off, false);
+            trace().note("teammate keeps the capture: off the tiles");
+        }
+        combat::act(w, combat::Focus{.groupId = g.id}, false);
+        return;
+    }
     if (!g.tileMask.is_set(w.pos)) {
         nav().stepToward(w, g.tileMask, dist(w.pos, g.center) > 3, &w.danger, g.center, groupPath(g.id));
         w.captureTurns = 0;
@@ -251,6 +267,21 @@ void bank(World& w, int altarIdx) {
         }
         combat::act(w, combat::Focus{}, false);
         return;
+    }
+    // Recall first when it is clearly quicker than walking, and nothing can cancel it (damage does).
+    if (tune::bank_by_recall && !w.atSpawn && dist(w.pos, altar) > 1 && w.incoming <= 0 && !w.beingHit &&
+        w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0) {
+        const int walk = fields::toAltar(altarIdx, w.pos);
+        if (walk > 0 && scorers::recallBankTurns(w, altarIdx) + tune::bank_recall_margin < w.walkTurns(static_cast<float>(walk))) {
+            try {
+                me.recall();
+                trace().action("rc");
+                trace().note("recall to bank");
+                return;
+            } catch (const bc::error& e) {
+                trace().note(std::string("recall failed: ") + e.message());
+            }
+        }
     }
     auto avoid = w.danger;
     if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();

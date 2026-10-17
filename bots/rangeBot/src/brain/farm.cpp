@@ -97,6 +97,31 @@ namespace {
 // to heal, left the camp empty and reset the capture. Returns the factor for our capture score.
 float captureShareUncached(const World& w, int groupId);
 
+// Melee champion types (attack range 1), from the designs.
+bool meleeChampion(bc::champion_type t) {
+    static std::array<std::int8_t, 16> cache{};
+    const auto i = static_cast<std::size_t>(t);
+    if (i >= cache.size()) return false;
+    if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
+    return cache[i] == 1;
+}
+
+// Champion types with a dash ability (Issac, Ren, Vesper Vale, Vendetta), from the designs.
+bool hasDash(bc::champion_type t) {
+    static std::array<std::int8_t, 16> cache{};
+    const auto i = static_cast<std::size_t>(t);
+    if (i >= cache.size()) return false;
+    if (cache[i] == 0) {
+        cache[i] = 2;
+        try {
+            for (const auto& a : bc::champion_designs[i].abilities())
+                if (const auto inf = a.info(); inf && std::holds_alternative<bc::ability_dash>(*inf)) cache[i] = 1;
+        } catch (const bc::error&) {
+        }
+    }
+    return cache[i] == 1;
+}
+
 bool rotateOnCapture(const World& w) { return tune::rotate_on_capture && w.round <= tune::rotate_capture_rounds; }
 
 // A teammate stands on this group's capture tiles now (the 5-round capture is under way), cached
@@ -149,6 +174,7 @@ float captureShareUncached(const World& w, int groupId) {
         float hp, power;
         int slot;
         bool tank = false;
+        bool mobile = false;  // a dash: walks the reward to an altar sooner
     };
     // Only what every teammate can read about every other: health. (A bag test made it one-sided:
     // a teammate's bag may not be readable, so both champions on the tiles decided they kept it.)
@@ -158,6 +184,8 @@ float captureShareUncached(const World& w, int groupId) {
         // The tank walks on with the party (rows: Varg kept the first wolves' capture, the second
         // wolves were too strong without it, and three of us stood on the tiles splitting it).
         if (tune::capture_keeper_not_tank && a.tank != b.tank) return !a.tank;
+        // Then a champion with a dash keeps it (rows: Issac banks the reward faster).
+        if (tune::capture_keeper_mobile && a.mobile != b.mobile) return a.mobile;
         if (std::abs(a.hp - b.hp) > 0.02f) return a.hp < b.hp;
         if (a.power != b.power) return a.power < b.power;
         return a.slot > b.slot;
@@ -168,7 +196,7 @@ float captureShareUncached(const World& w, int groupId) {
         return best;
     };
     const bool meOn = g.tileMask.is_set(w.pos);
-    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, isTank(w.type)};
+    const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, isTank(w.type), hasDash(w.type)};
     const int myDist = nearestTile(w.pos);
     bool allyOnTiles = false, allyKeeps = false, allyNearer = false;
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
@@ -180,7 +208,7 @@ float captureShareUncached(const World& w, int groupId) {
             allyOnTiles = true;
             if (meOn) {
                 const float hp = w.allyHpFrac(sl);
-                const Key them{hp >= 0 && homeward(hp), hp >= 0 ? hp : 1.0f, profile(type).farmPower, sl, isTank(type)};
+                const Key them{hp >= 0 && homeward(hp), hp >= 0 ? hp : 1.0f, profile(type).farmPower, sl, isTank(type), hasDash(type)};
                 if (keeps(them, me)) allyKeeps = true;
             }
         } else if (!meOn && comms::claimOf(sl) == groupId) {
@@ -297,7 +325,17 @@ Option scoreGroup(World& w, const Candidate& c) {
         // us, so they are on it. Vendetta used to recall from lanes' elk at half health while Varg
         // took over the hits right behind it.
         const bool allyTanks = !w.beingHit && w.allyTanking(g.id);
-        const float share = allyTanks ? 0.05f : role.leadsPull ? 1.0f : tankLeads ? 0.05f : role.partyAbsorb;
+        // Ranged with a melee ally on the camp: monsters hit the nearest champion, and the melee
+        // stands adjacent while we stand at full range, so we take few hits (rows: Tavi judged
+        // the third wolves as needing four of us and the camp sat untouched for 200 rounds).
+        bool meleeCover = false;
+        if (tune::ranged_cover_share > 0 && w.ranged && !role.leadsPull) {
+            const unsigned mates = comms::claimersMask(g.id, w.slot);
+            for (int sl = 0; sl < w.allyCount && sl < comms::alert_byte; ++sl)
+                if ((mates >> sl) & 1u) meleeCover = meleeCover || meleeChampion(w.allyTypes[static_cast<std::size_t>(sl)]);
+        }
+        const float share = allyTanks ? 0.05f : role.leadsPull ? 1.0f : tankLeads ? 0.05f :
+                            meleeCover ? std::min(role.partyAbsorb, tune::ranged_cover_share) : role.partyAbsorb;
         // With k attackers the fight is k times shorter and we absorb a share of the hits,
         // so per-head damage is solo * share / k (what campFight computes, without re-simulating).
         auto damageFor = [&](int k) {
@@ -385,7 +423,18 @@ Option scoreGroup(World& w, const Candidate& c) {
                 if (g.id == loop::target()) loop::tooStrong(w, g.id);
             }
         }
-        if (need > 1 && claims > 0) o.mul("join ally", 1.3f);
+        // Party full: allies nearer this camp than us already claim it in the numbers it needs. We
+        // add little but speed, and another camp stays idle (rows: the whole team walked the row
+        // as one group while two wolf camps sat respawned; their team ran two or three parties).
+        bool partyFull = false;
+        if (tune::party_full_factor != 1.0f && need > 1 && !engaged && g.id != w.lastTarget) {
+            const unsigned ahead = comms::ownersMask(g.id, w.slot, dist(w.pos, g.center));
+            if (__builtin_popcount(ahead) >= need) {
+                partyFull = true;
+                o.mul("party full", tune::party_full_factor);
+            }
+        }
+        if (need > 1 && claims > 0 && !partyFull) o.mul("join ally", 1.3f);
         // Under-levelled: build strength on wolves and clusters before taking elks.
         if (need > 1 && shop::shardsOwned() < tune::underpowered_shards) o.mul("underpowered", tune::underpowered_factor);
         if (need == 1 && owners) o.mul("nearer ally claimed", tune::ally_claim_factor);
@@ -513,6 +562,9 @@ Option scoreGroup(World& w, const Candidate& c) {
 }
 
 } // namespace
+
+float captureShareOf(const World& w, int groupId) { return captureShare(w, groupId); }
+bool allyHoldingOf(const World& w, int groupId) { return allyHolding(w, groupId); }
 
 void farm(World& w, std::vector<Option>& out) {
     // Branch and bound: an optimistic bound per group (Chebyshev distance never exceeds
