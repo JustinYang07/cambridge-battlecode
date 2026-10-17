@@ -256,6 +256,7 @@ inline constexpr float cohesion_alone_fight = 0.3f;   // fights with less than h
 inline constexpr bool invade_needs_lead = false;       // farm, fight or bank on their half only with more of us alive
 inline constexpr float no_invade_factor = 0.02f;
 inline constexpr bool wards = false;                  // place a ward on the halfway line when crossing it
+inline constexpr bool ward_bushes = true;             // moving toward an unseen bush: one ward on it (wards last forever, recharge in a round)
 inline constexpr int ward_line_width = 1;            // halfway line: |dist to our spawn - dist to theirs| <= this
 inline constexpr bool ward_once = false;             // one ward per champion, then stop trying
 inline constexpr int enemy_react_radius = 0;         // ignore enemies further than this from us (0: react to all we see)

@@ -5,6 +5,8 @@
 // onto our half are seen before they arrive. Each champion keeps one ward active at a time
 // (game rule), so in practice it is the first crossing. Skips tiles near a ward we know of and
 // backs off when out of charges.
+// Bush wards (tune::ward_bushes): moving toward a bush tile we cannot see into, one ward goes on
+// it, so whoever hides there is seen before we arrive.
 class World;
 
 namespace wards {

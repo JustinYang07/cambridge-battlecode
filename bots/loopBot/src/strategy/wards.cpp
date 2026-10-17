@@ -54,7 +54,72 @@ void setup(const World& w) {
 }
 } // namespace
 
+namespace {
+std::vector<std::uint8_t> bushB;  // per tile: a bush
+std::vector<std::uint8_t> bushNear;  // per tile: a bush within ward placement reach
+bc::vec2 lastPos{-1, -1}, lastWard{-100, -100};
+
+// Bushes hide whoever stands in them (bushes block line of sight; from inside one you see out).
+// A champion walking toward bushes it cannot see into puts its ward beside or in them: wards last
+// forever and recharge in a round, so each champion's single ward moves ahead of it. The ward's
+// vision is ours from the next turn, so the danger checks see whoever waits there before we step
+// beside them. Kept cheap (the first version lost ~600 turns a game to fuel): byte tables, this
+// turn's exported vision, no hypothetical-vision queries.
+void scoutBushes(World& w) {
+    const auto& s = Statics::get();
+    if (bushNear.empty()) {
+        bushNear.assign(static_cast<std::size_t>(s.width * s.height), 0);
+        bushB.assign(static_cast<std::size_t>(s.width * s.height), 0);
+        const auto bits = bc::map::bushes().export_linear_buffer();
+        const int r = static_cast<int>(bc::constants::ward_placement_radius);
+        for (int y = 0; y < s.height; ++y)
+            for (int x = 0; x < s.width; ++x) {
+                const auto i = static_cast<std::size_t>(y * s.width + x);
+                if (!((bits[i >> 3] >> (i & 7)) & 1)) continue;
+                bushB[i] = 1;
+                for (int yy = std::max(0, y - r); yy <= std::min(s.height - 1, y + r); ++yy)
+                    for (int xx = std::max(0, x - r); xx <= std::min(s.width - 1, x + r); ++xx)
+                        bushNear[static_cast<std::size_t>(yy * s.width + xx)] = 1;
+            }
+    }
+    const bc::vec2 pos = w.pos;
+    const bc::vec2 from = lastPos.x < 0 ? pos : lastPos;
+    lastPos = pos;
+    if (!bushNear[static_cast<std::size_t>(pos.y * s.width + pos.x)]) return;
+    const int dx = pos.x - from.x, dy = pos.y - from.y;
+    if (dx == 0 && dy == 0) return;  // only when moving toward bushes
+    // A hidden bush tile ahead of us within placement reach: the ward goes on it, once (a bush
+    // next to the one we already warded is covered by it).
+    const int reach = static_cast<int>(bc::constants::ward_placement_radius);
+    bc::vec2 best{-1, -1};
+    int bestD = 1 << 20;
+    for (int y = std::max(0, pos.y - reach); y <= std::min(s.height - 1, pos.y + reach); ++y)
+        for (int x = std::max(0, pos.x - reach); x <= std::min(s.width - 1, pos.x + reach); ++x) {
+            const bc::vec2 b{x, y};
+            if (!bushB[static_cast<std::size_t>(y * s.width + x)]) continue;
+            if ((x - pos.x) * dx + (y - pos.y) * dy < 0) continue;
+            if (dist(b, lastWard) <= 3 || w.isVisible(b)) continue;
+            const int d = dist(b, pos);
+            if (d < bestD) { bestD = d; best = b; }
+        }
+    if (best.x < 0) return;
+    try {
+        const auto st = bc::self().state();  // a ward would cancel a recall or tribute
+        if (st.contains(bc::champion_state::recalling) || st.contains(bc::champion_state::submitting_gems) || st.contains(bc::champion_state::teleporting)) return;
+        if (bc::self().place_ward(best)) {
+            lastWard = best;
+            FixedStr<48> msg;
+            trace().note((msg << "bush ward at " << best.x << ',' << best.y).view());
+        }
+    } catch (const bc::error& e) {
+        lastWard = best;  // do not retry this bush every turn
+        trace().note(std::string("scout ward failed: ") + e.message());
+    }
+}
+} // namespace
+
 void update(World& w) {
+    if (tune::ward_bushes && w.alive) scoutBushes(w);
     if (!tune::wards || !w.alive) return;
     if (!init) setup(w);
     if (done || w.round < nextTry || (w.round + w.slot) % 2 != 0) return;
