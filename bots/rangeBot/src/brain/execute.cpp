@@ -564,7 +564,42 @@ bool rangedFight(World& w, const Option& o) {
     return true;
 }
 
+// Cassi or Issac in a fight: never nearer the enemy than our other allies there (the twins share
+// one life, and pushing ahead as a pair is how both die). No other ally in this fight: walk to
+// the nearest one, hitting whatever is in range. Returns true if it handled the turn.
+bool twinHold(World& w, const Option& o) {
+    if (!tune::twin_hold || w.twinSlot < 0) return false;
+    int front = kNoFront;
+    bc::vec2 anchor{-1, -1};
+    int anchorD = kNoFront;
+    for (int s = 0; s < w.allyCount; ++s) {
+        if (s == w.slot || s == w.twinSlot) continue;
+        const auto p = w.allyPos(s);
+        if (p.x < 0) continue;
+        if (dist(p, o.at) <= tune::twin_team_radius) front = std::min(front, nearestEnemy(w, p));
+        if (dist(p, w.pos) < anchorD) { anchorD = dist(p, w.pos); anchor = p; }
+    }
+    if (anchor.x < 0) return false;  // nobody else alive: fight as usual
+    combat::Focus focus{.enemy = o.enemy, .anyEnemy = true};
+    const int mine = nearestEnemy(w, w.pos);
+    if (front == kNoFront || mine < front) {
+        // Alone ahead of (or away from) the team: back to the nearest ally.
+        if (anchorD > 1) nav().stepToward(w, anchor, 1, false);
+        combat::act(w, focus, false);
+        trace().note(front == kNoFront ? "twin: to the team" : "twin: back to the front");
+        return true;
+    }
+    if (mine == front) {
+        // Level with the front: hold here and hit what is in range.
+        combat::act(w, focus, true);
+        trace().note("twin: hold at the front");
+        return true;
+    }
+    return false;  // behind the front: close in as usual
+}
+
 void fight(World& w, const Option& o) {
+    if (twinHold(w, o)) return;
     if (rangedFight(w, o)) return;
     combat::Focus focus{.enemy = o.enemy};
     if (dist(w.pos, o.at) <= w.range) {

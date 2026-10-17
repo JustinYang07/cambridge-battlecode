@@ -61,14 +61,16 @@ inline constexpr int monster_range = 3;
 inline constexpr int fight_join_radius = 4;        // enemies this close to the target join its side
 inline constexpr int fight_beside_radius = 3;      // allies this close to us fight (and draw fire) with us
 // Cassi & Issac share one life (either dies, both die).
-inline constexpr bool twin_care = true;              // our twins: heal and flee earlier, fight less while either is low
+inline constexpr bool twin_care = false;              // our twins: heal earlier, fight less while either is low
 inline constexpr float twin_heal_margin = 0.15f;     // ...healing dominates this much higher up
-inline constexpr float twin_flee_horizon = 1.5f;     // ...flee danger starts this much earlier
 inline constexpr float twin_low_hp = 0.5f;           // ...either twin below this: fights scaled by twin_low_fight
 inline constexpr float twin_low_fight = 0.5f;
-inline constexpr bool twin_focus = true;             // their twins: count the pair as the weaker one's health, hit that one
-inline constexpr float twin_weaker_bonus = 1.5f;     // fight the weaker (or only visible) twin: kills both
-inline constexpr float twin_stronger_factor = 0.6f;  // fight the healthier twin while its partner is in view
+// (An earlier flee for twins, x1.5 danger horizon, made them run from fights at full health: 454
+// flee starts vs 321, 119 deaths within 20 rounds vs 71, kill rates down for the whole team.)
+inline constexpr bool twin_hold = false;              // our twins in fights: never nearer the enemy than our other allies there
+inline constexpr int twin_team_radius = 8;           // ...allies this near the fight count as the team
+inline constexpr float twin_alone_fight = 0.3f;      // ...no other ally near the target: the fight scores this (regroup instead)
+inline constexpr bool twin_focus = false;             // their twins, both in view, in a favourable fight: hit the weaker one
 inline constexpr float flee_horizon_turns = 10.0f;  // flee danger starts when we would die within this many turns
 // Early retreat (ladder losses: retreats began at a median 393 HP, 70% died within 3 turns):
 // flee while the enemies near us would need longer than our escape plus this margin to kill us.
@@ -137,6 +139,8 @@ inline constexpr int stuck_turns = 8;               // ...is penalised this long
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
+inline constexpr bool fixed_draft = true;            // draft a fixed comp, first N picks: Ren, Stellar, Cassi & Issac, Ryth, Varg
+inline constexpr float gold_draft_share = 0.95f;     // ...maps with at least this share of camps gold-only: Stellar, Tavi, Prism, Cassi & Issac, Ren
 inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
 inline constexpr bool treasure_maps = true;        // build 12: treasure emblem first on treasure maps (shop.cpp)
 inline constexpr int treasure_map_max_area = 1400;  // ...small maps (all gold within early reach)...
@@ -145,6 +149,7 @@ inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
                                                  // 10 monster>treasure, 11 jungle>power>durability (casters focus)
+inline constexpr int bruiser_build = 0;          // bruiser then durability emblems (main stat), then power: 0 off, 1 Cassi & Issac, 2 everyone (1: -7, 2: -48 vs 0)
 inline constexpr bool stat_matching = false;     // Ryth buys health (bonus hp -> strength), casters focus
 inline constexpr bool lock_own_altars = true;  // also lock unlocked altars on our side as we pass (A/B switch)
 inline constexpr bool break_altar_locks = true;   // bank at enemy-locked altars too: tributing attacks the lock (3 hits remove it)

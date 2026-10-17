@@ -82,6 +82,15 @@ std::vector<Step> plan(bc::champion_type type) {
     using F = Family;
     std::vector<Step> steps;
     auto add = [&](F f, Stat s) { steps.push_back({f, s}); };
+    // Survival build: bruiser then durability emblems, both in the main stat (bruiser adds one of
+    // each other stat), then power. For Cassi & Issac (one death costs both, and their bags), or
+    // everyone.
+    const bool twin = type == bc::champion_type::cassi || type == bc::champion_type::issac;
+    if (tune::bruiser_build == 2 || (tune::bruiser_build == 1 && twin)) {
+        add(F::bruiser, main); add(F::durability, main);
+        for (int i = 0; i < 6; ++i) add(F::power, main);
+        return steps;
+    }
     switch (tune::build_variant) {
     case 1:  // treasure rush for everyone
         add(F::treasure, main); add(F::jungle, main); add(F::monster, main); add(F::home, Stat::health);

@@ -84,7 +84,7 @@ void survive(World& w, std::vector<Option>& out) {
         const float outnumbered = pressure / std::max(w.alliedPower(w.pos, 5), 1.0f);
         // Danger rises as death gets close, and with a bag when we are outnumbered.
         const float bagRisk = w.gems >= tune::bag_avoid_gems ? (outnumbered - 1.0f) * 0.8f : 0.0f;
-        const float horizon = tune::flee_horizon_turns * (tune::twin_care && w.twinSlot >= 0 ? tune::twin_flee_horizon : 1.0f);
+        const float horizon = tune::flee_horizon_turns;
         const float danger = std::clamp(std::max((horizon - turnsToDie) / horizon, bagRisk), 0.0f, 1.0f);
         Option o;
         o.kind = OptionKind::flee;
