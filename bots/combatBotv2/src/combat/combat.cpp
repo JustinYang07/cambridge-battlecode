@@ -165,7 +165,9 @@ bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
                     const int score = tune::aoe_champions_first ? 100 * champs + camps : camps + 2 * champs;
                     if (score > bestScore) { bestScore = score; best = centre; bestChamps = champs; }
                 };
-                if (tune::aoe_champions_first && !w.enemies.empty()) {
+                bool enemyInReach = false;
+                for (const auto& e : w.enemies) enemyInReach = enemyInReach || (e.hp > 0 && dist(e.pos, w.pos) <= range + radius);
+                if (tune::aoe_champions_first && enemyInReach) {
                     // Every tile in reach that touches an enemy (a spot between two of them hits both).
                     for (int dx = -range; dx <= range; ++dx)
                         for (int dy = -range; dy <= range; ++dy) {

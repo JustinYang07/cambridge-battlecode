@@ -240,7 +240,8 @@ inline constexpr float fight_far_factor = 0.1f;     // ...otherwise the fight sc
 // Stuns (combatBotv2): who our stuns go on, and a stunned enemy becomes the team target. Ground spells aim where they hit the most enemy champions.
 inline constexpr int stun_target = 0;               // our stuns: 0 usual target, 1 squishiest, 2 biggest threat (damage, x2 when hitting us or an ally)
 inline constexpr bool stunned_team_target = true;   // a stunned enemy we can see becomes the team target
-inline constexpr int stun_check_radius = 8;         // read stun buffs on enemies this close (a host call each)
+inline constexpr int stun_check_radius = 5;         // read stun buffs on enemies this close (a host call each)...
+inline constexpr unsigned long long stun_check_fuel = 40000;  // ...with at least this much fuel left
 inline constexpr bool aoe_champions_first = true;   // ground spells: any tile in reach, champions hit first, monsters break ties
 inline constexpr int chase_radius = 6;              // enemies further than this are not chased...
 inline constexpr float chase_factor = 0.3f;         // ...their fight score gets this (unless channelling)

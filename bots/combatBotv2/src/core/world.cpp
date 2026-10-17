@@ -179,7 +179,8 @@ void World::refresh(bool firstTurn) {
                 }
                 e.stun = known > 0;
             }
-            if ((tune::stun_target != 0 || tune::stunned_team_target) && dist(e.pos, pos) <= tune::stun_check_radius) {
+            if ((tune::stun_target != 0 || tune::stunned_team_target) && dist(e.pos, pos) <= tune::stun_check_radius &&
+                bc::fuel_remaining() > tune::stun_check_fuel) {
                 try {
                     e.stunned = c.buffs().has_stun();
                 } catch (const bc::error&) {
