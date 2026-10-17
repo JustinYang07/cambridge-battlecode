@@ -226,6 +226,9 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
+    struct AllyHp { int round = -1; float hp = 0, maxHp = 1, strength = 0; bool alive = false; };
+    mutable std::array<AllyHp, 8> allyHpCache_{};
+    void readAllyHp(int s) const;
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};

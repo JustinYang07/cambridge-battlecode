@@ -73,7 +73,7 @@ bool holdForTank(World& w, const GroupInfo& g) {
     bool tankComing = false;
     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
         if (s == w.slot || comms::claimOf(s) != g.id || !isTank(w.allyTypes[static_cast<std::size_t>(s)])) continue;
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0) continue;
         int nearest = 1 << 20;
         for (auto t : g.tiles) nearest = std::min(nearest, dist(p, t));
@@ -184,7 +184,7 @@ bool rushPull(World& w, const GroupInfo& g, int need) {
 void farmGroup(World& w, const GroupInfo& g, int need) {
     combat::Focus focus{.groupId = g.id};
     const auto status = w.groups[static_cast<std::size_t>(g.id)].status;
-    if (status == GroupStatus::respawning && g.tileMask.is_set(w.pos)) {
+    if (status == GroupStatus::respawning && Statics::get().onGroup(g, w.pos)) {
         trace().note("off spawn tile");
         auto goals = nav().standTiles(w, g.center, 2) & ~g.tileMask & ~w.danger;
         nav().stepToward(w, goals, false);
@@ -235,7 +235,7 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
     // Last monster just died: start standing on the capture tiles straight away.
     // Not while it is respawning: then the "step off the spawn tile" rule above fires next turn
     // and the two bounced champions between tiles for 100+ rounds.
-    if (status != GroupStatus::respawning && groupVisiblyCleared(w, g) && !g.tileMask.is_set(w.pos) &&
+    if (status != GroupStatus::respawning && groupVisiblyCleared(w, g) && !Statics::get().onGroup(g, w.pos) &&
         bc::self().can_move()) {
         trace().note("cleared");
         nav().stepToward(w, g.tileMask, false);
@@ -246,7 +246,7 @@ void capture(World& w, const GroupInfo& g) {
     // A teammate keeps this capture: never stand on its tiles too (the reward is split between
     // everyone on them; rows split its wolves 33/33 all game once the opening rotation ended).
     if (tune::capture_step_off && scorers::allyHoldingOf(w, g.id) && scorers::captureShareOf(w, g.id) < 1.0f) {
-        if (g.tileMask.is_set(w.pos)) {
+        if (Statics::get().onGroup(g, w.pos)) {
             const auto blocked = nav().blocked(w);
             bc::bitboard off;
             off.clear();
@@ -258,7 +258,7 @@ void capture(World& w, const GroupInfo& g) {
         combat::act(w, combat::Focus{.groupId = g.id}, false);
         return;
     }
-    if (!g.tileMask.is_set(w.pos)) {
+    if (!Statics::get().onGroup(g, w.pos)) {
         nav().stepToward(w, g.tileMask, dist(w.pos, g.center) > 3, &w.danger, g.center, groupPath(g.id));
         w.captureTurns = 0;
     } else {
@@ -512,7 +512,7 @@ int frontLine(const World& w, bc::vec2 at) {
     int front = kNoFront;
     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
         if (s == w.slot || !meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0 || dist(p, at) > tune::ranged_front_radius) continue;
         front = std::min(front, nearestEnemy(w, p));
     }
@@ -539,7 +539,7 @@ bool rangedKite(World& w) {
     int refugeD = kNoFront;
     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
         if (s == w.slot || !meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0) continue;
         if (dist(p, w.pos) <= tune::ranged_kite_ally_radius) return false;
         if (dist(p, w.pos) < refugeD) { refugeD = dist(p, w.pos); refuge = p; }
@@ -585,7 +585,7 @@ bool bodyguard(World& w, const Option& o) {
     int bestD = kNoFront;
     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
         if (s == w.slot || meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;  // squishies only
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0 || dist(p, w.pos) > tune::guard_ally_radius) continue;
         for (const auto& e : w.enemies) {
             if (e.hp <= 0 || dist(e.pos, p) > tune::guard_threat_radius) continue;
@@ -688,7 +688,7 @@ bool rangedHold(World& w) {
         bool covered = false;
         for (int s = 0; s < comms::alert_byte && s < w.allyCount && !covered; ++s) {
             if (s == w.slot || !meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;
-            const auto p = w.allyPos(s);
+            const auto p = w.allyPosCached(s);
             if (p.x < 0) continue;
             if (dist(p, w.pos) <= tune::ranged_front_radius) covered = true;
             else if (dist(p, w.pos) < refugeD) { refugeD = dist(p, w.pos); refuge = p; }
@@ -809,7 +809,7 @@ bool safeDash(const World& w, bc::vec2 target) {
         int beside = 1;
         for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
             if (s == w.slot) continue;
-            const auto p = w.allyPos(s);
+            const auto p = w.allyPosCached(s);
             if (p.x >= 0 && dist(p, land) <= tune::fight_beside_radius) ++beside;
         }
         const float toDie = w.hp * static_cast<float>(beside) / theirs;
@@ -820,7 +820,7 @@ bool safeDash(const World& w, bc::vec2 target) {
     int front = kNoFront;
     for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
         if (s == w.slot || !meleeType(w.allyTypes[static_cast<std::size_t>(s)])) continue;
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0 || dist(p, target) > tune::ranged_front_radius + 2) continue;
         front = std::min(front, nearestEnemy(w, p));
     }
@@ -847,7 +847,7 @@ bool teamUp(World& w, const Option& o) {
     int allies = 0, alliesNear = 0;
     for (int s = 0; s < w.allyCount; ++s) {
         if (s == w.slot) continue;
-        const auto p = w.allyPos(s);
+        const auto p = w.allyPosCached(s);
         if (p.x < 0 || dist(p, w.pos) > tune::team_up_ally_radius) continue;  // too far to team up with
         allySum += static_cast<float>(dist(p, w.pos));
         cx += static_cast<float>(p.x);

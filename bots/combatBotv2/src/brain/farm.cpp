@@ -142,8 +142,8 @@ bool allyHolding(const World& w, int groupId) {
         const auto& g = Statics::get().groups[static_cast<std::size_t>(groupId)];
         for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !c; ++sl) {
             if (sl == w.slot) continue;
-            const auto p = w.allyPos(sl);
-            if (p.x >= 0 && dist(p, g.center) <= 3 && g.tileMask.is_set(p)) c = 1;
+            const auto p = w.allyPosCached(sl);
+            if (p.x >= 0 && dist(p, g.center) <= 3 && Statics::get().onGroup(g, p)) c = 1;
         }
     }
     return c == 1;
@@ -215,7 +215,7 @@ float captureShareUncached(const World& w, int groupId) {
         for (auto t : g.tiles) best = std::min(best, dist(p, t));
         return best;
     };
-    const bool meOn = g.tileMask.is_set(w.pos);
+    const bool meOn = Statics::get().onGroup(g, w.pos);
     // A tank only "walks on with the party" while it is fit to: a hurt tank is going home next, so it
     // competes on damage taken like everyone else (rows: Ryth at 58% recalled empty-handed right
     // after the wolves died, and Ren held the capture and recalled too, leaving two to farm on).
@@ -234,7 +234,7 @@ float captureShareUncached(const World& w, int groupId) {
     bool designatedOther = false;                                 // a teammate here is
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
         if (sl == w.slot) continue;
-        const auto p = w.allyPos(sl);
+        const auto p = w.allyPosCached(sl);
         if (p.x < 0 || dist(p, g.center) > 8) continue;
         const auto type = w.allyTypes[static_cast<std::size_t>(sl)];
         const float allyHp = w.allyHpFrac(sl);
@@ -244,7 +244,7 @@ float captureShareUncached(const World& w, int groupId) {
             designated = false;
             designatedOther = true;
         }
-        if (g.tileMask.is_set(p)) {
+        if (Statics::get().onGroup(g, p)) {
             allyOnTiles = true;
             if (meOn && keeps(them, me)) allyKeeps = true;
         } else if (!meOn && comms::claimOf(sl) == groupId) {
@@ -384,9 +384,9 @@ Option scoreGroup(World& w, const Candidate& c) {
         const auto& from = statics.groups[static_cast<std::size_t>(w.lastTarget)];
         for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
             if (sl == w.slot || !((w.partyMates >> sl) & 1u)) continue;
-            const auto p = w.allyPos(sl);
+            const auto p = w.allyPosCached(sl);
             const int claim = comms::claimOf(sl);
-            if (p.x < 0 || from.tileMask.is_set(p)) continue;
+            if (p.x < 0 || Statics::get().onGroup(from, p)) continue;
             if (tune::moving_on_real && (dist(p, w.pos) > tune::moving_on_radius || (claim != w.lastTarget && claim != g.id))) continue;
             movingMates |= 1u << sl;
         }
@@ -412,7 +412,7 @@ Option scoreGroup(World& w, const Candidate& c) {
             const unsigned claimers = comms::claimersMask(g.id, w.slot);
             for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount && !tankLeads; ++sl) {
                 if (sl == w.slot || !((claimers >> sl) & 1u) || !isTank(w.allyTypes[static_cast<std::size_t>(sl)])) continue;
-                const auto p = w.allyPos(sl);
+                const auto p = w.allyPosCached(sl);
                 tankLeads = !tune::tank_cover_near || (p.x >= 0 && dist(p, g.center) <= dist(w.pos, g.center) + tune::tank_cover_slack);
             }
         }
@@ -597,7 +597,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         // reward is not 5 turns away (both teams' Vargs sat on packs' cluster trading hits for 14
         // turns, scoring capture 2109 until one died). Winning the fight is the way to the reward.
         for (const auto& e : w.enemies)
-            if (e.hp > 0 && g.tileMask.is_set(e.pos)) {
+            if (e.hp > 0 && Statics::get().onGroup(g, e.pos)) {
                 o.mul("contested by enemy", tune::contested_capture_factor);
                 o.c.note << "contested";
                 break;
@@ -868,7 +868,9 @@ void farm(World& w, std::vector<Option>& out) {
         auto c = pre[static_cast<std::size_t>(pick)];
         pre[static_cast<std::size_t>(pick)].group = nullptr;
         // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
-        if ((c.bound < best && scored >= tune::trace_candidates) || scored >= maxScored) break;
+        // Traced builds score a few more so the trace can show runners-up; submissions stop as soon
+        // as no bound can beat the best (a bound is an upper limit on the score).
+        if ((c.bound < best && scored >= (kTracing ? tune::trace_candidates : 1)) || scored >= maxScored) break;
 
         scoreOne(c);
     }

@@ -64,6 +64,13 @@ struct Statics {
         std::optional<cambc::camp> handle;  // from map::camp_groups(); live reads cost ~50 fuel
     };
     const TileCamp* campAt(cambc::vec2 tile) const;
+    // A camp spawn tile of group g: a byte read (bitboard reads cost ~30-300 fuel each), or the
+    // group's mask on maps with more camps than the byte index holds.
+    bool onGroup(const GroupInfo& g, cambc::vec2 tile) const {
+        if (campsCapped_) return g.tileMask.is_set(tile);
+        const auto* c = campAt(tile);
+        return c && c->groupId == g.id;
+    }
     // Draft: append the packed camp facts (and their offset in the last two bytes) to the plan
     // bytes, padding to the full 1024. Champions read it back in init().
     void appendPacked(std::vector<std::uint8_t>& bytes) const;
@@ -78,6 +85,7 @@ private:
     RawBuf<std::uint8_t> tileCampIndex_;    // width*height: index into tileCamps_ + 1, 0 where there is no camp
                                                  // (a dense TileCamp table cost ~60k fuel to fill on the first turn)
     bool ready_ = false;
+    bool campsCapped_ = false;                   // more than 255 camps: some are missing from tileCampIndex_
 };
 
 inline int dist(cambc::vec2 a, cambc::vec2 b) { return static_cast<int>(a.chebyshev_distance(b)); }

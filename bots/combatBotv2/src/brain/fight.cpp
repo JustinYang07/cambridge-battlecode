@@ -68,7 +68,7 @@ void fight(World& w, std::vector<Option>& out) {
         // Standing on a cleared camp's spawn tiles, it blocks our capture: killing it frees the reward.
         for (const auto& g : Statics::get().groups)
             if (w.groups[static_cast<std::size_t>(g.id)].status == GroupStatus::reward && dist(g.center, e.pos) <= 3 &&
-                g.tileMask.is_set(e.pos)) {
+                Statics::get().onGroup(g, e.pos)) {
                 o.add("frees capture", static_cast<float>(g.gems) + static_cast<float>(g.gold) * goldValue(w));
                 break;
             }
@@ -151,7 +151,7 @@ void fight(World& w, std::vector<Option>& out) {
             int withMe = 1, alliesNear = 0, them = 0;
             for (int s = 0; s < w.allyCount; ++s) {
                 if (s == w.slot) continue;
-                const auto p = w.allyPos(s);
+                const auto p = w.allyPosCached(s);
                 if (p.x >= 0 && dist(p, w.pos) <= tune::engage_radius) { ++withMe; ++alliesNear; }
             }
             for (const auto& x : w.enemies)
