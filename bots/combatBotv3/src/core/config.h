@@ -185,6 +185,7 @@ inline constexpr int shop_alert_radius = 12;         // ...or an ally's enemy al
 inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
 // Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
 inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (dash over a hole in, and out)
+inline constexpr bool dash_straight_travel = true;  // combatBotv3: dashers score and walk camps across one-tile ditches by the straight line
 inline constexpr int dash_exit_turns = 2;     // dash out of a pocket, beyond the walk back to the landing tile
 inline constexpr int still_hold_turns = 80;   // ...holding for a party (a gem rally may be on its way)
 inline constexpr int still_turns = 25;        // still this long while idle/holding: drop that camp and hunt
@@ -476,6 +477,8 @@ inline constexpr int spell_clear_ally_radius = 4;
 inline constexpr bool spell_clear_option = true;
 inline constexpr float spell_clear_far_frac = 0.4f;   // ...Stellar only, camps at least this x map size from our spawn
 inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a quiet game (see below)
+inline constexpr bool spell_clear_force_quiet = true;   // ...in a quiet game Stellar always takes her best far camp by spells (user)
+inline constexpr float spell_clear_force_bonus = 3.0f;   // ...scoring it x this
 // Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
 // of us for quiet_rounds (both teams just farming their own sides).
 inline constexpr int quiet_min_round = 100;

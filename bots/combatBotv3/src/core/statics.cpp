@@ -406,6 +406,42 @@ void Statics::init() {
     }
 }
 
+int Statics::dashLine(bc::vec2 a, bc::vec2 b, bc::vec2* hopFrom, bc::vec2* hopTo) const {
+    if (wallBits_.empty()) {
+        wallBits_ = dashBlock.export_linear_buffer();
+        holeBits_ = (terrain & ~dashBlock).export_linear_buffer();
+    }
+    auto bitAt = [&](const std::vector<std::uint8_t>& bits, bc::vec2 t) {
+        if (t.x < 0 || t.y < 0 || t.x >= width || t.y >= height) return true;
+        const auto i = static_cast<std::size_t>(t.y * width + t.x);
+        return ((bits[i >> 3] >> (i & 7)) & 1) != 0;
+    };
+    // Bresenham from a to b.
+    int x = a.x, y = a.y;
+    const int dx = std::abs(b.x - a.x), dy = -std::abs(b.y - a.y), sx = a.x < b.x ? 1 : -1, sy = a.y < b.y ? 1 : -1;
+    int err = dx + dy, run = 0, result = 0;
+    bc::vec2 prev = a;
+    while (!(x == b.x && y == b.y)) {
+        const int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x += sx; }
+        if (e2 <= dx) { err += dx; y += sy; }
+        const bc::vec2 t{x, y};
+        if (bitAt(wallBits_, t) && !(t == b)) return -1;
+        if (bitAt(holeBits_, t)) {
+            if (++run > 1) return -1;
+            if (result == 0) {
+                result = 1;
+                if (hopFrom) *hopFrom = prev;
+            }
+        } else {
+            if (run == 1 && result == 1 && hopTo && hopTo->x < 0) *hopTo = t;
+            run = 0;
+            prev = t;
+        }
+    }
+    return result;
+}
+
 bool Statics::dashLegal(bc::vec2 from, bc::vec2 to) const {
     const int d = dist(from, to);
     if (d < 1 || d > 2 || to.x < 0 || to.y < 0 || to.x >= width || to.y >= height || terrain.is_set(to)) return false;

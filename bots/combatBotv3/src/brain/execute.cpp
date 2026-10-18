@@ -320,6 +320,11 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         }
         auto avoid = w.dangerExcept(g.id);
         if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
+        // combatBotv3: dashers cross a ditch on the straight line instead of walking round it.
+        if (dist(w.pos, g.center) > 4 && nav().dashAcross(w, g.center)) {
+            if (!holdFire) combat::act(w, focus, false);
+            return;
+        }
         // Casters hit from 4 tiles: spend the turn casting rather than walking into range.
         if (!holdFire) combat::castFromRange(w, focus);
         nav().stepToward(w, goals, dist(w.pos, g.center) > 4, &avoid, g.center, groupPath(g.id));

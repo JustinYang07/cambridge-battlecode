@@ -701,8 +701,10 @@ Option scoreGroup(World& w, const Candidate& c) {
             const float spellMult = multBeforeFight;
             const float normal = o.c.reward / std::max(o.c.time, 1.0f) * o.c.mult;
             const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
-            const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet;
-            if (viaSpells > normal) {
+            // Forced steal (user): in a quiet game Stellar takes the far camp by spells, slow or not.
+            const bool force = tune::spell_clear_force_quiet && w.quietGame();
+            const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet * (force ? tune::spell_clear_force_bonus : 1.0f);
+            if (viaSpells > normal || force) {
                 o.c.time = spellTime;
                 o.c.mult = spellMult;
                 o.kind = OptionKind::farm;
@@ -711,6 +713,10 @@ Option scoreGroup(World& w, const Candidate& c) {
                 o.spellClear = true;
                 killTurns = spellTurns;
                 o.mul("spell clear (no damage)", quiet);
+                if (force) {
+                    o.mul("quiet game: steal it", tune::spell_clear_force_bonus);
+                    o.c.mult = spellMult * quiet * tune::spell_clear_force_bonus;
+                }
                 if (quiet > 1.0f) o.c.note << "quiet game; ";
                 o.c.note << "spell clear: " << static_cast<int>(spellTurns) << " turns; ";
             }
@@ -959,6 +965,10 @@ void farm(World& w, std::vector<Option>& out) {
         // otherwise Chebyshev distance, which walking never beats.
         bc::vec2 unused;
         int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
+        // combatBotv3: a dasher whose straight line crosses only one-tile holes gets there by it.
+        if (tune::dash_straight_travel && !dash && w.kit.dashRange >= 2 && cheb > dist(w.pos, g.center) + 4 &&
+            statics.dashLine(w.pos, g.center) == 1)
+            cheb = dist(w.pos, g.center) + 1;
         // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
         // captured on foot, so it is not a farming option (it used to be scored by straight-line
         // distance, and champions stood still for 1,500 rounds trying to path to it).
@@ -1028,6 +1038,9 @@ void farm(World& w, std::vector<Option>& out) {
                 }
             }
         }
+        if (tune::dash_straight_travel && !c.dash && w.kit.dashRange >= 2 && travel > dist(w.pos, g.center) + 4 &&
+            Statics::get().dashLine(w.pos, g.center) == 1)
+            travel = std::max(0, dist(w.pos, g.center) + 1 - reach);
         // Beyond the BFS radius: estimate from straight-line distance (walls add ~25%).
         if (travel >= Navigator::unreachable) travel = static_cast<int>(static_cast<float>(c.travel) * 1.25f) + 4;
         if (c.travel > tune::bfs_radius * 2) return;
@@ -1065,7 +1078,21 @@ void farm(World& w, std::vector<Option>& out) {
     if (tune::gem_rally_bonus != 1.0f)
         for (int i = 0; i < n && rallyGroup < 0; ++i)
             if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
-    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup})
+    // combatBotv3 forced steal: in a quiet game Stellar always scores the far camp with the most gems.
+    int stealGroup = -1;
+    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && w.quietGame()) {
+        int bestGems = 0;
+        for (int i = 0; i < n; ++i) {
+            const auto* pg = pre[static_cast<std::size_t>(i)].group;
+            if (!pg || pg->harmless || pg->gems <= bestGems) continue;
+            if (static_cast<float>(dist(pg->center, statics.spawnCenter)) <
+                tune::spell_clear_far_frac * static_cast<float>(std::max(statics.width, statics.height)))
+                continue;
+            bestGems = pg->gems;
+            stealGroup = pg->id;
+        }
+    }
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup, stealGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {

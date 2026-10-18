@@ -49,6 +49,9 @@ public:
     bool stepAway(World& w, const std::vector<cambc::vec2>& threats, int keepRange);
     // combatBotv3: step to an adjacent tile in keepIn that is clearly less exposed (exposure map); false if none.
     bool saferStep(World& w, const cambc::bitboard& keepIn);
+    // combatBotv3: dashers heading for `target` across dashable holes (Statics::dashLine): walk to
+    // the tile before the first hole and dash over it. False when it does not apply.
+    bool dashAcross(World& w, cambc::vec2 target);
 
     // Turns of walking needed to leave every visible monster's and enemy's reach (0 if safe now).
     int escapeTurns(const World& w);

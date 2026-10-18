@@ -321,6 +321,25 @@ bool dashTo(World& w, int slot, bc::vec2 to) {
 }
 }  // namespace
 
+bool Navigator::dashAcross(World& w, bc::vec2 target) {
+    if (!tune::dash_straight_travel || w.kit.dashRange < 2 || w.reserveDash) return false;
+    const auto& st = Statics::get();
+    bc::vec2 from{-1, -1}, to{-1, -1};
+    if (st.dashLine(w.pos, target, &from, &to) != 1 || from.x < 0 || to.x < 0) return false;
+    if (w.pos == from) {
+        if (const int slot = readyDash(w); slot >= 0 && st.dashLegal(w.pos, to) && !w.occupied.is_set(to)) {
+            trace().note("dash across the ditch");
+            return dashTo(w, slot, to);
+        }
+        trace().action("hold");  // at the ditch, dash cooling down
+        return true;
+    }
+    bc::bitboard goal;
+    goal.clear();
+    goal.set(from);
+    return stepToward(w, goal, false);
+}
+
 bool Navigator::enterPocket(World& w, const GroupInfo& g) {
     if (w.pos == g.dashFrom) {
         if (const int slot = readyDash(w); slot >= 0 && !w.occupied.is_set(g.dashTo)) return dashTo(w, slot, g.dashTo);
