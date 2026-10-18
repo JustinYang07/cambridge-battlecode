@@ -235,9 +235,15 @@ inline constexpr bool routes_skip_gold_only = true;  // combatBot: gold-only clu
 inline constexpr bool fixed_draft = true;            // draft a fixed comp, first N picks: Ren, Stellar, Cassi & Issac, Ryth, Varg
 inline constexpr float gold_draft_share = 0.95f;     // ...maps with at least this share of camps gold-only: Stellar, Tavi, Prism, Cassi & Issac, Ren
 inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
-inline constexpr bool treasure_maps = true;        // build 12: treasure emblem first on treasure maps (shop.cpp)
+inline constexpr bool treasure_maps = false;        // build 12: treasure emblem first on treasure maps (shop.cpp)
 inline constexpr int treasure_map_max_area = 1400;  // ...small maps (all gold within early reach)...
 inline constexpr float treasure_map_max_elk_share = 0.8f;  // ...that are not mostly elk; or no gems outside Monoliths
+inline constexpr bool farm_map_monster = true;     // combatBotv3: on farming maps Durability emblems in the orders become Monster emblems
+inline constexpr bool farm_map_jungle = true;      // combatBotv3: on farming maps the per-champion orders start with a Jungle emblem
+inline constexpr int medium_map_side = 50;         // map editor size classes by the longest side: small < 50 <= medium < 75 <= large
+inline constexpr int large_map_side = 75;
+inline constexpr float farming_walk_ratio = 1.5f;  // medium maps: spawn-to-spawn walk at least this x the straight line = farming
+inline constexpr bool champion_builds = true;     // combatBotv3: shop/shop.cpp per-champion item orders (Cassi, Issac, Ryth, Stellar, Tavi, Prism, Ren, Varg)
 inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
