@@ -92,13 +92,23 @@ void fight(World& w, std::vector<Option>& out) {
         o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.02f, 1.5f));
         if (ours.count == 1 && myTurnsToDie < turnsToKill) o.mul("die first", 0.3f);
         // Mid to late game, a lost fight costs the bag we have built up: only take fights we are
-        // likely to win. Win chance from the edge, fitted on traced fights from round 300 (a win:
+        // likely to win (mode 0), or whose expected gain beats the expected loss (mode 1). Win chance from the edge, fitted on traced fights from round 300 (a win:
         // an enemy dies near the target before this champion does, within 15 rounds); it levels off
         // near 70-75%, so a 70% cutoff keeps only lopsided fights (edge ~7+).
         if (w.round >= tune::fight_mid_round && !e.channeling && tune::fight_mid_factor != 1.0f) {
             const float z = tune::fight_win_fit_a + tune::fight_win_fit_b * std::log(std::max(edge, 0.05f));
             const float winChance = 1.0f / (1.0f + std::exp(-z));
-            if (winChance < tune::fight_mid_win_chance) o.mul("mid game: under win cutoff", tune::fight_mid_factor);
+            if (tune::fight_mid_mode == 1) {
+                // Pot odds: what a win gains (their bag, the kill gold, them out for 60 rounds)
+                // against what a loss costs (our bag, us out for 60 rounds). Carrying a big bag we
+                // walk away from even fights; against a full bag a long shot can still pay.
+                const float gain = static_cast<float>(e.gems) + tune::kill_gold_value * goldValue(w) + tune::kill_denial_value;
+                const float stake = static_cast<float>(w.gems) + tune::death_time_value;
+                if (winChance * gain <= (1.0f - winChance) * stake) o.mul("mid game: bad odds", tune::fight_mid_factor);
+                o.c.note << "odds " << static_cast<int>(winChance * gain) << " vs " << static_cast<int>((1.0f - winChance) * stake) << "; ";
+            } else if (winChance < tune::fight_mid_win_chance) {
+                o.mul("mid game: under win cutoff", tune::fight_mid_factor);
+            }
             o.c.note << "win " << static_cast<int>(winChance * 100.0f) << "%; ";
         }
         if (comms::focusMask(e.index, w.slot) != 0) o.mul("focus fire", tune::focus_fire_bonus);
