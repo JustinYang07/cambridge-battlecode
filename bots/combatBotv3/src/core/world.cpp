@@ -152,6 +152,7 @@ void World::refresh(bool firstTurn) {
         }
         if (enemyRespawnAt < 0 || back < enemyRespawnAt) enemyRespawnAt = back;
     }
+    if (enemyRespawnAt >= 0 || !alive) anyDeathSeen = true;  // an enemy is down, or we are
     fuel::mark("refresh.enemyAlive");
     if (!enemyTiles.is_empty()) {
         for (const auto& c : bc::vision::champions(bc::team::enemy)) {
@@ -204,6 +205,8 @@ void World::refresh(bool firstTurn) {
             lastSeenPos_[k] = e.pos;
             lastSeenRound_[k] = round;
         }
+    for (const auto& e : enemies)
+        if (e.hp > 0 && dist(e.pos, pos) <= tune::quiet_enemy_radius) lastEnemyNearRound = round;
     // Team target: keep it while it is alive and seen recently; otherwise the first enemy seen
     // losing health since the last round we saw it (the most hurt one if several at once).
     if (teamTarget >= 0 && round - teamTargetSeen > tune::team_target_memory) teamTarget = -1;
@@ -729,6 +732,21 @@ bool World::tributeAtRisk(bc::vec2 altar, int bag) const {
 bool World::theirHalf(cambc::vec2 p) const {
     const auto& s = Statics::get();
     return dist(p, s.enemySpawnCenter) < dist(p, s.spawnCenter);
+}
+
+bool World::invadeWithoutMelee(bc::vec2 at) const {
+    if (!tune::invade_needs_melee || !ranged || !theirHalf(at)) return false;
+    for (int s = 0; s < allyCount && s < 8; ++s) {
+        if (s == slot) continue;
+        const auto t = static_cast<std::size_t>(allyTypes[static_cast<std::size_t>(s)]);
+        if (t >= bc::champion_designs.size() || bc::champion_designs[t].base_stats().base_attack_range > 1) continue;
+        const auto p = allyPosCached(s);
+        if (p.x < 0 || dist(p, at) > tune::invade_melee_radius) continue;
+        // invade_melee_ahead: it must also be in front of us (no farther from their spawn than we are).
+        if (tune::invade_melee_ahead && dist(p, Statics::get().enemySpawnCenter) > dist(pos, Statics::get().enemySpawnCenter)) continue;
+        return false;
+    }
+    return true;
 }
 
 bool World::enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const {

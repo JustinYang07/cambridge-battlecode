@@ -96,6 +96,8 @@ bool basicAttack(World& w, const Focus& focus) {
             return true;
         }
         if (auto* c = campInRange(w, focus.groupId, w.range)) {
+            // Lab probe: ranged champions hit attacking monsters with spells only (aggro test).
+            if (tune::probe_spell_only_camps && w.ranged && c->strength > 0) return false;
             me.attack(*c->handle);
             w.lastAttacked = c->pos;
             refresh(*c);
@@ -341,6 +343,16 @@ void act(World& w, const Focus& focus, bool beforeMove) {
         castOnTargets(w, focus, false);
     }
     if (attacked) resetAndAttack(w, focus);
+}
+
+int damageSpellRange(const World& w) {
+    int best = 0;
+    for (const auto& a : w.abilities()) {
+        if (!(a.is_damage() || a.is_aoe_damage() || a.is_cc())) continue;
+        const auto s = shape(a);
+        if (s.modifier > 0) best = std::max(best, static_cast<int>(s.range));
+    }
+    return best;
 }
 
 bool castFromRange(World& w, const Focus& focus) {

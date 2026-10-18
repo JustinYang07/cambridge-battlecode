@@ -65,6 +65,7 @@ void bank(World& w, std::vector<Option>& out) {
         if (k < 0 || estimate >= bestCost) continue;  // walking never beats the estimate
         const auto i = static_cast<std::size_t>(k);
         if (!w.mayInvade() && w.theirHalf(altars[i])) continue;  // no invading without a numbers lead
+        if (w.invadeWithoutMelee(altars[i])) continue;           // nor, ranged, without our melee there
         bool locked = false;
         try {
             locked = bc::vision::has_altar_lock(altars[i]) && bc::vision::altar_lock_at(altars[i]).is_enemy();
@@ -92,7 +93,9 @@ void bank(World& w, std::vector<Option>& out) {
     // After a recall the nearest altar is the one nearest spawn, not the one nearest us.
     if (tune::bank_recall_any_altar && viaHome < 1e8f) {
         for (int i = 0; i < static_cast<int>(altars.size()); ++i) {
-            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)]))) continue;
+            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)])) ||
+                w.invadeWithoutMelee(altars[static_cast<std::size_t>(i)]))
+                continue;
             bool locked = false;
             try {
                 locked = bc::vision::has_altar_lock(altars[static_cast<std::size_t>(i)]) &&

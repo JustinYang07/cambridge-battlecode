@@ -121,6 +121,9 @@ public:
     }
     // The tile is on their half (nearer their spawn than ours).
     bool theirHalf(cambc::vec2 p) const;
+    // combatBotv3: a ranged champion's spot on their half with none of our melee champions alive
+    // within tune::invade_melee_radius of it: too risky to invade alone (tune::invade_needs_melee).
+    bool invadeWithoutMelee(cambc::vec2 at) const;
     int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
     cambc::bitboard visible, occupied;
     cambc::bitboard danger;        // tiles within reach of live, damaging monsters we can see
@@ -234,6 +237,14 @@ public:
     };
     // combatBotv3 commitment: once we pick a fight (or a flight) we keep it until commitUntil.
     int commitKind = -1, commitTarget = -1, commitUntil = -1;
+    int spellClearGroup = -1;  // combatBotv3: this turn's plan clears this group with spells from range
+    // combatBotv3 quiet game: no enemy death seen and we never died, and no enemy champion within
+    // tune::quiet_enemy_radius of us for tune::quiet_rounds, from tune::quiet_min_round.
+    bool anyDeathSeen = false;
+    int lastEnemyNearRound = 0;
+    bool quietGame() const {
+        return !anyDeathSeen && round >= tune::quiet_min_round && round - lastEnemyNearRound >= tune::quiet_rounds;
+    }
     FightFeat bestFight;
     int lastContactRound = -100, exploreUntil = -1, exploreMode = 0;  // mode 1: declined, 2: forced
     int exploreForced = -1;  // option index forced this turn (mode 2)

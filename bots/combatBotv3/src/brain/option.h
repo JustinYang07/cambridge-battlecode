@@ -19,6 +19,7 @@ struct Option {
     std::optional<cambc::champion> enemy;  // fight / flee subject
     int need = 1;                          // champions needed to take this camp group safely
     float expectDamage = 0;                // farm: health we expect to lose (shown in traces)
+    bool spellClear = false;               // combatBotv3 farm: clear the attacking monsters with spells from outside their reach
     float score = 0;
     Candidate c;                           // label, note and factors, in trace form
 

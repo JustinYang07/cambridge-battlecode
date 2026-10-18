@@ -153,6 +153,8 @@ void fight(World& w, std::vector<Option>& out) {
         if (tune::no_chase_factor != 1.0f && !e.channeling && dist(w.pos, e.pos) > w.range && w.enemyMovingAway(e.index, e.pos))
             o.mul("it is leaving", tune::no_chase_factor);
         if (!w.mayInvade() && !e.channeling && w.theirHalf(e.pos)) o.mul("their half: no lead", tune::no_invade_factor);
+        // An enemy already in our range is self-defence, wherever we stand.
+        if (dist(e.pos, w.pos) > w.range && w.invadeWithoutMelee(e.pos)) o.mul("their half: no melee with us", tune::invade_no_melee_factor);
         // Fight as a group: with less than half the active team around us, leave it unless the
         // target is channelling or is the one hitting us.
         if (tune::cohesion && !e.channeling && cohesion::activeCount() >= 3) {

@@ -43,6 +43,8 @@ void support(World& w);
 // A damage spell reaches 4 tiles, beyond basic-attack range (and monster range 3): cast it
 // instead of stepping closer. Returns true if a spell was cast.
 bool castFromRange(World& w, const Focus& focus);
+// combatBotv3: the longest cast range among our damage spells (0 if none).
+int damageSpellRange(const World& w);
 // Stun or hit an enemy that is tributing or recalling: a stun cancels the channel.
 bool interruptChannels(World& w);
 // Place an altar lock: on an enemy's tribute (cancels it) or on an enemy-side altar we pass.

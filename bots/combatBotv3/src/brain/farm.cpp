@@ -471,6 +471,8 @@ Option scoreGroup(World& w, const Candidate& c) {
                                                   : std::max(0, __builtin_popcount(w.partyMates) - 1);  // less the keeper
         claims = std::max(claims, std::min(tune::max_team_per_camp - 1, movingOn));
     }
+    const float timeBeforeFight = o.c.time, multBeforeFight = o.c.mult;
+    const bool spellCandidate = o.kind == OptionKind::farm;
     if (o.kind == OptionKind::farm) {
         const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
         // Health we must keep to walk out of reach afterwards (monsters do not chase).
@@ -676,6 +678,43 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (need == 1 && owners) o.mul("nearer ally claimed", tune::ally_claim_factor);
         if (w.gems > 0 && fight.damage > 0)
             o.mul("bag at risk", std::max(0.4f, 1.0f - tune::carry_risk_per_gem * w.gems * fight.damage / std::max(w.hp, 1.0f)));
+        // combatBotv3 spell clear as an option: a ranged champion whose damage spell outranges the
+        // monsters can kill the attacking ones alone with spells from outside their reach (camps only
+        // hit whoever attacks them, within monster range): no damage, no party, but spell speed. Score
+        // that version too (same reward and walk) and keep whichever is better.
+        // Only Stellar, and only far camps (opposite corners, their half: where nobody farms and a
+        // solo, damage-free clear is a steal), more so in a quiet game (farming on both sides).
+        const auto& stc = Statics::get();
+        const bool farCamp = static_cast<float>(dist(g.center, stc.spawnCenter)) >=
+                             tune::spell_clear_far_frac * static_cast<float>(std::max(stc.width, stc.height));
+        if (spellCandidate && tune::spell_clear_option && w.type == bc::champion_type::stellar && farCamp && !g.harmless && claims == 0 &&
+            combat::damageSpellRange(w) > tune::monster_range && w.kit.spellDps > 0) {
+            float attackersHp = 0, othersHp = 0;
+            if (mem.visibleNow) {
+                for (const auto& cs : w.camps)
+                    if (cs.groupId == g.id && cs.hp > 0) (cs.strength > 0 ? attackersHp : othersHp) += cs.hp;
+            } else {
+                for (const auto& m : g.killOrder) (m.strength > 0 ? attackersHp : othersHp) += m.health * left;
+            }
+            const float spellTurns = attackersHp / w.kit.spellDps + othersHp / std::max(combat::campDamagePerTurn(w, g), 1.0f);
+            const float spellTime = timeBeforeFight + spellTurns + tune::capture_turns;
+            const float spellMult = multBeforeFight;
+            const float normal = o.c.reward / std::max(o.c.time, 1.0f) * o.c.mult;
+            const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
+            const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet;
+            if (viaSpells > normal) {
+                o.c.time = spellTime;
+                o.c.mult = spellMult;
+                o.kind = OptionKind::farm;
+                o.need = 1;
+                o.expectDamage = 0;
+                o.spellClear = true;
+                killTurns = spellTurns;
+                o.mul("spell clear (no damage)", quiet);
+                if (quiet > 1.0f) o.c.note << "quiet game; ";
+                o.c.note << "spell clear: " << static_cast<int>(spellTurns) << " turns; ";
+            }
+        }
     } else {
         o.turns("capture", tune::capture_turns);
         if (owners && !(captureShare(w, g.id) >= 1.0f && designatedKeeper(w, g.id))) o.mul("nearer ally capturing", tune::ally_claim_factor);
@@ -771,6 +810,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
     // No invading without a numbers lead.
     if (!w.mayInvade() && w.theirHalf(g.center)) o.mul("their half: no lead", tune::no_invade_factor);
+    if (w.invadeWithoutMelee(g.center)) o.mul("their half: no melee with us", tune::invade_no_melee_factor);
     // combatBotv3: a ranged champion is the exposed one at a camp that is not clearly ours, all the
     // more beside a bush that hides whoever waits in it (swirl: our team farmed the two centre camps,
     // 8-9 tiles from each spawn beside the bush walls, and lost four of five by round 51 while the
@@ -904,7 +944,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) * std::max(1.0f, tune::spell_clear_quiet_bonus) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);

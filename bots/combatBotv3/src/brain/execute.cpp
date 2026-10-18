@@ -181,6 +181,36 @@ bool rushPull(World& w, const GroupInfo& g, int need) {
     return true;
 }
 
+// combatBotv3 probe (camp_corner_stand): tiles from which a ranged champion reaches a live member of
+// the group (Chebyshev range) while more than camp_reach_euclid_sq (squared straight-line distance)
+// from every member that attacks: the diagonal corners, if monsters reach in a circle.
+bc::bitboard cornerTiles(const World& w, const GroupInfo& g) {
+    bc::bitboard out;
+    out.clear();
+    const auto& st = Statics::get();
+    const int r = w.range;
+    for (const auto& c : w.camps) {
+        if (c.groupId != g.id || c.hp <= 0) continue;
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+                for (int k = 0; k <= 1; ++k) {
+                    const bc::vec2 t{c.pos.x + sx * r, c.pos.y + sy * (r - k)};
+                    const bc::vec2 t2{c.pos.x + sx * (r - k), c.pos.y + sy * r};
+                    for (const auto q : {t, t2}) {
+                        if (q.x < 0 || q.y < 0 || q.x >= st.width || q.y >= st.height || st.terrain.is_set(q)) continue;
+                        bool safe = true;
+                        for (const auto& m : w.camps) {
+                            if (m.groupId != g.id || m.hp <= 0 || m.strength <= 0) continue;
+                            const int dx = q.x - m.pos.x, dy = q.y - m.pos.y;
+                            if (dx * dx + dy * dy <= tune::camp_reach_euclid_sq) { safe = false; break; }
+                        }
+                        if (safe) out.set(q);
+                    }
+                }
+    }
+    return out & ~g.tileMask;
+}
+
 void farmGroup(World& w, const GroupInfo& g, int need) {
     combat::Focus focus{.groupId = g.id};
     const auto status = w.groups[static_cast<std::size_t>(g.id)].status;
@@ -193,7 +223,57 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
     if (scorers::teamRushOn(w, g.id) && rushPull(w, g, need)) return;
     if (waitForParty(w, g, need)) return;
     const bool holdFire = holdForTank(w, g);
+    // combatBotv3 spell clear: a ranged champion whose damage spell outranges the monsters, alone on
+    // this camp, clears its attacking monsters with spells only from outside their reach (camps only
+    // hit whoever attacks them, and only within monster_range): no damage taken.
+    if ((tune::spell_clear_camps || w.spellClearGroup == g.id) && w.ranged && !holdFire) {
+        const int sr = combat::damageSpellRange(w);
+        bool attackers = false, allyHere = false;
+        for (const auto& c : w.camps) attackers = attackers || (c.groupId == g.id && c.hp > 0 && c.strength > 0);
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPosCached(sl);
+            allyHere = allyHere || (p.x >= 0 && dist(p, g.center) <= tune::spell_clear_ally_radius);
+        }
+        if (sr > tune::monster_range && attackers && (!allyHere || w.spellClearGroup == g.id)) {
+            bc::bitboard inReach, inSpell;
+            inReach.clear();
+            inSpell.clear();
+            for (const auto& c : w.camps)
+                if (c.groupId == g.id && c.hp > 0 && c.strength > 0) {
+                    inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+                    inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
+                }
+            const auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
+            if (!goals.is_empty()) {
+                combat::Focus spellFocus{.groupId = g.id};
+                if (goals.is_set(w.pos)) {
+                    if (!combat::castFromRange(w, spellFocus)) trace().action("hold");
+                } else {
+                    combat::castFromRange(w, spellFocus);
+                    nav().stepToward(w, goals, false, &w.danger, g.center);
+                }
+                trace().note("spell clear");
+                return;
+            }
+        }
+    }
     if (groupMemberInRange(w, g.id)) {
+        // combatBotv3 probe: ranged in range but not on a corner: step to a corner within 2 tiles.
+        if (tune::camp_corner_stand && w.ranged && !holdFire && bc::self().can_move()) {
+            const auto corners = cornerTiles(w, g);
+            if (!corners.is_empty() && !corners.is_set(w.pos)) {
+                bc::bitboard nearCorner;
+                nearCorner.clear();
+                nearCorner.draw_chebyshev(w.pos, 2.0f);
+                if (!(corners & nearCorner).is_empty()) {
+                    combat::act(w, focus, true);
+                    nav().stepToward(w, corners & nearCorner, false);
+                    trace().note("camp corner");
+                    return;
+                }
+            }
+        }
         // combatBotv3: ranged with enemies about: shoot from the safest tile still in range of a member.
         bool stepped = false;
         if (tune::exposure_stand && w.ranged && !w.enemies.empty()) {
@@ -228,6 +308,9 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         if (const auto open = goals & Statics::get().reach; !open.is_empty()) goals = open;
         // Monsters hit the nearest champion: ranged allies stand at full range so whoever is
         // closer (ideally the tank) soaks the hits.
+        if (tune::camp_corner_stand && w.ranged) {
+            if (const auto corners = cornerTiles(w, g) & goals; !corners.is_empty()) goals = corners;
+        }
         if (w.ranged) {
             bc::bitboard closeIn;
             closeIn.clear();
@@ -1099,7 +1182,9 @@ void execute(World& w, const Option& o) {
             nav().enterPocket(w, g);
             combat::act(w, combat::Focus{.groupId = g.id}, false);
         } else if (o.kind == OptionKind::farm) {
+            w.spellClearGroup = o.spellClear ? g.id : -1;
             farmGroup(w, g, o.need);
+            w.spellClearGroup = -1;
         } else {
             capture(w, g);
         }

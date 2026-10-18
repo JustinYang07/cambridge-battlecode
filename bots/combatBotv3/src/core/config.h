@@ -448,6 +448,34 @@ inline constexpr float cohesion_away_factor = 0.75f;  // camps elsewhere
 inline constexpr float cohesion_alone_fight = 0.3f;   // fights with less than half the active team near
 inline constexpr bool invade_needs_lead = false;       // farm, fight or bank on their half only with more of us alive
 inline constexpr float no_invade_factor = 0.02f;
+// combatBotv3: ranged champions do not invade alone. A farm, fight or bank spot on their half with
+// none of our melee champions alive within invade_melee_radius scores x invade_no_melee_factor
+// (banks there are skipped); fights against an enemy already in range are exempt.
+inline constexpr bool invade_needs_melee = false;
+inline constexpr int invade_melee_radius = 8;
+inline constexpr bool invade_melee_ahead = false;  // ...and that melee ally must be in front of us (no farther from their spawn)
+// combatBotv3 probe: ranged champions shoot camps from the diagonal corners of their range,
+// outside a circular monster reach (squared straight-line distance > camp_reach_euclid_sq; (3,2)
+// = 13 is still hit, so a range-3 corner (3,3) = 18 is the candidate).
+inline constexpr bool camp_corner_stand = false;
+inline constexpr int camp_reach_euclid_sq = 13;
+inline constexpr bool probe_spell_only_camps = false;  // lab probe: ranged never basic-attack monsters that hit back (spells only)
+// combatBotv3 spell clear: a ranged champion whose damage spell reaches beyond monster_range clears a
+// camp's attacking monsters alone with spells only, from tiles outside their reach (no ally within
+// spell_clear_ally_radius of the camp; with one there, the usual nearest-tanks play).
+inline constexpr bool spell_clear_camps = false;
+inline constexpr int spell_clear_ally_radius = 4;
+// ...and as a scored option: camp scoring also prices clearing alone by spells (no damage, no party,
+// spell speed) and takes it when it beats the usual fight.
+inline constexpr bool spell_clear_option = true;
+inline constexpr float spell_clear_far_frac = 0.4f;   // ...Stellar only, camps at least this x map size from our spawn
+inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a quiet game (see below)
+// Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
+// of us for quiet_rounds (both teams just farming their own sides).
+inline constexpr int quiet_min_round = 100;
+inline constexpr int quiet_enemy_radius = 10;
+inline constexpr int quiet_rounds = 60;
+inline constexpr float invade_no_melee_factor = 0.1f;
 inline constexpr bool wards = false;                  // place a ward on the halfway line when crossing it
 // ---- rangeBot: ranged champions' fights
 inline constexpr bool ranged_hold_range = true;   // an enemy champion in range: hit it instead of walking to the chosen one
