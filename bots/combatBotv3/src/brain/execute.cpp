@@ -244,7 +244,18 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
                     inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
                     inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
                 }
-            const auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
+            auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
+            // Cast from the tiles nearest our side, not from deep in their half (user).
+            if (tune::spell_clear_near_side && !goals.is_empty()) {
+                const auto home = Statics::get().spawnCenter;
+                int best = 1 << 20;
+                for (auto t : goals.positions()) best = std::min(best, dist(t, home));
+                bc::bitboard near;
+                near.clear();
+                for (auto t : goals.positions())
+                    if (dist(t, home) <= best + 1) near.set(t);
+                goals = near;
+            }
             if (!goals.is_empty()) {
                 combat::Focus spellFocus{.groupId = g.id};
                 if (goals.is_set(w.pos)) {

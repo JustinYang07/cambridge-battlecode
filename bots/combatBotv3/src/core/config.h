@@ -477,8 +477,9 @@ inline constexpr int spell_clear_ally_radius = 4;
 inline constexpr bool spell_clear_option = true;
 inline constexpr float spell_clear_far_frac = 0.4f;   // ...Stellar only, camps at least this x map size from our spawn
 inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a quiet game (see below)
-inline constexpr bool spell_clear_force_quiet = true;   // ...in a quiet game Stellar always takes her best far camp by spells (user)
+inline constexpr bool spell_clear_force_quiet = true;   // ...in a quiet game on a large map (side >= large_map_side) Stellar always takes her best far camp by spells (user; expanse +150, other maps -31 overall)
 inline constexpr float spell_clear_force_bonus = 3.0f;   // ...scoring it x this
+inline constexpr bool spell_clear_near_side = true;     // ...cast from the spell-range tiles nearest our spawn (within 1 of the nearest)
 // Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
 // of us for quiet_rounds (both teams just farming their own sides).
 inline constexpr int quiet_min_round = 100;

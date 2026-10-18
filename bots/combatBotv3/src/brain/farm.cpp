@@ -702,7 +702,8 @@ Option scoreGroup(World& w, const Candidate& c) {
             const float normal = o.c.reward / std::max(o.c.time, 1.0f) * o.c.mult;
             const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
             // Forced steal (user): in a quiet game Stellar takes the far camp by spells, slow or not.
-            const bool force = tune::spell_clear_force_quiet && w.quietGame();
+            const bool force = tune::spell_clear_force_quiet && w.quietGame() &&
+                               std::max(stc.width, stc.height) >= tune::large_map_side;
             const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet * (force ? tune::spell_clear_force_bonus : 1.0f);
             if (viaSpells > normal || force) {
                 o.c.time = spellTime;
@@ -1080,7 +1081,8 @@ void farm(World& w, std::vector<Option>& out) {
             if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
     // combatBotv3 forced steal: in a quiet game Stellar always scores the far camp with the most gems.
     int stealGroup = -1;
-    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && w.quietGame()) {
+    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && w.quietGame() &&
+        std::max(statics.width, statics.height) >= tune::large_map_side) {
         int bestGems = 0;
         for (int i = 0; i < n; ++i) {
             const auto* pg = pre[static_cast<std::size_t>(i)].group;
