@@ -390,6 +390,15 @@ bool teamRush(const World& w, const GroupInfo& g) {
     return w.alliesAlive >= tune::team_rush_min_alive;
 }
 
+// combatBotv3 steal mode (user): on large maps Stellar goes straight for the far camps from the
+// start and leaves the near ones to the team, quiet game or not.
+bool stellarSteal(const World& w) {
+    const auto& st = Statics::get();
+    return tune::stellar_steal_large && w.type == bc::champion_type::stellar && w.round >= tune::stellar_steal_round &&
+           w.round >= w.stealBackoffUntil &&
+           std::max(st.width, st.height) >= tune::large_map_side;
+}
+
 Option scoreGroup(World& w, const Candidate& c) {
     const auto& statics = Statics::get();
     const auto& g = *c.group;
@@ -702,7 +711,7 @@ Option scoreGroup(World& w, const Candidate& c) {
             const float normal = o.c.reward / std::max(o.c.time, 1.0f) * o.c.mult;
             const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
             // Forced steal (user): in a quiet game Stellar takes the far camp by spells, slow or not.
-            const bool force = tune::spell_clear_force_quiet && w.quietGame() &&
+            const bool force = tune::spell_clear_force_quiet && (w.quietGame() || stellarSteal(w)) && w.round >= w.stealBackoffUntil &&
                                std::max(stc.width, stc.height) >= tune::large_map_side;
             const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet * (force ? tune::spell_clear_force_bonus : 1.0f);
             if (viaSpells > normal || force) {
@@ -746,6 +755,9 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (incoming > 0 && incoming * tune::capture_turns >= w.hp) o.mul("would not survive", 0.02f);
     }
 
+    if (stellarSteal(w) && (o.kind == OptionKind::farm || o.kind == OptionKind::capture) &&
+        static_cast<float>(dist(g.center, statics.spawnCenter)) < tune::spell_clear_far_frac * static_cast<float>(std::max(statics.width, statics.height)))
+        o.mul("steal mode: far camps only", tune::stellar_steal_near_factor);
     if (g.id == mapplan::routeGroup()) {
         o.mul("route", tune::route_bonus);
         o.c.note << "route";
@@ -1081,7 +1093,7 @@ void farm(World& w, std::vector<Option>& out) {
             if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
     // combatBotv3 forced steal: in a quiet game Stellar always scores the far camp with the most gems.
     int stealGroup = -1;
-    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && w.quietGame() &&
+    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && (w.quietGame() || stellarSteal(w)) &&
         std::max(statics.width, statics.height) >= tune::large_map_side) {
         int bestGems = 0;
         for (int i = 0; i < n; ++i) {

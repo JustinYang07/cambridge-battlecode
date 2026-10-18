@@ -235,6 +235,19 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             const auto p = w.allyPosCached(sl);
             allyHere = allyHere || (p.x >= 0 && dist(p, g.center) <= tune::spell_clear_ally_radius);
         }
+        // Stealing and enemy champions show up near us: run back toward our side and leave the
+        // steal for a while (user).
+        if (w.spellClearGroup == g.id && tune::steal_back_off_radius > 0) {
+            bool threat = false;
+            for (const auto& e : w.enemies) threat = threat || (e.hp > 0 && dist(e.pos, w.pos) <= tune::steal_back_off_radius);
+            if (threat) {
+                w.stealBackoffUntil = w.round + tune::steal_back_off_rounds;
+                w.forceReplan = true;
+                if (!nav().stepHome(w)) nav().stepToward(w, Statics::get().allySpawn, true, nullptr, Statics::get().spawnCenter);
+                trace().note("steal: enemies seen, back off");
+                return;
+            }
+        }
         if (sr > tune::monster_range && attackers && (!allyHere || w.spellClearGroup == g.id)) {
             bc::bitboard inReach, inSpell;
             inReach.clear();

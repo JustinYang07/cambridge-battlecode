@@ -480,6 +480,13 @@ inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a qui
 inline constexpr bool spell_clear_force_quiet = true;   // ...in a quiet game on a large map (side >= large_map_side) Stellar always takes her best far camp by spells (user; expanse +150, other maps -31 overall)
 inline constexpr float spell_clear_force_bonus = 3.0f;   // ...scoring it x this
 inline constexpr bool spell_clear_near_side = true;     // ...cast from the spell-range tiles nearest our spawn (within 1 of the nearest)
+// Steal mode (user): on large maps Stellar goes for the far camps from stellar_steal_round, quiet or
+// not; near camps score x stellar_steal_near_factor for her.
+inline constexpr bool stellar_steal_large = true;
+inline constexpr int stellar_steal_round = 0;
+inline constexpr float stellar_steal_near_factor = 0.05f;
+inline constexpr int steal_back_off_radius = 8;    // stealing and an enemy champion this close: run back toward our side...
+inline constexpr int steal_back_off_rounds = 20;   // ...and no steal for this many rounds
 // Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
 // of us for quiet_rounds (both teams just farming their own sides).
 inline constexpr int quiet_min_round = 100;
