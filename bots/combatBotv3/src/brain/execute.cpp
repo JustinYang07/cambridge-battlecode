@@ -252,12 +252,23 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             bc::bitboard inReach, inSpell;
             inReach.clear();
             inSpell.clear();
-            for (const auto& c : w.camps)
-                if (c.groupId == g.id && c.hp > 0 && c.strength > 0) {
-                    inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
-                    inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
-                }
+            for (const auto& c : w.camps) {
+                if (c.hp <= 0 || c.strength <= 0) continue;
+                // Out of reach of every attacking monster we can see, not just this group's: the
+                // neighbouring groups sit a few tiles away (expanse: Stellar died to them 1.5 a game).
+                inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+                if (c.groupId == g.id) inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
+            }
             auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
+            // Between spells, basic-attack the group's clusters (they do not hit back) from a tile
+            // still outside every monster's reach, when there is one.
+            if (tune::spell_clear_hit_clusters) {
+                bc::bitboard inBasic;
+                inBasic.clear();
+                for (const auto& c : w.camps)
+                    if (c.groupId == g.id && c.hp > 0 && c.strength <= 0) inBasic.draw_chebyshev(c.pos, static_cast<float>(w.range));
+                if (const auto both = goals & inBasic; !both.is_empty()) goals = both;
+            }
             // Cast from the tiles nearest our side, not from deep in their half (user).
             if (tune::spell_clear_near_side && !goals.is_empty()) {
                 const auto home = Statics::get().spawnCenter;
@@ -271,8 +282,22 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
             }
             if (!goals.is_empty()) {
                 combat::Focus spellFocus{.groupId = g.id};
+                w.spellClearRound = w.round;
                 if (goals.is_set(w.pos)) {
-                    if (!combat::castFromRange(w, spellFocus)) trace().action("hold");
+                    bool acted = combat::castFromRange(w, spellFocus);
+                    if (!acted && tune::spell_clear_hit_clusters && bc::self().can_attack())
+                        for (auto& c : w.camps) {
+                            if (c.groupId != g.id || c.hp <= 0 || c.strength > 0 || !c.handle || dist(c.pos, w.pos) > w.range) continue;
+                            try {
+                                bc::self().attack(*c.handle);
+                                FixedStr<24> msg;
+                                trace().action((msg << "ac" << c.pos.x << ',' << c.pos.y).view());
+                                acted = true;
+                            } catch (const bc::error&) {
+                            }
+                            break;
+                        }
+                    if (!acted) trace().action("hold");
                 } else {
                     combat::castFromRange(w, spellFocus);
                     nav().stepToward(w, goals, false, &w.danger, g.center);

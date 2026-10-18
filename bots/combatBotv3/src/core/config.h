@@ -487,6 +487,7 @@ inline constexpr int stellar_steal_round = 0;
 inline constexpr float stellar_steal_near_factor = 0.05f;
 inline constexpr int steal_back_off_radius = 8;    // stealing and an enemy champion this close: run back toward our side...
 inline constexpr int steal_back_off_rounds = 20;   // ...and no steal for this many rounds
+inline constexpr bool spell_clear_hit_clusters = false; // spell clears hit the group's clusters between spells (off: it wakes the elks; expanse +106 vs +300, Stellar deaths 1.82 vs 0.03)
 // Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
 // of us for quiet_rounds (both teams just farming their own sides).
 inline constexpr int quiet_min_round = 100;

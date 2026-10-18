@@ -239,6 +239,8 @@ public:
     int commitKind = -1, commitTarget = -1, commitUntil = -1;
     int spellClearGroup = -1;  // combatBotv3: this turn's plan clears this group with spells from range
     int stealBackoffUntil = -1;  // combatBotv3: saw enemies while stealing: no steal until this round
+    int stealTarget = -1;        // combatBotv3: the far camp this turn's steal goes for (-1 none)
+    int spellClearRound = -1;    // combatBotv3: last round we worked a spell clear (not idle)
     // combatBotv3 quiet game: no enemy death seen and we never died, and no enemy champion within
     // tune::quiet_enemy_radius of us for tune::quiet_rounds, from tune::quiet_min_round.
     bool anyDeathSeen = false;

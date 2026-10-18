@@ -712,6 +712,7 @@ Option scoreGroup(World& w, const Candidate& c) {
             const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
             // Forced steal (user): in a quiet game Stellar takes the far camp by spells, slow or not.
             const bool force = tune::spell_clear_force_quiet && (w.quietGame() || stellarSteal(w)) && w.round >= w.stealBackoffUntil &&
+                               (w.stealTarget < 0 || g.id == w.stealTarget) &&
                                std::max(stc.width, stc.height) >= tune::large_map_side;
             const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet * (force ? tune::spell_clear_force_bonus : 1.0f);
             if (viaSpells > normal || force) {
@@ -1095,17 +1096,20 @@ void farm(World& w, std::vector<Option>& out) {
     int stealGroup = -1;
     if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && (w.quietGame() || stellarSteal(w)) &&
         std::max(statics.width, statics.height) >= tune::large_map_side) {
-        int bestGems = 0;
+        int bestGems = 0, bestDist = 1 << 20;
         for (int i = 0; i < n; ++i) {
             const auto* pg = pre[static_cast<std::size_t>(i)].group;
-            if (!pg || pg->harmless || pg->gems <= bestGems) continue;
-            if (static_cast<float>(dist(pg->center, statics.spawnCenter)) <
-                tune::spell_clear_far_frac * static_cast<float>(std::max(statics.width, statics.height)))
-                continue;
+            if (!pg || pg->harmless || pg->gems < bestGems) continue;
+            const int d = dist(pg->center, statics.spawnCenter);
+            if (static_cast<float>(d) < tune::spell_clear_far_frac * static_cast<float>(std::max(statics.width, statics.height))) continue;
+            // Equal gems: the nearest to our spawn (expanse: blue's top-left cluster, red's bottom-right).
+            if (pg->gems == bestGems && d >= bestDist) continue;
             bestGems = pg->gems;
+            bestDist = d;
             stealGroup = pg->id;
         }
     }
+    w.stealTarget = stealGroup;
     for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup, stealGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)

@@ -177,7 +177,8 @@ void Bot::play_turn() {
     // for 1,700 rounds; stampede: one champion held an elk camp alone for 750).
     if (w.alive && !me.is_recalling() && !me.is_submitting_gems() && !me.is_teleporting()) {
         // Not stuck while there is something to hit, or while banking or healing.
-        bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal);
+        bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal) ||
+                    w.spellClearRound >= w.round - 1;  // casting at a camp from range, waiting on the cooldown
         for (const auto& c : w.camps) busy = busy || (c.hp > 0 && dist(c.pos, w.pos) <= w.range);
         for (const auto& e : w.enemies) busy = busy || (e.hp > 0 && dist(e.pos, w.pos) <= w.range + 1);
         if (!busy && w.pos.x == w.stillPos.x && w.pos.y == w.stillPos.y) {
