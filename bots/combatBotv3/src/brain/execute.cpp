@@ -481,20 +481,20 @@ void flee(World& w) {
         const auto avoid = w.enemyReach();
         if (nav().stepToward(w, ally, 1, true, &avoid)) {
             trace().note("fleeing to an ally");
-            combat::act(w, combat::Focus{}, false);
+            if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
             return;
         }
     }
     // Run home around their reach (43% of our deaths came while fleeing, a third of those flights
     // drifting away from home: the nearest tile out of reach is often deeper in their half).
     if (tune::flee_home_weighted && nav().stepHome(w)) {
-        combat::act(w, combat::Focus{}, false);
+        if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
         return;
     }
     // Nothing to escape out of: head home along the spawn path rather than just away from them.
     if (!nav().stepEscape(w) && !(tune::flee_homeward ? false : nav().stepAway(w, threats, 6)))
         nav().stepToward(w, Statics::get().allySpawn, true, nullptr, Statics::get().spawnCenter, spawnPath());
-    combat::act(w, combat::Focus{}, false);
+    if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
 }
 
 // Melee champion types (attack range 1), from the designs: they form the front line.
@@ -1021,7 +1021,7 @@ void execute(World& w, const Option& o) {
     if (o.kind == OptionKind::fight) comms::claimEnemy(w.slot, o.target);
     else if (o.kind == OptionKind::wait && o.target == 2) comms::claimRegroup(w.slot);
     else if (farming) comms::claimGroup(w.slot, o.target, dist(w.pos, statics.groups[static_cast<std::size_t>(o.target)].center));
-    else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold || tune::ranged_follow_front)) comms::claimRetreat(w.slot);
+    else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold || tune::ranged_follow_front || tune::team_fight_call)) comms::claimRetreat(w.slot);
     else comms::clear(w.slot);
 
     // combatBotv3: outmatched by a group closing on us: leave before contact, whatever we were doing

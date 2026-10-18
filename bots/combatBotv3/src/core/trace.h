@@ -78,6 +78,7 @@ public:
     void candidates(const Candidate* const* list, int count, bool decisionChanged);
     void action(std::string_view text);
     void note(std::string_view text);
+    void raw(std::string_view line) { if (written_ <= budget_) write(line); }  // a whole record line (e.g. @F)
     void flush(unsigned long long fuelUsed);
     void lostTurns(int n) { lost_ = n; }
     void forceFull() { full_ = true; }

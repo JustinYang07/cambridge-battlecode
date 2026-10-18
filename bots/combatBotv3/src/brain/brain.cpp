@@ -1,6 +1,9 @@
 #include "brain.h"
+#include <algorithm>
+#include <array>
 #include "scorers.h"
 #include "../core/config.h"
+#include "../core/comms.h"
 #include "../core/trace.h"
 #include "../core/fuel.h"
 
@@ -64,6 +67,37 @@ int choose(const std::vector<Option>& options, World& w) {
     // Emergencies override any lock: badly hurt, or being hit while outnumbered by enemies.
     const bool emergency = w.hpFrac() < tune::lock_emergency_hp ||
                            (w.beingHit && w.enemyPressure(w.pos, 5) > w.alliedPower(w.pos, 5));
+    // combatBotv3: one call per fight. Allies near us (within team_call_radius) claiming a fight or
+    // a retreat vote; the majority is the team's call and we follow it (join their target, or
+    // retreat without fighting). Badly hurt, we may still leave a fight.
+    const bool hurt = w.hpFrac() < tune::commit_break_hp;
+    int callFight = -1;  // enemy the team fights (-1 none)
+    bool callRetreat = false;
+    if (tune::team_fight_call && !w.enemies.empty()) {
+        int retreatVotes = 0, fightVotes = 0;
+        std::array<int, 16> votes{};
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPosCached(sl);
+            if (p.x < 0 || dist(p, w.pos) > tune::team_call_radius) continue;
+            if (comms::retreating(sl)) {
+                ++retreatVotes;
+            } else if (const int e = comms::enemyOf(sl); e >= 0 && e < 16) {
+                ++fightVotes;
+                ++votes[static_cast<std::size_t>(e)];
+            }
+        }
+        if (fightVotes > retreatVotes) {
+            for (int e = 0; e < 16; ++e)
+                if (votes[static_cast<std::size_t>(e)] > 0 &&
+                    (callFight < 0 || votes[static_cast<std::size_t>(e)] > votes[static_cast<std::size_t>(callFight)]))
+                    callFight = e;
+        } else if (retreatVotes > fightVotes) {
+            callRetreat = true;
+        }
+    }
+    const bool teamCall = callFight >= 0 || callRetreat;
+    const bool committed = tune::fight_commit_rounds > 0 && !teamCall && w.round < w.commitUntil && !hurt;
     int best = -1;
     float bestScore = -1;
     for (int i = 0; i < static_cast<int>(options.size()); ++i) {
@@ -73,9 +107,34 @@ int choose(const std::vector<Option>& options, World& w) {
         if (key == last) s *= tune::switch_hysteresis;            // changing our mind has a cost
         if (w.lockTurns > 0 && !emergency && key == w.lock) s = 1e9f;  // locked after flip-flopping
         if (w.stuckTurns > 0 && key == w.stuck) s *= tune::stuck_factor;  // it left us bouncing in place
+        if (teamCall) {
+            if (callRetreat && o.kind == OptionKind::fight) continue;
+            if (callRetreat && o.kind == OptionKind::flee) s = std::max(s, 5e8f);
+            if (callFight >= 0 && !hurt && o.kind == OptionKind::fight && o.target == callFight) s = std::max(s, 5e8f);
+        } else if (committed) {
+            if (w.commitKind == static_cast<int>(OptionKind::flee) && o.kind == OptionKind::fight) continue;
+            if (w.commitKind == static_cast<int>(OptionKind::fight) && o.kind == OptionKind::fight && o.target == w.commitTarget)
+                s = std::max(s, 5e8f);
+        }
+        if constexpr (kTracing) {
+            // Lab exploration overrides locks: a declined fight is never picked, a forced one always.
+            if (w.exploreMode == 1 && o.kind == OptionKind::fight) continue;
+            if ((w.exploreMode == 2 || w.exploreMode == 3) && i == w.exploreForced) s = 2e9f;
+        }
         if (s > bestScore) { bestScore = s; best = i; }
     }
     if (best < 0) return best;
+    // Start a commitment when we enter a fight or a flight (it runs out, then we decide afresh).
+    if (tune::fight_commit_rounds > 0) {
+        const auto& b = options[static_cast<std::size_t>(best)];
+        const bool fightNow = b.kind == OptionKind::fight, fleeNow = b.kind == OptionKind::flee;
+        const bool same = w.round < w.commitUntil && w.commitKind == static_cast<int>(b.kind) && (fleeNow || w.commitTarget == b.target);
+        if ((fightNow || fleeNow) && !same) {
+            w.commitKind = static_cast<int>(b.kind);
+            w.commitTarget = b.target;
+            w.commitUntil = w.round + tune::fight_commit_rounds;
+        }
+    }
     if (w.lockTurns > 0) --w.lockTurns;
     if (w.stuckTurns > 0) --w.stuckTurns;
 

@@ -226,6 +226,19 @@ public:
     // An ally's carried gems by draft slot (-1 when unknown or dead).
     int allyGems(int slot) const;
     void spentAbility(int slot) { ready_[slot] = 0; }
+    // Lab fight data (traced builds only): features of this turn's best-scored fight option, and
+    // the exploration state (a share of contacts do the opposite of the scorer for a while).
+    struct FightFeat {
+        int round = -1, enemy = -1, us = 0, them = 0, ghosts = 0, tgtBag = 0, theirBags = 0, enemyStuns = 0, tx = 0, ty = 0, dist = 0;
+        float score = -1, edge = 0, ourHp = 0, theirHp = 0, ourDps = 0, theirDps = 0, tgtHpFrac = 0, theirHpFrac = 0, monster = 0, winChance = 0;
+    };
+    // combatBotv3 commitment: once we pick a fight (or a flight) we keep it until commitUntil.
+    int commitKind = -1, commitTarget = -1, commitUntil = -1;
+    FightFeat bestFight;
+    int lastContactRound = -100, exploreUntil = -1, exploreMode = 0;  // mode 1: declined, 2: forced
+    int exploreForced = -1;  // option index forced this turn (mode 2)
+    // Allies (not us) within `radius` of `at` with a stun off cooldown (host reads: lab only).
+    int alliesStunReadyNear(cambc::vec2 at, int radius) const;
 
 private:
     void loadNearbyCamps();

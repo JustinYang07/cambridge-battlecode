@@ -71,6 +71,13 @@ void Trace::legend() {
     for (auto a : s.altars) j.array().value(static_cast<long long>(a.x)).value(static_cast<long long>(a.y)).endArray();
     j.endArray();
     write(j.view());
+    // Bush tiles (lab analysis: deaths near bushes), as flat x,y pairs.
+    j.reset();
+    j.raw("@B");
+    j.array();
+    for (auto b : cambc::map::bushes().positions()) j.value(static_cast<long long>(b.x)).value(static_cast<long long>(b.y));
+    j.endArray();
+    write(j.view());
     std::fflush(stdout);
 }
 

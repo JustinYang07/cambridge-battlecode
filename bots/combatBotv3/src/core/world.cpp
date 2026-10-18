@@ -489,6 +489,28 @@ bool World::allyVisible(int s) const {
     return (allyVisMask_ >> s) & 1u;
 }
 
+int World::alliesStunReadyNear(bc::vec2 at, int radius) const {
+    int n = 0;
+    for (int i = 0; i < static_cast<int>(allyHandles_.size()) && i < 8; ++i) {
+        if (i == slot) continue;
+        const auto p = allyPosCached(i);
+        if (p.x < 0 || dist(p, at) > radius) continue;
+        try {
+            const auto abilities = allyHandles_[static_cast<std::size_t>(i)].abilities();
+            for (const auto& a : abilities) {
+                const auto& info = a.info();
+                const auto* aoe = info ? std::get_if<bc::ability_aoe_damage>(&*info) : nullptr;
+                if ((a.is_cc() || (aoe && aoe->duration > 0)) && a.cooldown() == 0) {
+                    ++n;
+                    break;
+                }
+            }
+        } catch (const bc::error&) {
+        }
+    }
+    return n;
+}
+
 int World::allyGems(int s) const {
     if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return -1;
     if (!allyVisible(s)) return -1;

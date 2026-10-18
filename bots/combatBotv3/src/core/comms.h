@@ -66,6 +66,8 @@ int claimOf(int slot);
 int claimBracket(int slot);
 // Bit per allied slot (excluding exceptSlot) attacking this enemy champion.
 unsigned focusMask(int enemyIndex, int exceptSlot);
+// combatBotv3: the enemy (roster index) the ally in `slot` claims to be fighting, or -1.
+int enemyOf(int slot);
 
 // ---- capture board (byte 5, only for teams of at most 5 bodies, where it is not a claim byte)
 // The champion that completes a capture writes the group there (7 bits, +1) with a bit that flips

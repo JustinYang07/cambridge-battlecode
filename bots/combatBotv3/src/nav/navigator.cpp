@@ -160,6 +160,35 @@ int bushNearAt(bc::vec2 t) {
     return d < 0 ? 3 : std::min(d, 3);
 }
 
+// combatBotv3: unseen bushes in the middle of the map, and the tiles around them (wider when
+// carrying gems): whoever waits in one ambushes anyone walking past. Bushes we can see into (our
+// ward on them) are fine. Only bushes within 10 tiles of us; false when there are none. The
+// centre bush list is built once (a per-call scan of the area cost ~30k fuel a turn).
+bool centreBushZone(const World& w, bc::bitboard& zone) {
+    static std::vector<bc::vec2> centre;
+    static bool built = false;
+    if (tune::centre_bush_ring < 0) return false;
+    if (!built) {
+        built = true;
+        const auto& st = Statics::get();
+        const float hx = static_cast<float>(st.width) / 2.0f, hy = static_cast<float>(st.height) / 2.0f;
+        for (auto t : bc::map::bushes().positions()) {
+            const float cx = std::abs(static_cast<float>(t.x) + 0.5f - hx) / hx, cy = std::abs(static_cast<float>(t.y) + 0.5f - hy) / hy;
+            if (std::max(cx, cy) <= tune::centre_bush_region) centre.push_back(t);
+        }
+    }
+    if (centre.empty()) return false;
+    const int ring = w.gems >= tune::centre_bush_gems ? tune::centre_bush_ring + 1 : tune::centre_bush_ring;
+    bool any = false;
+    for (const auto t : centre) {
+        if (dist(t, w.pos) > 10 || w.isVisible(t)) continue;
+        if (!any) zone.clear();
+        zone.draw_chebyshev(t, static_cast<float>(ring));
+        any = true;
+    }
+    return any;
+}
+
 struct ExMap {
     static constexpr int R = 5, N = 2 * R + 1, HB = R + 2, HN = 2 * HB + 1;
     bool on = false, melee = false;
@@ -420,10 +449,17 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
         }
         if (any) avoid = &merged;
     }
-    // Set paths: far from the goal, walk the precomputed field (built now if it is missing).
+    // combatBotv3: unseen centre bushes near us (zone built once here, used by both walks below).
+    bc::bitboard bushes;
+    const bool haveBushes = tune::centre_bush_ring >= 0 && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor &&
+                            centreBushZone(w, bushes);
+    // Set paths: far from the goal, walk the precomputed field (built now if it is missing). Its
+    // step never enters a bush zone; with no step around one, the search below decides.
     if (tune::set_paths && far.read && aim.x >= 0 && dist(w.pos, aim) > tune::field_walk_tiles) {
         if (far.read(far.id, w.pos) < 0 && far.ensure && bc::fuel_remaining() > tune::field_build_fuel) far.ensure(far.id);
-        if (stepByField(w, far, blockedNow, avoid, allowDash, aim)) return true;
+        bc::bitboard farAvoid;
+        if (haveBushes) farAvoid = (avoid ? *avoid | bushes : bushes) & ~goals;
+        if (stepByField(w, far, blockedNow, haveBushes ? &farAvoid : avoid, allowDash, aim)) return true;
     }
     bc::distance_field field;
     bc::bitboard visited, here;
@@ -432,7 +468,37 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     // While a decision is marked stuck (we were bouncing between two tiles), ignore the avoid
     // layer: a safe route and the plain fallback pointing opposite ways caused exactly that.
     // Short of fuel: skip the safe-route search (one path search fewer) rather than overrun.
-    if (avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
+    // combatBotv3: route around unseen centre bushes (plus the usual avoid zones) when the detour
+    // is short; otherwise fall through to the usual avoid handling.
+    bool bushRoute = false;
+    {
+        if (haveBushes) {
+            auto zone = (avoid ? *avoid | bushes : bushes) & ~goals;
+            if (zone.is_set(w.pos)) {
+                bc::bitboard bubble;
+                bubble.clear();
+                bubble.draw_chebyshev(w.pos, 1.0f);
+                zone = zone & ~bubble;
+            }
+            auto walls = blockedNow | zone;
+            walls.set(w.pos, false);
+            field.compute_to(walls, goals, here, visited);
+            if (visited.is_set(w.pos)) {
+                bc::distance_field plain;
+                bc::bitboard plainVisited;
+                plain.compute_to(blockedNow, goals, here, plainVisited);
+                const int detour = plainVisited.is_set(w.pos) ? static_cast<int>(field.get(w.pos)) - static_cast<int>(plain.get(w.pos)) : 0;
+                const int cap = w.gems >= tune::centre_bush_gems ? tune::centre_bush_detour_gems : tune::centre_bush_detour;
+                if (detour <= cap) {
+                    blockedNow = walls;
+                    bushRoute = true;
+                    if (detour > 0) trace().note("around a centre bush");
+                }
+            }
+            if (!bushRoute) visited.clear();
+        }
+    }
+    if (!bushRoute && avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
         // First try a route that never enters the avoided zones. If we are already inside one,
         // free a small bubble around us so the safe route can lead out of it; otherwise every
         // step from in here fell back to the plain route, which pointed back the way we came.

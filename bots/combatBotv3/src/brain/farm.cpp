@@ -818,6 +818,17 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (o.need > 1) o.mul("dash: solo only", 0.05f);
         o.c.note << "dash in";
     }
+    // combatBotv3: mid-game, farm where an ally is (fights find us together, not one by one).
+    if (tune::group_farm_bonus != 1.0f && w.round >= tune::group_farm_round) {
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPosCached(sl);
+            if (p.x >= 0 && dist(p, g.center) <= tune::group_farm_radius) {
+                o.mul("ally near", tune::group_farm_bonus);
+                break;
+            }
+        }
+    }
     o.finish();
     return o;
 }
@@ -893,7 +904,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);

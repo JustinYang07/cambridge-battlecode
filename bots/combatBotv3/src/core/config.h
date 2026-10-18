@@ -266,9 +266,44 @@ inline constexpr int fight_mid_round = 300;
 inline constexpr float fight_mid_win_chance = 0.70f;
 inline constexpr float fight_mid_factor = 0.3f;     // 1: off
 inline constexpr int fight_mid_mode = 1;            // 0: win-chance cutoff; 1: pot odds (p x gain vs (1-p) x stake)
-inline constexpr float death_time_value = 36.0f;    // pot odds: gem-equivalents of a death (~13 farming over 60 rounds; 36 beat 12 and 24 in A/B)
+inline constexpr float death_time_value = 12.0f;    // pot odds: gem-equivalents of a death (~13 farming over 60 rounds). With model 2: 12 -8, 18 -27, 24 -10, 30 -19, 36 -28 vs model 0 at 36 (1,020 games each)
+// Lab fight data (traced builds only): on a new contact (no enemy within 6 tiles for 10 rounds),
+// this share of contacts does the opposite of the fight scorer for 10 rounds (0: off; data runs).
+inline constexpr float fight_explore_rate = 0.0f;
+inline constexpr bool fight_explore_even = false;   // lab data mode: always fight the best target when our count near it >= theirs
+// combatBotv3 team fighting (each an A/B switch):
+// 1. commitment: once we pick a fight (or a flight) we keep it this many rounds unless below
+//    commit_break_hp; fleeing never attacks (flee_no_attack).
+inline constexpr int fight_commit_rounds = 0;       // 0: off
+inline constexpr float commit_break_hp = 0.25f;
+inline constexpr bool flee_no_attack = false;
+// 2. team call: allies within team_call_radius claiming a fight or a retreat vote; we follow the majority.
+inline constexpr bool team_fight_call = false;
+inline constexpr int team_call_radius = 6;
+// 4. group fights: fewer than group_fight_min of us around the target scores x this (1: off);
+//    from group_farm_round, camps with an ally within group_farm_radius score x group_farm_bonus.
+inline constexpr float group_fight_alone_factor = 0.3f;  // A/B (204 games): +35 +/- 58, deaths 5.58 -> 5.24, banked 831 -> 862
+inline constexpr int group_fight_min = 2;
+inline constexpr int group_fight_radius = 6;
+inline constexpr float group_farm_bonus = 1.2f;     // 1: off
+inline constexpr int group_farm_round = 300;
+inline constexpr int group_farm_radius = 8;
 inline constexpr float fight_win_fit_a = -0.144f;
 inline constexpr float fight_win_fit_b = 0.510f;
+// Fight win model: 0 the curve above; 1 the edge curve refit on 1,800 self-play games (resolved
+// fights we took, win = first death near the fight is theirs); 2 eight features on the same fights.
+inline constexpr int fight_win_model = 2;
+inline constexpr float fight_win_refit_a = -1.1700f;
+inline constexpr float fight_win_refit_b = 0.4630f;
+inline constexpr float fwm_bias = -0.9515f;
+inline constexpr float fwm_ln_edge = 1.0331f;
+inline constexpr float fwm_ln_hp = 0.3904f;       // ln(our side's health / theirs)
+inline constexpr float fwm_ln_dps = -0.6413f;     // ln(our side's damage / theirs)
+inline constexpr float fwm_lead = -0.3622f;       // our count - theirs around the target
+inline constexpr float fwm_them = 0.2765f;        // their count
+inline constexpr float fwm_their_hp = 1.5133f;    // their side's health fraction
+inline constexpr float fwm_target_hp = -1.0760f;  // the target's health fraction
+inline constexpr float fwm_dist = -0.1519f;       // tiles to the target
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
 inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
 inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
@@ -515,6 +550,14 @@ inline constexpr int flee_dash_gain = 1;            // flee home: dash when it b
 inline constexpr bool flee_dash_then_walk = true;   // flee home: walk on after a dash in the same turn
 inline constexpr int flee_bush_bonus = 4;           // flee home: a bush tile is worth this many steps (0: off)...
 inline constexpr int flee_bush_chase = 8;           // ...while the nearest enemy is 3 to this many tiles away
+// combatBotv3: walk around unseen bushes in the middle of the map (ambush spots): the bush and
+// this many tiles around it are avoided while a route around costs at most centre_bush_detour extra
+// steps; carrying centre_bush_gems or more, one tile wider and a longer detour is accepted.
+inline constexpr int centre_bush_ring = -1;         // -1: off (A/B: 3 detours a game, deaths near bushes not lower, -26 banked)
+inline constexpr float centre_bush_region = 0.35f;  // middle: within this fraction of the half-width/height from the centre
+inline constexpr int centre_bush_detour = 4;
+inline constexpr int centre_bush_gems = 20;
+inline constexpr int centre_bush_detour_gems = 8;
 inline constexpr bool flee_homeward = true;         // fleeing: equally quick escapes go toward home; else walk home
 inline constexpr bool tank_opens = true;            // ranged hold fire on a sleeping camp until the tank is beside it...
 inline constexpr int tank_open_radius = 15;         // ...if a tank claiming it is this close to the camp...

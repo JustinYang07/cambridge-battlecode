@@ -5,6 +5,7 @@
 #include "../combat/combat.h"
 #include "../core/comms.h"
 #include "../core/config.h"
+#include "../core/trace.h"
 #include "../nav/navigator.h"
 #include "../strategy/cohesion.h"
 #include "../strategy/regroup.h"
@@ -21,11 +22,14 @@ void fight(World& w, std::vector<Option>& out) {
         // Fights are team against team: the target plus enemies close enough to join it, against
         // us plus allies near it or already attacking it (shared focus). Each side's time to wipe
         // the other decides who wins; we all hit the target, so it falls in e.hp / our damage.
-        float theirHp = 0, theirDps = 0;
-        int theirCount = 0;
+        float theirHp = 0, theirDps = 0, theirMaxHp = 0;
+        int theirCount = 0, theirBags = 0, theirStuns = 0;
         for (const auto& o : w.enemies)
             if (o.hp > 0 && dist(o.pos, e.pos) <= tune::fight_join_radius) {
                 theirHp += o.hp;
+                theirMaxHp += o.maxHp;
+                theirBags += o.gems;
+                theirStuns += o.stun ? 1 : 0;
                 theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
                 ++theirCount;
             }
@@ -45,8 +49,9 @@ void fight(World& w, std::vector<Option>& out) {
         // Monsters fight for them too: the camp hits we are already taking, or the camps around the
         // target that whoever fights there may pull (35% of our deaths to champions came after
         // monster hits in the 15 rounds before, 23% of theirs).
+        float monsters = 0;
         if (tune::fight_monster_damage) {
-            const float monsters = std::max(w.incoming, tune::fight_spot_camp_weight * w.incomingCampDamage(e.pos));
+            monsters = std::max(w.incoming, tune::fight_spot_camp_weight * w.incomingCampDamage(e.pos));
             theirDps += monsters;
         }
         auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
@@ -95,9 +100,25 @@ void fight(World& w, std::vector<Option>& out) {
         // likely to win (mode 0), or whose expected gain beats the expected loss (mode 1). Win chance from the edge, fitted on traced fights from round 300 (a win:
         // an enemy dies near the target before this champion does, within 15 rounds); it levels off
         // near 70-75%, so a 70% cutoff keeps only lopsided fights (edge ~7+).
+        // Win chance (first death near the fight is theirs). Model 0: the first edge curve; 1: the edge
+        // curve refit on 1,800 self-play games; 2: eight features fitted on the same fights (held-out
+        // AUC 0.705 vs 0.662 for edge alone).
+        const float lnEdge = std::log(std::max(edge, 0.05f));
+        float z;
+        if (tune::fight_win_model == 2) {
+            z = tune::fwm_bias + tune::fwm_ln_edge * lnEdge +
+                tune::fwm_ln_hp * std::log(std::max(ours.hp, 1.0f) / std::max(theirHp, 1.0f)) +
+                tune::fwm_ln_dps * std::log(std::max(ours.dps, 1.0f) / std::max(theirDps, 1.0f)) +
+                tune::fwm_lead * static_cast<float>(ours.count - theirCount) + tune::fwm_them * static_cast<float>(theirCount) +
+                tune::fwm_their_hp * (theirHp / std::max(theirMaxHp, 1.0f)) + tune::fwm_target_hp * (e.hp / std::max(e.maxHp, 1.0f)) +
+                tune::fwm_dist * static_cast<float>(dist(w.pos, e.pos));
+        } else if (tune::fight_win_model == 1) {
+            z = tune::fight_win_refit_a + tune::fight_win_refit_b * lnEdge;
+        } else {
+            z = tune::fight_win_fit_a + tune::fight_win_fit_b * lnEdge;
+        }
+        const float winChance = 1.0f / (1.0f + std::exp(-z));
         if (w.round >= tune::fight_mid_round && !e.channeling && tune::fight_mid_factor != 1.0f) {
-            const float z = tune::fight_win_fit_a + tune::fight_win_fit_b * std::log(std::max(edge, 0.05f));
-            const float winChance = 1.0f / (1.0f + std::exp(-z));
             if (tune::fight_mid_mode == 1) {
                 // Pot odds: what a win gains (their bag, the kill gold, them out for 60 rounds)
                 // against what a loss costs (our bag, us out for 60 rounds). Carrying a big bag we
@@ -182,12 +203,37 @@ void fight(World& w, std::vector<Option>& out) {
                 o.c.note << "engage " << withMe << "v" << them << "; ";
             }
         }
+        // combatBotv3: fight as a group. Fewer than group_fight_min of us around the target (allies
+        // near it or beside us), and it is neither channelling nor able to hit us: leave it.
+        if (tune::group_fight_alone_factor != 1.0f && !e.channeling && dist(e.pos, w.pos) > e.range) {
+            int bodies = 1;
+            for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+                if (sl == w.slot) continue;
+                const auto p = w.allyPosCached(sl);
+                if (p.x >= 0 && (dist(p, e.pos) <= tune::group_fight_radius || dist(p, w.pos) <= 3)) ++bodies;
+            }
+            if (bodies < tune::group_fight_min) o.mul("no group with us", tune::group_fight_alone_factor);
+        }
         o.mul("role appetite", w.role().fightAppetite);
         // combatBotv3: mid-capture, an enemy we cannot already hit does not pull us off the tiles.
         if (dist(e.pos, w.pos) > w.range && captureHold(w)) o.mul("finishing a capture", tune::capture_hold_fight_factor);
         o.c.note << ours.count << "v" << theirCount << ": kill in " << static_cast<int>(turnsToKill) << ", edge x10 "
                  << static_cast<int>(edge * 10.0f);
         o.finish();
+        if constexpr (kTracing) {
+            // Lab fight data: keep the features of the best-scored fight this turn.
+            auto& f = w.bestFight;
+            if (f.round != w.round || o.score > f.score) {
+                int ghosts = 0;
+                for (const auto& g : w.ghosts) {
+                    const int age = w.round - g.round;
+                    if (age > 0 && age <= 5 && dist(g.pos, e.pos) <= tune::fight_join_radius + age) ++ghosts;
+                }
+                f = {w.round, e.index, ours.count, theirCount, ghosts, e.gems, theirBags, theirStuns, e.pos.x, e.pos.y, dist(w.pos, e.pos),
+                     o.score, edge, ours.hp, theirHp, ours.dps, theirDps, e.hp / std::max(e.maxHp, 1.0f),
+                     theirHp / std::max(theirMaxHp, 1.0f), monsters, winChance};
+            }
+        }
         out.push_back(std::move(o));
     }
 }
