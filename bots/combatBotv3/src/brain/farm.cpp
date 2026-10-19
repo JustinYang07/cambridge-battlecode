@@ -4,6 +4,7 @@
 #include <cmath>
 #include "../combat/combat.h"
 #include "../core/comms.h"
+#include "../core/budget.h"
 #include "../core/config.h"
 #include "../core/profile.h"
 #include "../core/trace.h"
@@ -383,6 +384,8 @@ int teamCamp(const World& w) {
 // Rush now: it is the rush camp, the opening is over, and enough of us are alive to take it.
 bool teamRush(const World& w, const GroupInfo& g) {
     if (g.id == teamCamp(w)) return true;
+    // combatBotv3: the team opening's camp: the whole team gathers and takes it together.
+    if (mapplan::read().teamOpening && g.id == mapplan::read().openingCamp && mapplan::openingActive(w)) return true;
     if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
     // alliesAlive works out of sight (ally positions do not: an unseen ally reads as absent).
     return w.alliesAlive >= tune::team_rush_min_alive;
@@ -469,10 +472,20 @@ Option scoreGroup(World& w, const Candidate& c) {
                                                   : std::max(0, __builtin_popcount(w.partyMates) - 1);  // less the keeper
         claims = std::max(claims, std::min(tune::max_team_per_camp - 1, movingOn));
     }
+    const float timeBeforeFight = o.c.time, multBeforeFight = o.c.mult;
+    const bool spellCandidate = o.kind == OptionKind::farm;
     if (o.kind == OptionKind::farm) {
         const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
         // Health we must keep to walk out of reach afterwards (monsters do not chase).
-        const auto solo = combat::campFight(w, g, left, 1);
+        auto solo = combat::campFight(w, g, left, 1);
+        // combatBotv3: kite farming: spells from outside the monsters' reach, no damage taken; kill
+        // time is the camp's remaining health over our spell damage (and any other kiter's on it).
+        const bool kite = kiteFarmable(w, g);
+        if (kite) {
+            solo.damage = 0;
+            solo.hitting = 0;
+            solo.turns = left * g.totalHealth / std::max(w.kit.spellDps, 1.0f);
+        }
         const float reserve = solo.hitting * (tune::escape_margin_turns + 1.0f);
         const auto& role = w.role();
         const float budget = w.maxHp * role.maxFightHpUse - reserve;
@@ -513,9 +526,22 @@ Option scoreGroup(World& w, const Candidate& c) {
         };
         int need = 1;
         while (need < tune::max_team_per_camp && damageFor(need) > budget) ++need;
+        // combatBotv3: a camp nearer their spawn than ours is where they find us mid-fight: take it
+        // with enough of us to win that fight too, or not at all (elkring vs alfungus: Ren and Varg
+        // took an elk 26 from our spawn, 19 from theirs; three of them walked over and killed both,
+        // user). Not while their team is down (raids), nor on a team rush / team opening camp.
+        if (tune::enemy_side_min_party > 1 && w.enemiesAlive > 1 && !teamRush(w, g)) {
+            const auto& st = Statics::get();
+            if (dist(g.center, st.spawnCenter) > dist(g.center, st.enemySpawnCenter))
+                need = std::max(need, std::min(tune::enemy_side_min_party, std::max(w.alliesAlive, 1)));
+        }
+        // combatBotv3: down bodies, a ranged champion does not open a monster camp alone (elkring vs
+        // alfungus r83: Stellar woke g0's elk alone at 4v6 while four of them walked into our half).
+        if (tune::outnumbered_ranged_pair && w.ranged && !g.harmless && w.alliesAlive < w.enemiesAlive) need = std::max(need, 2);
         const int k = std::max(need, 1 + claims);
         const unsigned mates = comms::claimersMask(g.id, w.slot) | movingMates;
-        const auto fight = k == 1 ? solo : combat::campFight(w, g, left, k, share, mates);
+        auto fight = k == 1 || kite ? solo : combat::campFight(w, g, left, k, share, mates);
+        if (kite && k > 1) fight.turns = solo.turns / static_cast<float>(k);
         if (allyTanks) o.c.note << "ally tanking";
         else if (tankLeads) o.c.note << "tank soaks";
         if (role.followsParty && claims > 0) o.mul("support joins party", 1.5f);
@@ -662,6 +688,50 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (need == 1 && owners) o.mul("nearer ally claimed", tune::ally_claim_factor);
         if (w.gems > 0 && fight.damage > 0)
             o.mul("bag at risk", std::max(0.4f, 1.0f - tune::carry_risk_per_gem * w.gems * fight.damage / std::max(w.hp, 1.0f)));
+        // combatBotv3 spell clear as an option: a ranged champion whose damage spell outranges the
+        // monsters can kill the attacking ones alone with spells from outside their reach (camps only
+        // hit whoever attacks them, within monster range): no damage, no party, but spell speed. Score
+        // that version too (same reward and walk) and keep whichever is better.
+        // Only Stellar, and only far camps (opposite corners, their half: where nobody farms and a
+        // solo, damage-free clear is a steal), more so in a quiet game (farming on both sides).
+        const auto& stc = Statics::get();
+        const bool farCamp = static_cast<float>(dist(g.center, stc.spawnCenter)) >=
+                             tune::spell_clear_far_frac * static_cast<float>(std::max(stc.width, stc.height));
+        if (spellCandidate && tune::spell_clear_option && w.type == bc::champion_type::stellar && farCamp && !g.harmless && claims == 0 &&
+            combat::damageSpellRange(w) > tune::monster_range && w.kit.spellDps > 0) {
+            float attackersHp = 0, othersHp = 0;
+            if (mem.visibleNow) {
+                for (const auto& cs : w.camps)
+                    if (cs.groupId == g.id && cs.hp > 0) (cs.strength > 0 ? attackersHp : othersHp) += cs.hp;
+            } else {
+                for (const auto& m : g.killOrder) (m.strength > 0 ? attackersHp : othersHp) += m.health * left;
+            }
+            const float spellTurns = attackersHp / w.kit.spellDps + othersHp / std::max(combat::campDamagePerTurn(w, g), 1.0f);
+            const float spellTime = timeBeforeFight + spellTurns + tune::capture_turns;
+            const float spellMult = multBeforeFight;
+            const float normal = o.c.reward / std::max(o.c.time, 1.0f) * o.c.mult;
+            const float quiet = w.quietGame() ? tune::spell_clear_quiet_bonus : 1.0f;
+            // Forced steal (user): in a quiet game Stellar takes the far camp by spells, slow or not.
+            const bool force = tune::spell_clear_force_quiet && w.quietGame() &&
+                               std::max(stc.width, stc.height) >= tune::large_map_side;
+            const float viaSpells = o.c.reward / std::max(spellTime, 1.0f) * spellMult * quiet * (force ? tune::spell_clear_force_bonus : 1.0f);
+            if (viaSpells > normal || force) {
+                o.c.time = spellTime;
+                o.c.mult = spellMult;
+                o.kind = OptionKind::farm;
+                o.need = 1;
+                o.expectDamage = 0;
+                o.spellClear = true;
+                killTurns = spellTurns;
+                o.mul("spell clear (no damage)", quiet);
+                if (force) {
+                    o.mul("quiet game: steal it", tune::spell_clear_force_bonus);
+                    o.c.mult = spellMult * quiet * tune::spell_clear_force_bonus;
+                }
+                if (quiet > 1.0f) o.c.note << "quiet game; ";
+                o.c.note << "spell clear: " << static_cast<int>(spellTurns) << " turns; ";
+            }
+        }
     } else {
         o.turns("capture", tune::capture_turns);
         if (owners && !(captureShare(w, g.id) >= 1.0f && designatedKeeper(w, g.id))) o.mul("nearer ally capturing", tune::ally_claim_factor);
@@ -757,6 +827,22 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (const float mid = centreBonus(w, g); mid > 1.001f) o.mul("towards the middle", mid);
     // No invading without a numbers lead.
     if (!w.mayInvade() && w.theirHalf(g.center)) o.mul("their half: no lead", tune::no_invade_factor);
+    // combatBotv3: a hurt front-liner farms our half (elkring vs Rhodes r74: Ren at 42% walked into theirs).
+    if (!w.ranged && w.hpFrac() < tune::hurt_front_hp && w.theirHalf(g.center)) o.mul("hurt: not into their half", tune::hurt_front_factor);
+    if (w.invadeWithoutMelee(g.center)) o.mul("their half: no melee with us", tune::invade_no_melee_factor);
+    // combatBotv3: a ranged champion is the exposed one at a camp that is not clearly ours, all the
+    // more beside a bush that hides whoever waits in it (swirl: our team farmed the two centre camps,
+    // 8-9 tiles from each spawn beside the bush walls, and lost four of five by round 51 while the
+    // wolves on our side stood untouched; user). Risky: an enemy seen by it lately, or a bush beside it.
+    // A team rush or team opening is the whole team going together on purpose (stampede's gem camp).
+    if (tune::ranged_contested_factor < 1.0f && (w.ranged || tune::contested_all) && !teamRush(w, g)) {
+        const auto& st = Statics::get();
+        const float dOur = static_cast<float>(dist(g.center, st.spawnCenter)), dTheir = static_cast<float>(dist(g.center, st.enemySpawnCenter));
+        if (dOur > tune::own_side_ratio * dTheir) {
+            const bool seen = mem.enemyNearRound >= 0 && w.round - mem.enemyNearRound <= tune::contested_seen_rounds;
+            if (seen || bushBeside(g)) o.mul("contested: ranged exposed", tune::ranged_contested_factor);
+        }
+    }
     // Cohesion: farm around the leader (soft pull; banking and healing stay individual).
     if (const int lc = cohesion::leaderCamp(); lc >= 0 && !raiding) {
         if (g.id == lc) o.mul("with the leader", tune::cohesion_leader_bonus);
@@ -768,6 +854,9 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (w.chainFrom >= 0 && w.chainFrom != g.id && w.round - w.chainRound <= tune::chain_rounds &&
         mapplan::isNeighbour(w.chainFrom, g.id))
         o.mul("next to the last camp", tune::chain_bonus);
+    // combatBotv3: the team opening is on: everyone goes there first.
+    if (mapplan::read().teamOpening && !opening && mapplan::read().openingCamp >= 0 && mapplan::openingActive(w))
+        o.mul("team opening elsewhere", tune::team_opening_other_factor);
     if (opening) {
         o.mul("opening camp", tune::opening_camp_bonus);
         o.c.note << "opening";
@@ -788,6 +877,17 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (o.need > 1) o.mul("dash: solo only", 0.05f);
         o.c.note << "dash in";
     }
+    // combatBotv3: mid-game, farm where an ally is (fights find us together, not one by one).
+    if (tune::group_farm_bonus != 1.0f && w.round >= tune::group_farm_round) {
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPosCached(sl);
+            if (p.x >= 0 && dist(p, g.center) <= tune::group_farm_radius) {
+                o.mul("ally near", tune::group_farm_bonus);
+                break;
+            }
+        }
+    }
     o.finish();
     return o;
 }
@@ -796,6 +896,67 @@ Option scoreGroup(World& w, const Candidate& c) {
 
 float captureShareOf(const World& w, int groupId) { return captureShare(w, groupId); }
 bool allyHoldingOf(const World& w, int groupId) { return allyHolding(w, groupId); }
+
+// A bush within 3 tiles of the group's centre (worked out once per group).
+bool bushBeside(const GroupInfo& g) {
+    static std::vector<std::int8_t> cache;
+    const auto& st = Statics::get();
+    if (cache.empty()) cache.assign(st.groups.size(), -1);
+    if (g.id < 0 || g.id >= static_cast<int>(cache.size())) return false;
+    auto& c = cache[static_cast<std::size_t>(g.id)];
+    if (c < 0) {
+        c = 0;
+        try {
+            for (auto b : bc::map::bushes().positions())
+                if (dist(b, g.center) <= 3) { c = 1; break; }
+        } catch (const bc::error&) {
+        }
+    }
+    return c == 1;
+}
+
+bool kiteFarmable(const World& w, const GroupInfo& g) {
+    if (!tune::kite_farm || !w.ranged || g.harmless || w.kit.spellRange <= tune::monster_range || w.kit.spellDps <= 0) return false;
+    // Farming maps only: on combat maps a kiter farming alone split the team (eight -444, corners -360).
+    if (tune::kite_farming_maps_only && !shop::isFarmingMap()) return false;
+    for (int s = 0; s < w.allyCount && s < 8; ++s) {
+        if (s == w.slot || !meleeChampion(w.allyTypes[static_cast<std::size_t>(s)])) continue;
+        // A melee ally farming this camp makes it a party fight (it takes the hits); one passing by does not.
+        if (comms::claimOf(s) == g.id) return false;
+    }
+    return true;
+}
+
+bool captureHold(const World& w) {
+    // Rounds we have stood on the same reward's tiles (once per round; a gap restarts it).
+    static int lastRound = -100, lastGroup = -1, onSince = 0;
+    if (lastRound != w.round) {
+        int on = -1;
+        const auto& st = Statics::get();
+        // Only someone who was farming or capturing last turn can be standing on a reward's tiles.
+        const bool maybe = w.lastOption == static_cast<int>(OptionKind::capture) || w.lastOption == static_cast<int>(OptionKind::farm);
+        if (w.alive && maybe)
+            for (const auto& g : st.groups)
+                if (w.groups[static_cast<std::size_t>(g.id)].status == GroupStatus::reward && dist(g.center, w.pos) <= 6 && st.onGroup(g, w.pos)) {
+                    on = g.id;
+                    break;
+                }
+        if (on < 0 || on != lastGroup || lastRound != w.round - 1) onSince = w.round;
+        lastGroup = on;
+        lastRound = w.round;
+    }
+    // The answer holds for the round (fight scoring asks once per enemy).
+    static int answeredRound = -100;
+    static bool answer = false;
+    if (answeredRound == w.round) return answer;
+    answeredRound = w.round;
+    answer = false;
+    if (tune::capture_hold_radius <= 0 || lastGroup < 0 || w.round - onSince < tune::capture_hold_after) return false;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= tune::capture_hold_radius) return false;
+    answer = true;
+    return true;
+}
 
 bool teamRushOn(const World& w, int groupId) {
     if (groupId >= 0 && groupId == teamCamp(w)) return true;
@@ -809,52 +970,100 @@ void farm(World& w, std::vector<Option>& out) {
     // bound order until no remaining bound can beat the best real score. The walking
     // distance BFS is only consulted for the few groups that get scored.
     const auto& statics = Statics::get();
+    const auto preStart = bc::fuel_remaining();
     constexpr int kMax = 64;
     std::array<Candidate, kMax> pre;
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) * std::max(1.0f, tune::spell_clear_quiet_bonus) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);
+    // combatBotv3: lazy bounds. The exact bound (walking distance from the group's field, kill time,
+    // respawn wait) costs ~450 fuel a group, ~40k a turn on lanes. Every group first gets a cheap
+    // looser bound (straight-line distance to its nearest possible tile, no kill time); the exact
+    // one is worked out only for groups that come up for scoring, for the nearest camp, or for a
+    // forced pick. Bounds stay upper limits, so the same groups get scored.
+    static std::vector<int> extent;  // per group: farthest tile from its centre
+    if (extent.size() != statics.groups.size()) {
+        extent.assign(statics.groups.size(), 0);
+        for (const auto& g : statics.groups)
+            for (auto t : g.tiles) extent[static_cast<std::size_t>(g.id)] = std::max(extent[static_cast<std::size_t>(g.id)], dist(t, g.center));
+    }
+    std::array<std::uint8_t, kMax> exact{};
+    // Exact bound for pre[i]; false (and the entry emptied) when the group is not an option.
+    auto refine = [&](int i) -> bool {
+        auto& pc = pre[static_cast<std::size_t>(i)];
+        exact[static_cast<std::size_t>(i)] = 1;
+        const auto& g = *pc.group;
+        auto drop = [&] { pc.group = nullptr; return false; };
+            const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+            const bool dash = dashable(w, g);
+            if (!g.reachable && !dash) return drop();  // sealed off from our spawn: cannot be walked to
+            const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
+            // Exact walking distance once its field exists (a tighter bound prunes more groups),
+            // otherwise Chebyshev distance, which walking never beats.
+            bc::vec2 unused;
+            int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
+            // combatBotv3: a dasher whose straight line crosses only one-tile holes gets there by it.
+            if (tune::dash_straight_travel && !dash && w.kit.dashRange >= 2 && cheb > dist(w.pos, g.center) + 4 &&
+                statics.dashLine(w.pos, g.center) == 1)
+                cheb = dist(w.pos, g.center) + 1;
+            // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
+            // captured on foot, so it is not a farming option (it used to be scored by straight-line
+            // distance, and champions stood still for 1,500 rounds trying to path to it).
+            if (tune::skip_field_unreachable && cheb >= Navigator::unreachable) return drop();
+            if (cheb < 0) {
+                cheb = 1 << 20;
+                for (auto t : g.tiles) cheb = std::min(cheb, dist(w.pos, t));
+            }
+            cheb = std::max(0, cheb - reach);
+            const int wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - cheb) : 0;
+            if (wait > 60) return drop();  // too far in the future to plan around
+            float reward = static_cast<float>(g.gems) * gemV + static_cast<float>(g.gold) * gv;
+            // Keep the bound honest for the opening-gold bonus (applied per group, not to all).
+            if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds) reward *= tune::opening_gold_bonus * 1.3f;
+            float minKill = 0;
+            if (mem.status != GroupStatus::reward) {
+                const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
+                minKill = g.totalHealth * left /
+                          (std::max(combat::campDamagePerTurn(w, g), 1.0f) * static_cast<float>(tune::max_team_per_camp));
+                // combatBotv3: a kiter takes it with spells alone (two of us at most): a slow kill.
+                if (kiteFarmable(w, g)) minKill = std::max(minKill, g.totalHealth * left / (std::max(w.kit.spellDps, 1.0f) * 2.0f));
+            }
+            // combatBotv3: a camp that would kill us before we killed it alone takes a party, and our
+            // share of it is at most half: halve the bound (an upper limit still). Without this the
+            // six two-elk corner camps on expanse (bound as if four of us killed them) took every
+            // scoring slot each turn and the wolf pair 37 tiles out was never scored at all.
+            if (tune::bound_party_share && mem.status != GroupStatus::reward && !g.harmless && comms::claimsOn(g.id, w.slot) == 0 &&
+                !teamRush(w, g) && g.id != mapplan::read().openingCamp && !kiteFarmable(w, g)) {
+                const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
+                const float soloTurns = g.totalHealth * left / std::max(combat::campDamagePerTurn(w, g), 1.0f);
+                if (soloTurns * g.totalStrength > w.maxHp * w.role().maxFightHpUse) reward *= 0.5f;
+            }
+            // Include the respawn wait: without it a respawning camp's bound looked huge, it took
+            // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
+            // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
+            const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
+        pc = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, dash};
+        return true;
+    };
     for (const auto& g : statics.groups) {
         if (n >= kMax) break;
-        const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         if (g.gems == 0 && g.gold == 0) continue;
-        const bool dash = dashable(w, g);
-        if (!g.reachable && !dash) continue;  // sealed off from our spawn: cannot be walked to
+        const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
-        // Exact walking distance once its field exists (a tighter bound prunes more groups),
-        // otherwise Chebyshev distance, which walking never beats.
-        bc::vec2 unused;
-        int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
-        // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
-        // captured on foot, so it is not a farming option (it used to be scored by straight-line
-        // distance, and champions stood still for 1,500 rounds trying to path to it).
-        if (tune::skip_field_unreachable && cheb >= Navigator::unreachable) continue;
-        if (cheb < 0) {
-            cheb = 1 << 20;
-            for (auto t : g.tiles) cheb = std::min(cheb, dist(w.pos, t));
-        }
-        cheb = std::max(0, cheb - reach);
-        const int wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - cheb) : 0;
-        if (wait > 60) continue;  // too far in the future to plan around
+        const int lb = std::max(0, dist(w.pos, g.center) - extent[static_cast<std::size_t>(g.id)] - reach);
+        const int wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - lb) : 0;
         float reward = static_cast<float>(g.gems) * gemV + static_cast<float>(g.gold) * gv;
-        // Keep the bound honest for the opening-gold bonus (applied per group, not to all).
         if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds) reward *= tune::opening_gold_bonus * 1.3f;
-        float minKill = 0;
-        if (mem.status != GroupStatus::reward) {
-            const float left = mem.status == GroupStatus::alive && mem.seenRound >= 0 ? mem.healthLeft : 1.0f;
-            minKill = g.totalHealth * left /
-                      (std::max(combat::campDamagePerTurn(w, g), 1.0f) * static_cast<float>(tune::max_team_per_camp));
-        }
-        // Include the respawn wait: without it a respawning camp's bound looked huge, it took
-        // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
-        // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
-        const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
-        pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, dash};
+        const float time = static_cast<float>(lb + wait) + tune::capture_turns;
+        exact[static_cast<std::size_t>(n)] = 0;
+        pre[static_cast<std::size_t>(n++)] = {&g, lb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, false};
+        if (!g.reachable) refine(n - 1);  // sealed: only a dash gets there, worked out now
     }
+    if (const auto now = bc::fuel_remaining(); preStart > now) budget::noteFarmPre(preStart - now);
     fuel::mark("farm.pre");
 
     const std::size_t first = out.size();  // this scorer's options start here
@@ -870,12 +1079,15 @@ void farm(World& w, std::vector<Option>& out) {
     int nearestOut = -1, nearestTravel = 1 << 20;
     // Fully score one candidate (walking distance, fight estimate) and add it to the options.
     unsigned long long costliest = 0;  // combatBotv3: the dearest camp scored this turn
+    const bool contact = !w.enemies.empty();
     auto scoreOne = [&](Candidate c) {
         // combatBotv2: past the first camp, stop before the rest of the turn runs out of fuel.
         // combatBotv3: leave room for one more camp as dear as the dearest so far (party fights read
         // each ally, so a camp can cost well over the 6k the cap assumes).
         const auto before = bc::fuel_remaining();
         if (scored > 0 && tune::farm_reserve > 0 && before < tune::farm_reserve + (tune::farm_reserve_adaptive ? costliest : 0)) return;
+        // combatBotv3 governor: keep execute's reserve and the scorers still to come.
+        if (scored > 0 && tune::fuel_governor && before < budget::farmTail(contact) + costliest + tune::farm_margin) return;
         const auto& g = *c.group;
         const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
         const int reach = mem.status == GroupStatus::reward ? 0 : w.range;
@@ -898,6 +1110,9 @@ void farm(World& w, std::vector<Option>& out) {
                 }
             }
         }
+        if (tune::dash_straight_travel && !c.dash && w.kit.dashRange >= 2 && travel > dist(w.pos, g.center) + 4 &&
+            Statics::get().dashLine(w.pos, g.center) == 1)
+            travel = std::max(0, dist(w.pos, g.center) + 1 - reach);
         // Beyond the BFS radius: estimate from straight-line distance (walls add ~25%).
         if (travel >= Navigator::unreachable) travel = static_cast<int>(static_cast<float>(c.travel) * 1.25f) + 4;
         if (c.travel > tune::bfs_radius * 2) return;
@@ -917,16 +1132,51 @@ void farm(World& w, std::vector<Option>& out) {
         out.push_back(std::move(o));
         if (const auto now = bc::fuel_remaining(); before > now) costliest = std::max(costliest, before - now);
     };
+    // Lazy picks: a heap of (key, index, exact?) entries. An entry popped before its group's exact
+    // bound is known gets it worked out and goes back in with the exact key (never higher), so the
+    // first exact entry popped is the true best.
+    struct Entry { float key; int i; bool exact; };
+    auto less = [](const Entry& x, const Entry& y) { return x.key < y.key; };
+    struct Heap { std::array<Entry, 2 * kMax> h; int size = 0; };
+    // keyOf: the heap order for an entry (higher first); eligible: may this entry be picked at all.
+    auto build = [&](Heap& hp, auto keyOf, auto eligible) {
+        hp.size = 0;
+        for (int i = 0; i < n; ++i)
+            if (pre[static_cast<std::size_t>(i)].group && eligible(i))
+                hp.h[static_cast<std::size_t>(hp.size++)] = {keyOf(i), i, exact[static_cast<std::size_t>(i)] == 1};
+        std::make_heap(hp.h.begin(), hp.h.begin() + hp.size, less);
+    };
+    // The best exact entry still in the heap (-1: none). Refines as it goes. combatBotv3 governor:
+    // once a camp is scored, stop (refining too) while the rest of the turn needs what is left.
+    auto popBest = [&](Heap& hp, auto keyOf, auto eligible) -> int {
+        while (hp.size > 0) {
+            if (scored > 0 && tune::fuel_governor &&
+                bc::fuel_remaining() < budget::farmTail(contact) + tune::farm_margin + std::max<unsigned long long>(costliest, 2000))
+                return -1;
+            std::pop_heap(hp.h.begin(), hp.h.begin() + hp.size, less);
+            const auto e = hp.h[static_cast<std::size_t>(--hp.size)];
+            if (!pre[static_cast<std::size_t>(e.i)].group || !eligible(e.i)) continue;
+            if (e.exact) return e.i;
+            if (!exact[static_cast<std::size_t>(e.i)] && !refine(e.i)) continue;
+            hp.h[static_cast<std::size_t>(hp.size++)] = {keyOf(e.i), e.i, true};
+            std::push_heap(hp.h.begin(), hp.h.begin() + hp.size, less);
+        }
+        return -1;
+    };
+    auto byTravel = [&](int i) { return -static_cast<float>(pre[static_cast<std::size_t>(i)].travel); };
+    auto byBound = [&](int i) { return pre[static_cast<std::size_t>(i)].bound; };
+    auto any = [](int) { return true; };
     // The nearest camp that is up is always scored too (it may earn the nearest-camp bonus).
     int nearestUp = -1;
-    for (int i = 0, bestD = 1 << 20; i < n; ++i) {
-        const auto& pc = pre[static_cast<std::size_t>(i)];
-        if (pc.group && w.groups[static_cast<std::size_t>(pc.group->id)].status != GroupStatus::respawning &&
-            !(rotateOnCapture(w) && w.groups[static_cast<std::size_t>(pc.group->id)].status == GroupStatus::reward &&
-              allyHolding(w, pc.group->id)) &&
-            pc.travel < bestD) {
-            bestD = pc.travel;
-            nearestUp = pc.group->id;
+    {
+        auto up = [&](int i) { return w.groups[static_cast<std::size_t>(pre[static_cast<std::size_t>(i)].group->id)].status != GroupStatus::respawning; };
+        Heap hp;
+        build(hp, byTravel, up);
+        for (int i; (i = popBest(hp, byTravel, up)) >= 0;) {
+            const int id = pre[static_cast<std::size_t>(i)].group->id;
+            if (rotateOnCapture(w) && w.groups[static_cast<std::size_t>(id)].status == GroupStatus::reward && allyHolding(w, id)) continue;
+            nearestUp = id;
+            break;
         }
     }
     // The route's and the loop's camps are always scored, whatever their bounds.
@@ -934,31 +1184,55 @@ void farm(World& w, std::vector<Option>& out) {
     int rallyGroup = -1;
     if (tune::gem_rally_bonus != 1.0f)
         for (int i = 0; i < n && rallyGroup < 0; ++i)
-            if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0) rallyGroup = pg->id;
-    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup})
+            if (const auto* pg = pre[static_cast<std::size_t>(i)].group; pg && pg->gems > 0 && comms::claimsOn(pg->id, w.slot) > 0 &&
+                (exact[static_cast<std::size_t>(i)] || refine(i)))
+                rallyGroup = pg->id;
+    // combatBotv3 forced steal: in a quiet game Stellar always scores the far camp with the most gems.
+    int stealGroup = -1;
+    if (tune::spell_clear_option && tune::spell_clear_force_quiet && w.type == bc::champion_type::stellar && w.quietGame() &&
+        std::max(statics.width, statics.height) >= tune::large_map_side) {
+        for (;;) {
+            int bestGems = 0, bestI = -1;
+            for (int i = 0; i < n; ++i) {
+                const auto* pg = pre[static_cast<std::size_t>(i)].group;
+                if (!pg || pg->harmless || pg->gems <= bestGems) continue;
+                if (static_cast<float>(dist(pg->center, statics.spawnCenter)) <
+                    tune::spell_clear_far_frac * static_cast<float>(std::max(statics.width, statics.height)))
+                    continue;
+                bestGems = pg->gems;
+                bestI = i;
+            }
+            if (bestI < 0) break;
+            if (!exact[static_cast<std::size_t>(bestI)] && !refine(bestI)) continue;
+            stealGroup = pre[static_cast<std::size_t>(bestI)].group->id;
+            break;
+        }
+    }
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup, stealGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
+                    if (!exact[static_cast<std::size_t>(i)] && !refine(i)) break;
                     auto c = pre[static_cast<std::size_t>(i)];
                     pre[static_cast<std::size_t>(i)].group = nullptr;
                     scoreOne(c);
                     break;
                 }
-    for (int round = 0; round < n; ++round) {
-        // Selection instead of a full sort: we usually stop after a handful.
-        int pick = -1;
-        for (int i = 0; i < n; ++i)
-            if (pre[static_cast<std::size_t>(i)].group && (pick < 0 || pre[static_cast<std::size_t>(i)].bound > pre[static_cast<std::size_t>(pick)].bound))
-                pick = i;
-        if (pick < 0) break;
-        auto c = pre[static_cast<std::size_t>(pick)];
-        pre[static_cast<std::size_t>(pick)].group = nullptr;
-        // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
-        // Traced builds score a few more so the trace can show runners-up; submissions stop as soon
-        // as no bound can beat the best (a bound is an upper limit on the score).
-        if ((c.bound < best && scored >= (kTracing ? tune::trace_candidates : 1)) || scored >= maxScored) break;
+    {
+        Heap hp;
+        build(hp, byBound, any);
+        for (int pick; (pick = popBest(hp, byBound, any)) >= 0;) {
+            auto c = pre[static_cast<std::size_t>(pick)];
+            pre[static_cast<std::size_t>(pick)].group = nullptr;
+            // Stop when nothing left can win, and never score more than a handful (~6k fuel each).
+            // Traced builds score a few more so the trace can show runners-up; submissions stop as soon
+            // as no bound can beat the best (a bound is an upper limit on the score).
+            const int minScored = kTracing ? tune::trace_candidates
+                                  : tune::rich_fuel > 0 && fuelLeft >= tune::rich_fuel ? tune::min_scored_rich : 1;
+            if ((c.bound < best && scored >= minScored) || scored >= maxScored) break;
 
-        scoreOne(c);
+            scoreOne(c);
+        }
     }
     // The bound ignores whether we can take a camp: when every group it ranked first turned out
     // infeasible (corners' rich elk groups, "too strong" for one champion) the best score sat below
@@ -966,18 +1240,17 @@ void farm(World& w, std::vector<Option>& out) {
     // also score the nearest groups not yet looked at.
     // Also when the best is a party camp nobody else is coming to (Cassi and Issac held at an elk
     // for 30+ turns on collision while the wolves they could solo were never scored).
-    if (best < tune::idle_rescue_score || bestNeedsHelp)
+    if (best < tune::idle_rescue_score || bestNeedsHelp) {
+        Heap hp;
+        build(hp, byTravel, any);
         for (int extra = 0; extra < tune::idle_rescue_groups; ++extra) {
-            int pick = -1;
-            for (int i = 0; i < n; ++i)
-                if (pre[static_cast<std::size_t>(i)].group &&
-                    (pick < 0 || pre[static_cast<std::size_t>(i)].travel < pre[static_cast<std::size_t>(pick)].travel))
-                    pick = i;
+            const int pick = popBest(hp, byTravel, any);
             if (pick < 0) break;
             auto c = pre[static_cast<std::size_t>(pick)];
             pre[static_cast<std::size_t>(pick)].group = nullptr;
             scoreOne(c);
         }
+    }
     // Gems-only mode: from the mid game, while the enemy has banked gems_only_lag more than us, the
     // whole team leaves gold-only camps for gem camps. Only when some gem camp is worth going to:
     // otherwise gold scored below idling and all six stood at spawn for 1,700 rounds (lanes), never

@@ -19,6 +19,8 @@ void refresh(const World& w);  // re-reads the inventory only where buying is po
 void spend(World& w);
 // Keep one altar lock (and optionally a teleport crystal) in the bag; 10 gold each, spawn only.
 void buyConsumables(World& w);
+// combatBotv3: a farming map (large, or medium with a long walk between the spawns): see shop.cpp.
+bool isFarmingMap();
 bool hasPassive(cambc::item_passive passive);
 // Progress through the build order, for traces: "jungle-str 3/5".
 std::string progress();

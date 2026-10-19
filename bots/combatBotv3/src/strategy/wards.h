@@ -7,11 +7,15 @@
 // backs off when out of charges.
 // Bush wards (tune::ward_bushes): moving toward a bush tile we cannot see into, one ward goes on
 // it, so whoever hides there is seen before we arrive.
+#include <cambc.h>
 class World;
 
 namespace wards {
 
 // Try to place a ward this turn. Call after the turn's action, while alive and not channelling.
 void update(World& w);
+// combatBotv3: Chebyshev distance from t to the nearest bush (0: a bush), from the table the bush
+// wards build on a turn with fuel to spare; -1 until then (or on a map without bushes: 255).
+int bushDistance(cambc::vec2 t);
 
 } // namespace wards

@@ -1,4 +1,7 @@
 #include "bot.h"
+#include <cstdint>
+#include <variant>
+#include <string>
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
@@ -11,6 +14,7 @@
 #include "core/config.h"
 #include "core/fixed_str.h"
 #include "nav/fields.h"
+#include "core/budget.h"
 #include "core/fuel.h"
 #include "core/profile.h"
 #include "core/trace.h"
@@ -20,6 +24,88 @@
 namespace bc = cambc;
 
 namespace {
+
+// ---- lab fight data (traced builds only)
+// Deterministic per-round, per-slot coin in [0, 1).
+float labCoin(int round, int slot) {
+    std::uint32_t h = static_cast<std::uint32_t>(round) * 2654435761u ^ static_cast<std::uint32_t>(slot + 1) * 40503u ^ 0x9e3779b9u;
+    h ^= h >> 15;
+    h *= 0x2c1b3c6du;
+    h ^= h >> 12;
+    return static_cast<float>(h & 0xffffu) / 65536.0f;
+}
+
+// A new contact, the same rule the fight dataset uses (a fight row due this turn, none in the
+// previous 10 rounds), flips the fight decision with probability tune::fight_explore_rate for 10
+// rounds: decline the fight the scorer wants, or take the best fight it would not.
+void exploreFights(World& w, std::vector<Option>& options) {
+    w.exploreMode = 0;
+    w.exploreForced = -1;
+    const auto& f = w.bestFight;
+    if (f.round != w.round || f.dist > 8) return;  // no fight row this turn
+    // Lab mode: take every fight where we are at least even in numbers around the target (visible),
+    // so the data has no selection bias in that range.
+    if (tune::fight_explore_even && f.us >= f.them) {
+        for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+            const auto& o = options[static_cast<std::size_t>(i)];
+            if (o.kind == OptionKind::fight && o.target == f.enemy) {
+                w.exploreMode = 3;
+                w.exploreForced = i;
+                trace().note("explore: even, took the fight");
+                return;
+            }
+        }
+    }
+    if (tune::fight_explore_rate > 0 && w.round - w.lastContactRound >= 10 && labCoin(w.round, w.slot) < tune::fight_explore_rate)
+        w.exploreUntil = w.round + 10;
+    w.lastContactRound = w.round;
+    if (w.round >= w.exploreUntil) return;
+    int best = -1, bestFight = -1;
+    for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+        const auto& o = options[static_cast<std::size_t>(i)];
+        if (best < 0 || o.score > options[static_cast<std::size_t>(best)].score) best = i;
+        if (o.kind == OptionKind::fight && (bestFight < 0 || o.score > options[static_cast<std::size_t>(bestFight)].score)) bestFight = i;
+    }
+    if (bestFight < 0) return;
+    if (options[static_cast<std::size_t>(best)].kind == OptionKind::fight) {
+        w.exploreMode = 1;
+        trace().note("explore: declined the fight");
+    } else {
+        w.exploreMode = 2;
+        w.exploreForced = bestFight;
+        trace().note("explore: took the fight");
+    }
+}
+
+// One @F row per champion turn near a scored fight target (features the bot sees now):
+// [r,u,enemy,chose fight,explore,edge%,us,them,ghosts,our hp,their hp,our dps,their dps,
+//  my hp%,target hp%,their hp%,my bag,target bag,their bags,my stun ready,ally stuns ready,
+//  enemy stunners,to our spawn,to their spawn,monster dps,dist,tx,ty,win%]
+void logFight(World& w, const std::vector<Option>& options, int chosen) {
+    const auto& f = w.bestFight;
+    if (f.round != w.round || f.dist > 8) return;
+    const bool choseFight = chosen >= 0 && options[static_cast<std::size_t>(chosen)].kind == OptionKind::fight;
+    int myStun = 0;
+    for (int k = 0; k < 2; ++k) {
+        const auto& a = w.abilities()[static_cast<std::size_t>(k)];
+        const auto& info = a.info();
+        const auto* aoe = info ? std::get_if<bc::ability_aoe_damage>(&*info) : nullptr;
+        if ((a.is_cc() || (aoe && aoe->duration > 0)) && w.abilityReady(k)) myStun = 1;
+    }
+    const bc::vec2 t{f.tx, f.ty};
+    const auto& st = Statics::get();
+    auto i = [](float v) { return std::to_string(static_cast<long>(v)); };
+    std::string row = "@F[";
+    row += std::to_string(w.round) + ',' + std::to_string(w.slot) + ',' + std::to_string(f.enemy) + ',' + (choseFight ? "1" : "0") + ',' +
+           std::to_string(w.exploreMode) + ',' + i(f.edge * 100.0f) + ',' + std::to_string(f.us) + ',' + std::to_string(f.them) + ',' +
+           std::to_string(f.ghosts) + ',' + i(f.ourHp) + ',' + i(f.theirHp) + ',' + i(f.ourDps) + ',' + i(f.theirDps) + ',' +
+           i(w.hpFrac() * 100.0f) + ',' + i(f.tgtHpFrac * 100.0f) + ',' + i(f.theirHpFrac * 100.0f) + ',' + std::to_string(w.gems) + ',' +
+           std::to_string(f.tgtBag) + ',' + std::to_string(f.theirBags) + ',' + std::to_string(myStun) + ',' +
+           std::to_string(w.alliesStunReadyNear(t, 6)) + ',' + std::to_string(f.enemyStuns) + ',' + std::to_string(dist(t, st.spawnCenter)) + ',' +
+           std::to_string(dist(t, st.enemySpawnCenter)) + ',' + i(f.monster) + ',' + std::to_string(f.dist) + ',' + std::to_string(f.tx) + ',' +
+           std::to_string(f.ty) + ',' + i(f.winChance * 100.0f) + ']';
+    trace().raw(row);
+}
 bool isGroupPlan(const Option& o) { return o.kind == OptionKind::farm || o.kind == OptionKind::capture; }
 } // namespace
 
@@ -171,7 +257,8 @@ void Bot::play_turn() {
         const bool planStale = plan_ && plan_->kind == OptionKind::farm && plan_->target >= 0 &&
                                plan_->target < static_cast<int>(w.groups.size()) &&
                                w.groups[static_cast<std::size_t>(plan_->target)].status != GroupStatus::alive;
-        const bool tight = tune::think_floor > 0 && plan_ && bc::fuel_remaining() < tune::think_floor &&
+        const unsigned long long thinkFloor = tune::fuel_governor ? budget::reserve(!w.enemies.empty()) + tune::think_min_fuel : tune::think_floor;
+        const bool tight = thinkFloor > 0 && plan_ && bc::fuel_remaining() < thinkFloor &&
                            w.hpFrac() >= tune::lock_emergency_hp && !planStale && tightStreak < tune::think_floor_max_streak;
         tightStreak = tight ? tightStreak + 1 : 0;
         if (tight) trace().note("fuel tight: kept plan");
@@ -223,7 +310,9 @@ void Bot::play_turn() {
                 seenEnemies_ = seen;
                 trace().forceFull();
             }
+            if constexpr (kTracing) exploreFights(w, options);
             chosen = brain::choose(options, w);
+            if constexpr (kTracing) logFight(w, options, chosen);
             awaitedCount_ = 0;
             for (std::size_t i = 0; i < options.size() && awaitedCount_ < static_cast<int>(awaited_.size()); ++i) {
                 const auto& o = options[i];
@@ -259,9 +348,11 @@ void Bot::play_turn() {
                     w.partyCamp = pick.target;
                 }
             }
+            const auto execStart = bc::fuel_remaining();
             brain::execute(w, pick);
             brain::noteMovement(w);
             wards::update(w);
+            if (const auto now = bc::fuel_remaining(); !fuel::split() && execStart > now) budget::noteExecute(execStart - now, !w.enemies.empty());
         }
         fuel::mark("execute");
 
@@ -320,6 +411,7 @@ void Bot::play_turn() {
         prevWrite_ = trace().lastFullWrite_;
         prevBytes_ = trace().lastFullBytes_;
     }
+    if (tune::fuel_governor) budget::noteTurnEnd(!w.enemies.empty());
     fuel::mark("flush");
     // Spare fuel at the end of the turn builds the static distance fields scoring reads.
     if (!fuel::split()) fields::step(tune::fuel_reserve_fields);

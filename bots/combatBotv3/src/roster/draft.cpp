@@ -179,7 +179,11 @@ void play_draft() {
         const float goldOnlyShare = farmable > 0 ? static_cast<float>(goldOnly) / static_cast<float>(farmable) : 0.0f;
         const bool goldMap = goldOnlyShare >= tune::gold_draft_share;
         planText += "gold-only camps " + std::to_string(static_cast<int>(goldOnlyShare * 100.0f)) + "%; ";
-        const auto& fixedOrder = goldMap ? goldOrder : standardOrder;
+        static const std::vector<D> farOrder{D::varg, D::stellar, D::cassi_and_issac, D::ryth, D::ren};
+        const auto& st = Statics::get();
+        const bool farSpawns = tune::far_spawn_farmer_dist > 0 && teamSize <= 3 && dist(st.spawnCenter, st.enemySpawnCenter) >= tune::far_spawn_farmer_dist;
+        if (farSpawns) planText += "far spawns, 3 picks: farmer comp; ";
+        const auto& fixedOrder = goldMap ? goldOrder : farSpawns ? farOrder : standardOrder;
         if (tune::fixed_draft) {
             for (auto d : fixedOrder)
                 if (!taken(d)) { fallback = d; break; }

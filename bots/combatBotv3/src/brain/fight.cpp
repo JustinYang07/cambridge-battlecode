@@ -1,9 +1,13 @@
 // Fighting enemy champions when we expect to win: their bag and the kill gold
 // are the reward, time-to-kill (plus the walk) is the cost.
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include "../combat/combat.h"
 #include "../core/comms.h"
+#include "../core/budget.h"
 #include "../core/config.h"
+#include "../core/trace.h"
 #include "../nav/navigator.h"
 #include "../strategy/cohesion.h"
 #include "../strategy/regroup.h"
@@ -13,21 +17,63 @@ namespace scorers {
 
 void fight(World& w, std::vector<Option>& out) {
     const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
-    for (const auto& e : w.enemies) {
+    bool scoredOne = false;
+    unsigned long long dearestEnemy = 0;  // fuel the dearest enemy scored this turn took
+    // combatBotv3: camps waiting for capture, listed once (each enemy scanned every group: ~0.8k each).
+    std::array<const GroupInfo*, 16> rewardGroups{};
+    int rewardCount = 0;
+    if (!w.enemies.empty())
+        for (const auto& g : Statics::get().groups)
+            if (rewardCount < static_cast<int>(rewardGroups.size()) && w.groups[static_cast<std::size_t>(g.id)].status == GroupStatus::reward)
+                rewardGroups[static_cast<std::size_t>(rewardCount++)] = &g;
+    // combatBotv3: each enemy's damage once (the side sums below asked it per pair: 25 calls in a 5v5).
+    std::array<float, 16> dpsOf{};
+    for (std::size_t k = 0; k < w.enemies.size() && k < dpsOf.size(); ++k) {
+        const auto& o = w.enemies[k];
+        dpsOf[k] = std::max(w.enemyDps(o.index, o.strength + o.focus * 1.5f / tune::spell_cooldown), 1.0f);
+    }
+    // combatBotv3: score the nearest fight_score_max enemies (and any channelling one): a far enemy
+    // scores x0.1 or less as a chase anyway, and each costs ~5k to score.
+    unsigned scoreMask = ~0u;
+    if (tune::fight_score_max > 0 && static_cast<int>(w.enemies.size()) > tune::fight_score_max) {
+        scoreMask = 0;
+        for (int picked = 0; picked < tune::fight_score_max; ++picked) {
+            int bestK = -1;
+            for (int k = 0; k < static_cast<int>(w.enemies.size()) && k < 32; ++k)
+                if (!((scoreMask >> k) & 1u) &&
+                    (bestK < 0 || dist(w.enemies[static_cast<std::size_t>(k)].pos, w.pos) < dist(w.enemies[static_cast<std::size_t>(bestK)].pos, w.pos)))
+                    bestK = k;
+            if (bestK >= 0) scoreMask |= 1u << bestK;
+        }
+        for (int k = 0; k < static_cast<int>(w.enemies.size()) && k < 32; ++k)
+            if (w.enemies[static_cast<std::size_t>(k)].channeling) scoreMask |= 1u << k;
+    }
+    for (std::size_t ek = 0; ek < w.enemies.size(); ++ek) {
+        const auto& e = w.enemies[ek];
+        if (ek < 32 && !((scoreMask >> ek) & 1u)) continue;
+        // combatBotv3 governor: past the first enemy, stop while execute's reserve and one more enemy
+        // (as dear as the dearest so far) are all that is left.
+        if (scoredOne && tune::fuel_governor && budget::spare(true) < tune::fight_enemy_fuel + dearestEnemy) break;
+        const auto enemyStart = cambc::fuel_remaining();
         // On or by its own spawn it heals every round: scored at x0.05 anyway, so skip the work
         // (rushbait-v2: scoring five enemies standing on their spawn cost ~30k fuel every turn).
         if (tune::fight_skip_at_spawn && !e.channeling && dist(e.pos, Statics::get().enemySpawnCenter) <= tune::enemy_spawn_radius) continue;
         // Fights are team against team: the target plus enemies close enough to join it, against
         // us plus allies near it or already attacking it (shared focus). Each side's time to wipe
         // the other decides who wins; we all hit the target, so it falls in e.hp / our damage.
-        float theirHp = 0, theirDps = 0;
-        int theirCount = 0;
-        for (const auto& o : w.enemies)
+        float theirHp = 0, theirDps = 0, theirMaxHp = 0;
+        int theirCount = 0, theirBags = 0, theirStuns = 0;
+        for (std::size_t k = 0; k < w.enemies.size(); ++k) {
+            const auto& o = w.enemies[k];
             if (o.hp > 0 && dist(o.pos, e.pos) <= tune::fight_join_radius) {
                 theirHp += o.hp;
-                theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
+                theirMaxHp += o.maxHp;
+                theirBags += o.gems;
+                theirStuns += o.stun ? 1 : 0;
+                theirDps += k < dpsOf.size() ? dpsOf[k] : std::max(w.enemyDps(o.index, o.strength + o.focus * 1.5f / tune::spell_cooldown), 1.0f);
                 ++theirCount;
             }
+        }
         // Enemies seen in the last few rounds but not now can still join (out of sight, in bushes,
         // walking in): in 16 of 23 traced centre deaths after a fight we judged 3v1 to 5v2, four or
         // five enemies took part in the kill. Count those that could have reached the target since.
@@ -44,8 +90,9 @@ void fight(World& w, std::vector<Option>& out) {
         // Monsters fight for them too: the camp hits we are already taking, or the camps around the
         // target that whoever fights there may pull (35% of our deaths to champions came after
         // monster hits in the 15 rounds before, 23% of theirs).
+        float monsters = 0;
         if (tune::fight_monster_damage) {
-            const float monsters = std::max(w.incoming, tune::fight_spot_camp_weight * w.incomingCampDamage(e.pos));
+            monsters = std::max(w.incoming, tune::fight_spot_camp_weight * w.incomingCampDamage(e.pos));
             theirDps += monsters;
         }
         auto ours = w.ourSide(e.pos, tune::fight_join_radius + 1, e.index, myDps);
@@ -60,18 +107,22 @@ void fight(World& w, std::vector<Option>& out) {
         Option o;
         o.kind = OptionKind::fight;
         o.enemy = e.handle;
+        // combatBotv3: a hurt front-liner does not push into their half (elkring vs Rhodes r74: Ren
+        // at 42% walked on to their spawn and died to Issac and Prism).
+        const bool hurtFront = !w.ranged && w.hpFrac() < tune::hurt_front_hp && w.theirHalf(e.pos);
         o.target = e.index;
         o.at = e.pos;
         o.c.target << 'e' << static_cast<int>(static_cast<cambc::handle_champion_t>(e.handle));
         o.add("their bag", static_cast<float>(e.gems));
         o.add("kill gold", tune::kill_gold_value * goldValue(w));
         // Standing on a cleared camp's spawn tiles, it blocks our capture: killing it frees the reward.
-        for (const auto& g : Statics::get().groups)
-            if (w.groups[static_cast<std::size_t>(g.id)].status == GroupStatus::reward && dist(g.center, e.pos) <= 3 &&
-                Statics::get().onGroup(g, e.pos)) {
+        for (int k = 0; k < rewardCount; ++k) {
+            const auto& g = *rewardGroups[static_cast<std::size_t>(k)];
+            if (dist(g.center, e.pos) <= 3 && Statics::get().onGroup(g, e.pos)) {
                 o.add("frees capture", static_cast<float>(g.gems) + static_cast<float>(g.gold) * goldValue(w));
                 break;
             }
+        }
         o.turns("travel", static_cast<float>(std::max(0, dist(w.pos, e.pos) - w.range)));
         // Do not chase: an enemy this far off is leaving, and the walk is time not farmed. A
         // channelling enemy (tribute, recall) is standing still, so it is still worth the walk.
@@ -90,6 +141,46 @@ void fight(World& w, std::vector<Option>& out) {
         // the decision, so it is visibly considered and rejected.
         o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.02f, 1.5f));
         if (ours.count == 1 && myTurnsToDie < turnsToKill) o.mul("die first", 0.3f);
+        // Mid to late game, a lost fight costs the bag we have built up: only take fights we are
+        // likely to win (mode 0), or whose expected gain beats the expected loss (mode 1). Win chance from the edge, fitted on traced fights from round 300 (a win:
+        // an enemy dies near the target before this champion does, within 15 rounds); it levels off
+        // near 70-75%, so a 70% cutoff keeps only lopsided fights (edge ~7+).
+        // Win chance (first death near the fight is theirs). Model 0: the first edge curve; 1: the edge
+        // curve refit on 1,800 self-play games; 2: eight features fitted on the same fights (held-out
+        // AUC 0.705 vs 0.662 for edge alone).
+        // combatBotv3: the win chance (three logs and an exp) only where it is used.
+        const bool needWin = kTracing || (w.round >= tune::fight_mid_round && !e.channeling && tune::fight_mid_factor != 1.0f);
+        const float lnEdge = needWin ? std::log(std::max(edge, 0.05f)) : 0.0f;
+        float z = 0;
+        if (!needWin) {
+            // not used this turn
+        } else if (tune::fight_win_model == 2) {
+            z = tune::fwm_bias + tune::fwm_ln_edge * lnEdge +
+                tune::fwm_ln_hp * std::log(std::max(ours.hp, 1.0f) / std::max(theirHp, 1.0f)) +
+                tune::fwm_ln_dps * std::log(std::max(ours.dps, 1.0f) / std::max(theirDps, 1.0f)) +
+                tune::fwm_lead * static_cast<float>(ours.count - theirCount) + tune::fwm_them * static_cast<float>(theirCount) +
+                tune::fwm_their_hp * (theirHp / std::max(theirMaxHp, 1.0f)) + tune::fwm_target_hp * (e.hp / std::max(e.maxHp, 1.0f)) +
+                tune::fwm_dist * static_cast<float>(dist(w.pos, e.pos));
+        } else if (tune::fight_win_model == 1) {
+            z = tune::fight_win_refit_a + tune::fight_win_refit_b * lnEdge;
+        } else {
+            z = tune::fight_win_fit_a + tune::fight_win_fit_b * lnEdge;
+        }
+        const float winChance = needWin ? 1.0f / (1.0f + std::exp(-z)) : 0.0f;
+        if (w.round >= tune::fight_mid_round && !e.channeling && tune::fight_mid_factor != 1.0f) {
+            if (tune::fight_mid_mode == 1) {
+                // Pot odds: what a win gains (their bag, the kill gold, them out for 60 rounds)
+                // against what a loss costs (our bag, us out for 60 rounds). Carrying a big bag we
+                // walk away from even fights; against a full bag a long shot can still pay.
+                const float gain = static_cast<float>(e.gems) + tune::kill_gold_value * goldValue(w) + tune::kill_denial_value;
+                const float stake = static_cast<float>(w.gems) + tune::death_time_value;
+                if (winChance * gain <= (1.0f - winChance) * stake) o.mul("mid game: bad odds", tune::fight_mid_factor);
+                o.c.note << "odds " << static_cast<int>(winChance * gain) << " vs " << static_cast<int>((1.0f - winChance) * stake) << "; ";
+            } else if (winChance < tune::fight_mid_win_chance) {
+                o.mul("mid game: under win cutoff", tune::fight_mid_factor);
+            }
+            o.c.note << "win " << static_cast<int>(winChance * 100.0f) << "%; ";
+        }
         if (comms::focusMask(e.index, w.slot) != 0) o.mul("focus fire", tune::focus_fire_bonus);
         else if (e.index == w.teamTarget) o.mul("team target", tune::team_target_bonus);
         // A hurt enemy is worth chasing beyond the shorter kill time: it is about to recall (and
@@ -111,6 +202,8 @@ void fight(World& w, std::vector<Option>& out) {
         if (tune::no_chase_factor != 1.0f && !e.channeling && dist(w.pos, e.pos) > w.range && w.enemyMovingAway(e.index, e.pos))
             o.mul("it is leaving", tune::no_chase_factor);
         if (!w.mayInvade() && !e.channeling && w.theirHalf(e.pos)) o.mul("their half: no lead", tune::no_invade_factor);
+        // An enemy already in our range is self-defence, wherever we stand.
+        if (dist(e.pos, w.pos) > w.range && w.invadeWithoutMelee(e.pos)) o.mul("their half: no melee with us", tune::invade_no_melee_factor);
         // Fight as a group: with less than half the active team around us, leave it unless the
         // target is channelling or is the one hitting us.
         if (tune::cohesion && !e.channeling && cohesion::activeCount() >= 3) {
@@ -161,11 +254,41 @@ void fight(World& w, std::vector<Option>& out) {
                 o.c.note << "engage " << withMe << "v" << them << "; ";
             }
         }
+        // combatBotv3: fight as a group. Fewer than group_fight_min of us around the target (allies
+        // near it or beside us), and it is neither channelling nor able to hit us: leave it.
+        if (tune::group_fight_alone_factor != 1.0f && !e.channeling && dist(e.pos, w.pos) > e.range) {
+            int bodies = 1;
+            for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+                if (sl == w.slot) continue;
+                const auto p = w.allyPosCached(sl);
+                if (p.x >= 0 && (dist(p, e.pos) <= tune::group_fight_radius || dist(p, w.pos) <= 3)) ++bodies;
+            }
+            if (bodies < tune::group_fight_min) o.mul("no group with us", tune::group_fight_alone_factor);
+        }
         o.mul("role appetite", w.role().fightAppetite);
+        if (hurtFront) o.mul("hurt: not into their half", tune::hurt_front_factor);
+        // combatBotv3: mid-capture, an enemy we cannot already hit does not pull us off the tiles.
+        if (dist(e.pos, w.pos) > w.range && captureHold(w)) o.mul("finishing a capture", tune::capture_hold_fight_factor);
         o.c.note << ours.count << "v" << theirCount << ": kill in " << static_cast<int>(turnsToKill) << ", edge x10 "
                  << static_cast<int>(edge * 10.0f);
         o.finish();
+        if constexpr (kTracing) {
+            // Lab fight data: keep the features of the best-scored fight this turn.
+            auto& f = w.bestFight;
+            if (f.round != w.round || o.score > f.score) {
+                int ghosts = 0;
+                for (const auto& g : w.ghosts) {
+                    const int age = w.round - g.round;
+                    if (age > 0 && age <= 5 && dist(g.pos, e.pos) <= tune::fight_join_radius + age) ++ghosts;
+                }
+                f = {w.round, e.index, ours.count, theirCount, ghosts, e.gems, theirBags, theirStuns, e.pos.x, e.pos.y, dist(w.pos, e.pos),
+                     o.score, edge, ours.hp, theirHp, ours.dps, theirDps, e.hp / std::max(e.maxHp, 1.0f),
+                     theirHp / std::max(theirMaxHp, 1.0f), monsters, winChance};
+            }
+        }
         out.push_back(std::move(o));
+        scoredOne = true;
+        if (const auto now = cambc::fuel_remaining(); enemyStart > now) dearestEnemy = std::max(dearestEnemy, enemyStart - now);
     }
 }
 

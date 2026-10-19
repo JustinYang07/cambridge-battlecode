@@ -54,6 +54,10 @@ struct Statics {
     // A dash of up to 2 tiles may pass over holes but not walls (probed on ambush: the engine
     // refused every dash across a wall row, allowed one over a hole).
     bool dashLegal(cambc::vec2 from, cambc::vec2 to) const;
+    // combatBotv3: the straight line from a to b for a dasher. -1: a wall (or a hole run wider than
+    // one tile) is on it; 0: plain walk; 1: it crosses holes a 2-tile dash hops, the first hop from
+    // *hopFrom to *hopTo. Reads byte tables built once (bitboard reads cost ~30-300 fuel each).
+    int dashLine(cambc::vec2 a, cambc::vec2 b, cambc::vec2* hopFrom = nullptr, cambc::vec2* hopTo = nullptr) const;
     // The dash-in group whose pocket holds this tile, if any.
     const GroupInfo* pocketAt(cambc::vec2 tile) const;
     cambc::bitboard dashBlock;        // tiles a dash cannot pass over: terrain except holes
@@ -85,7 +89,8 @@ private:
     RawBuf<std::uint8_t> tileCampIndex_;    // width*height: index into tileCamps_ + 1, 0 where there is no camp
                                                  // (a dense TileCamp table cost ~60k fuel to fill on the first turn)
     bool ready_ = false;
-    bool campsCapped_ = false;                   // more than 255 camps: some are missing from tileCampIndex_
+    bool campsCapped_ = false;
+    mutable std::vector<std::uint8_t> wallBits_, holeBits_;  // dashLine tables (packed bits)                   // more than 255 camps: some are missing from tileCampIndex_
 };
 
 inline int dist(cambc::vec2 a, cambc::vec2 b) { return static_cast<int>(a.chebyshev_distance(b)); }

@@ -62,6 +62,12 @@ int rallyThreat(int exceptSlot) {
     return most;
 }
 
+int enemyOf(int slot) {
+    if (slot < 0 || slot >= alert_byte) return -1;
+    const auto v = cache[static_cast<std::size_t>(slot)];
+    return v >= enemy_code && v < regroup_code ? v - enemy_code : -1;
+}
+
 bool retreating(int slot) { return slot >= 0 && slot < alert_byte && cache[static_cast<std::size_t>(slot)] >= retreat_code; }
 
 bool fighting(int slot) {

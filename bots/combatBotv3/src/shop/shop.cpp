@@ -1,4 +1,5 @@
 #include "shop.h"
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <string>
@@ -68,7 +69,70 @@ bool treasureMap() {
     return cached == 1;
 }
 
+// combatBotv3: farming or combat map, from the map editor's size classes (longest side: small 30-49,
+// medium 50-74, large 75-100) and, for medium maps, how far the walk between the spawns is against
+// the straight line (lanes and rows force detours). Measured on the pool (deaths per 100 rounds):
+// large maps and medium maps with walk >= 1.5x straight are the farming maps (expanse, lanes,
+// ambush, rushbait, rows, pilgrimage); small and other medium maps are where the fights are.
+bool farmingMap() {
+    static int cached = -1;
+    if (cached >= 0) return cached == 1;
+    const auto& s = Statics::get();
+    const int side = std::max(s.width, s.height);
+    if (side >= tune::large_map_side) { cached = 1; return true; }
+    if (side < tune::medium_map_side) { cached = 0; return false; }
+    cached = 0;
+    try {
+        // Walking distance from the tiles beside their spawn to our spawn centre.
+        bc::bitboard beside;
+        beside.clear();
+        for (auto p : s.enemySpawn.positions()) beside.draw_chebyshev(p, 1.0f);
+        beside = beside & ~s.terrain;
+        bc::distance_field field;
+        bc::bitboard visited;
+        field.compute(s.terrain, beside, visited);
+        const int straight = std::max(1, dist(s.spawnCenter, s.enemySpawnCenter));
+        if (visited.is_set(s.spawnCenter) && static_cast<float>(field.get(s.spawnCenter)) >= tune::farming_walk_ratio * static_cast<float>(straight))
+            cached = 1;
+    } catch (const bc::error&) {
+    }
+    return cached == 1;
+}
+
 std::vector<Step> plan(bc::champion_type type) {
+    // combatBotv3: per-champion item orders (user, from the top teams' builds), then Power emblems
+    // of the last stat for good: duplicate emblems add no second passive, but Power has none and
+    // its stats stack. Champions without an entry keep build_variant's plan below.
+    if (tune::champion_builds) {
+        using F = Family;
+        using T = bc::champion_type;
+        std::vector<Step> s;
+        auto add = [&](F f, Stat st) { s.push_back({f, st}); };
+        Stat last = Stat::focus;
+        switch (type) {
+        case T::cassi:   add(F::bruiser, Stat::health); add(F::durability, Stat::focus); last = Stat::focus; break;
+        case T::issac:   add(F::durability, Stat::health); last = Stat::strength; break;
+        case T::ryth:    add(F::bruiser, Stat::health); add(F::durability, Stat::focus); last = Stat::focus; break;
+        case T::stellar: add(F::durability, Stat::health); last = Stat::focus; break;
+        case T::tavi:    add(F::treasure, Stat::focus); add(F::durability, Stat::focus); last = Stat::focus; break;
+        case T::prism:   add(F::durability, Stat::health); last = Stat::focus; break;
+        case T::ren:     add(F::bruiser, Stat::health); add(F::durability, Stat::health); last = Stat::focus; break;
+        case T::varg:    add(F::durability, Stat::health); last = Stat::strength; break;
+        default: break;
+        }
+        if (!s.empty()) {
+            // Farming maps: a Jungle emblem of our damage stat first (30% less camp damage: the
+            // orders above lost every game on rows and rushbait without it).
+            if (tune::farm_map_jungle && farmingMap()) s.insert(s.begin(), Step{F::jungle, last});
+            // Farming maps: Monster (10% more damage to camps) in place of Durability (10% less
+            // damage taken), which pays off in fights (user).
+            if (tune::farm_map_monster && farmingMap())
+                for (auto& st : s)
+                    if (st.family == F::durability) st.family = F::monster;
+            for (int i = 0; i < 12; ++i) add(F::power, last);
+            return s;
+        }
+    }
     const auto& p = profile(type);
     Stat main = p.primary;
     const bool vesper = type == bc::champion_type::vesper_vale;
@@ -142,15 +206,32 @@ int owned(Step s) {
 }
 
 // Which step are we on? Repeated steps (e.g. several power emblems) need cumulative targets.
+// combatBotv3: the plan never changes for a champion and the answer only changes when the inventory
+// does: build both once / per inventory read (rebuilding the plan every turn cost ~5k a turn).
+int inventoryVersion = 0;
 std::optional<std::pair<Step, int>> currentStep(bc::champion_type type) {
-    const auto steps = plan(type);
-    for (std::size_t i = 0; i < steps.size(); ++i) {
-        int target = 0;
-        for (std::size_t j = 0; j <= i; ++j)
-            if (steps[j].family == steps[i].family && steps[j].stat == steps[i].stat) target += shardsPer(steps[j].family);
-        if (owned(steps[i]) < target) return std::make_pair(steps[i], target - owned(steps[i]));
+    static std::vector<Step> steps;
+    static std::vector<int> targets;
+    static bool planned = false;
+    static int forVersion = -1;
+    static std::optional<std::pair<Step, int>> answer;
+    if (!planned) {
+        planned = true;
+        steps = plan(type);
+        targets.assign(steps.size(), 0);
+        for (std::size_t i = 0; i < steps.size(); ++i)
+            for (std::size_t j = 0; j <= i; ++j)
+                if (steps[j].family == steps[i].family && steps[j].stat == steps[i].stat) targets[i] += shardsPer(steps[j].family);
     }
-    return std::nullopt;
+    if (forVersion == inventoryVersion) return answer;
+    forVersion = inventoryVersion;
+    answer = std::nullopt;
+    for (std::size_t i = 0; i < steps.size(); ++i)
+        if (const int have = owned(steps[i]); have < targets[i]) {
+            answer = std::make_pair(steps[i], targets[i] - have);
+            break;
+        }
+    return answer;
 }
 
 } // namespace
@@ -161,6 +242,7 @@ void refresh(const World& w) {
     if (inventory && !inventoryStale && w.alive && !w.atSpawn && !remoteShop()) return;
     inventoryStale = false;
     inventory = bc::self().item_count();
+    ++inventoryVersion;
     passiveMask = 0;
     const std::pair<bc::item_passive, Family> families[] = {
         {bc::item_passive::monster, Family::monster}, {bc::item_passive::durability, Family::durability},
@@ -173,6 +255,8 @@ void refresh(const World& w) {
             if (counts[static_cast<std::size_t>(emblemOf({family, static_cast<Stat>(stat)}))] > 0)
                 passiveMask |= 1u << static_cast<unsigned>(passive);
 }
+
+bool isFarmingMap() { return farmingMap(); }
 
 bool hasPassive(bc::item_passive passive) { return passiveMask & (1u << static_cast<unsigned>(passive)); }
 

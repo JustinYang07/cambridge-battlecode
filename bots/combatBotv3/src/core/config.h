@@ -185,6 +185,7 @@ inline constexpr int shop_alert_radius = 12;         // ...or an ally's enemy al
 inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
 // Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
 inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (dash over a hole in, and out)
+inline constexpr bool dash_straight_travel = true;  // combatBotv3: dashers score and walk camps across one-tile ditches by the straight line
 inline constexpr int dash_exit_turns = 2;     // dash out of a pocket, beyond the walk back to the landing tile
 inline constexpr int still_hold_turns = 80;   // ...holding for a party (a gem rally may be on its way)
 inline constexpr int still_turns = 25;        // still this long while idle/holding: drop that camp and hunt
@@ -235,9 +236,33 @@ inline constexpr bool routes_skip_gold_only = true;  // combatBot: gold-only clu
 inline constexpr bool fixed_draft = true;            // draft a fixed comp, first N picks: Ren, Stellar, Cassi & Issac, Ryth, Varg
 inline constexpr float gold_draft_share = 0.95f;     // ...maps with at least this share of camps gold-only: Stellar, Tavi, Prism, Cassi & Issac, Ren
 inline constexpr bool draft_mite_small = false;     // 3-pick drafts take Mite's roster (Ren, Stellar, Cassi & Issac)
-inline constexpr bool treasure_maps = true;        // build 12: treasure emblem first on treasure maps (shop.cpp)
+inline constexpr bool treasure_maps = false;        // build 12: treasure emblem first on treasure maps (shop.cpp)
 inline constexpr int treasure_map_max_area = 1400;  // ...small maps (all gold within early reach)...
 inline constexpr float treasure_map_max_elk_share = 0.8f;  // ...that are not mostly elk; or no gems outside Monoliths
+// combatBotv3: kite farming. Monsters reach 3 tiles and never leave their camp; a champion whose
+// damaging spells reach further (Cassi, Stellar: 4) hits them for free from outside that reach
+// (replays: casts from 4 tiles took damage the next round 1% of the time, attacks from 3 63%).
+// With no melee ally at the camp it farms that way alone or with another kiter (user).
+inline constexpr bool bound_party_share = false;  // tested with kiting off: h2h -26 (noise); off   // combatBotv3: farm pre-pass halves the bound of camps we cannot take alone
+// combatBotv3 (elkring vs Rhodes Island analysis, user): fight sense.
+inline constexpr bool observed_enemy_dps = true;   // enemy damage = max(stats estimate, damage seen dealt lately)
+inline constexpr int observed_dps_memory = 20;     // ...a sighting of its damage counts this many rounds
+inline constexpr bool fight_turned_retreat = true; // an ally died beside us and their front is still healthy: fall back
+inline constexpr int fight_turned_rounds = 4;      // ...an ally death this recent
+inline constexpr int fight_turned_radius = 8;      // ...this close to us
+inline constexpr float fight_turned_edge = 1.2f;   // ...and our side would not clearly win (health / their damage vs theirs / ours)
+inline constexpr float fight_turned_hp = 0.33f;    // ...while an enemy within 6 has more than this share of its health
+inline constexpr float hurt_front_hp = 0.5f;       // melee below this health: farm/fight on their half x hurt_front_factor
+inline constexpr float hurt_front_factor = 0.2f;
+inline constexpr bool kite_farm = false;  // tested: h2h vs mb5 -50 (all maps), -81 (farming maps only); off
+inline constexpr bool kite_farming_maps_only = true;  // ...only on farming maps (shop::isFarmingMap)
+inline constexpr int kite_melee_radius = 4;          // a melee ally this close to the camp: farm as a party instead
+inline constexpr bool farm_map_monster = true;     // combatBotv3: on farming maps Durability emblems in the orders become Monster emblems
+inline constexpr bool farm_map_jungle = true;      // combatBotv3: on farming maps the per-champion orders start with a Jungle emblem
+inline constexpr int medium_map_side = 50;         // map editor size classes by the longest side: small < 50 <= medium < 75 <= large
+inline constexpr int large_map_side = 75;
+inline constexpr float farming_walk_ratio = 1.5f;  // medium maps: spawn-to-spawn walk at least this x the straight line = farming
+inline constexpr bool champion_builds = true;     // combatBotv3: shop/shop.cpp per-champion item orders (Cassi, Issac, Ryth, Stellar, Tavi, Prism, Ren, Varg)
 inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
                                                  // 7 treasure>monster, 8 treasure>home, 9 treasure>power,
@@ -259,6 +284,51 @@ inline constexpr int bag_avoid_gems = 20;           // carrying this many gems, 
 inline constexpr float kill_gold_value = 50.0f;
 inline constexpr float fight_our_dps_scale = 1.0f;  // our side's damage in fight estimates (measured real/predicted ~0.21)
 inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit
+// Mid/late-game fights (combatBotv3): from fight_mid_round, a fight whose estimated win chance is
+// under fight_mid_win_chance scores x fight_mid_factor (channelling targets exempt). Win chance =
+// logistic(a + b ln edge), fitted on traced fights from round 300 (edge 1.3: 50%, 2.9: 60%, 7: 70%).
+inline constexpr int fight_mid_round = 300;
+inline constexpr float fight_mid_win_chance = 0.70f;
+inline constexpr float fight_mid_factor = 0.3f;     // 1: off
+inline constexpr int fight_mid_mode = 1;            // 0: win-chance cutoff; 1: pot odds (p x gain vs (1-p) x stake)
+inline constexpr float death_time_value = 12.0f;    // pot odds: gem-equivalents of a death (~13 farming over 60 rounds). With model 2: 12 -8, 18 -27, 24 -10, 30 -19, 36 -28 vs model 0 at 36 (1,020 games each)
+// Lab fight data (traced builds only): on a new contact (no enemy within 6 tiles for 10 rounds),
+// this share of contacts does the opposite of the fight scorer for 10 rounds (0: off; data runs).
+inline constexpr float fight_explore_rate = 0.0f;
+inline constexpr bool fight_explore_even = false;   // lab data mode: always fight the best target when our count near it >= theirs
+// combatBotv3 team fighting (each an A/B switch):
+// 1. commitment: once we pick a fight (or a flight) we keep it this many rounds unless below
+//    commit_break_hp; fleeing never attacks (flee_no_attack).
+inline constexpr int fight_commit_rounds = 0;       // 0: off
+inline constexpr float commit_break_hp = 0.25f;
+inline constexpr bool flee_no_attack = false;
+// 2. team call: allies within team_call_radius claiming a fight or a retreat vote; we follow the majority.
+inline constexpr bool team_fight_call = false;
+inline constexpr int team_call_radius = 6;
+// 4. group fights: fewer than group_fight_min of us around the target scores x this (1: off);
+//    from group_farm_round, camps with an ally within group_farm_radius score x group_farm_bonus.
+inline constexpr float group_fight_alone_factor = 0.3f;  // A/B (204 games): +35 +/- 58, deaths 5.58 -> 5.24, banked 831 -> 862
+inline constexpr int group_fight_min = 2;
+inline constexpr int group_fight_radius = 6;
+inline constexpr float group_farm_bonus = 1.2f;     // 1: off
+inline constexpr int group_farm_round = 300;
+inline constexpr int group_farm_radius = 8;
+inline constexpr float fight_win_fit_a = -0.144f;
+inline constexpr float fight_win_fit_b = 0.510f;
+// Fight win model: 0 the curve above; 1 the edge curve refit on 1,800 self-play games (resolved
+// fights we took, win = first death near the fight is theirs); 2 eight features on the same fights.
+inline constexpr int fight_win_model = 2;
+inline constexpr float fight_win_refit_a = -1.1700f;
+inline constexpr float fight_win_refit_b = 0.4630f;
+inline constexpr float fwm_bias = -0.9515f;
+inline constexpr float fwm_ln_edge = 1.0331f;
+inline constexpr float fwm_ln_hp = 0.3904f;       // ln(our side's health / theirs)
+inline constexpr float fwm_ln_dps = -0.6413f;     // ln(our side's damage / theirs)
+inline constexpr float fwm_lead = -0.3622f;       // our count - theirs around the target
+inline constexpr float fwm_them = 0.2765f;        // their count
+inline constexpr float fwm_their_hp = 1.5133f;    // their side's health fraction
+inline constexpr float fwm_target_hp = -1.0760f;  // the target's health fraction
+inline constexpr float fwm_dist = -0.1519f;       // tiles to the target
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
 inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
 inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
@@ -283,7 +353,7 @@ inline constexpr int spell_cooldown = 8;
 inline constexpr unsigned long long fuel_reserve_trace = 5000;       // skip all tracing below this
 inline constexpr unsigned long long trace_fuel_per_byte = 36;          // stdout cost, measured ~33
 inline constexpr unsigned long long fuel_reserve_full_trace = 40000; // skip the detailed trace below this
-inline constexpr unsigned long long nav_safe_floor = 0;                // below this fuel, paths skip the avoid-danger search (0: always search)
+inline constexpr unsigned long long nav_safe_floor = 20000;                // below this fuel, paths skip the avoid-danger search (0: always search)
 inline constexpr unsigned long long farm_floor = 0;                       // loopBot: skip farm scoring (keep the plan's camp) below this much fuel before thinking (0: off; 70k: +257 vs +361 off)
 inline constexpr bool farm_skip_ignore_spawn = true;   // rangeBot: enemies on their own spawn do not trigger the farm skip
 inline constexpr bool fight_skip_at_spawn = true;      // rangeBot: enemies on their own spawn are not scored as fights
@@ -293,6 +363,28 @@ inline constexpr int scan_sight = 9;               // ...vision 8 (+1 slack)
 inline constexpr int reward_recheck_every = 3;     // rangeBot: re-read a captured-waiting group's state every this many rounds when away from it
 inline constexpr int think_floor_max_streak = 3;            // rangeBot: ...at most this many turns in a row (a stale plan deadlocked lanes)
 inline constexpr unsigned long long first_turn_plan_floor = 150000;  // combatBotv2: first turn with less fuel than this before thinking: follow the draft plan (0: off)
+// combatBotv3 fuel governor (core/budget): keep a running estimate of execute's cost and stop
+// scoring while it (plus the turn's tail) is still left, so no turn overruns.
+inline constexpr bool fuel_governor = true;
+inline constexpr unsigned long long exec_reserve_start = 20000;          // execute estimate before any turn is measured
+inline constexpr unsigned long long exec_reserve_start_contact = 30000;  // ...with an enemy in sight
+inline constexpr unsigned long long exec_reserve_min = 18000;
+inline constexpr unsigned long long exec_reserve_min_contact = 25000;
+inline constexpr unsigned long long exec_reserve_max = 50000;
+inline constexpr unsigned long long turn_tail_fuel = 8000;               // after execute: wards, bookkeeping, slack
+inline constexpr unsigned long long think_min_fuel = 25000;              // think at all only with this much above the reserve
+inline constexpr unsigned long long farm_min_fuel = 12000;               // score camps only with this much above the reserve
+inline constexpr unsigned long long farm_pre_start = 15000;              // farm bound pass estimate before it is measured
+inline constexpr unsigned long long farm_camp_fuel = 10000;              // ...plus one fully scored camp
+inline constexpr unsigned long long farm_tail_start = 40000;             // after-farm cost estimate before it is measured
+inline constexpr unsigned long long farm_tail_start_contact = 50000;     // ...with an enemy in sight
+inline constexpr unsigned long long farm_tail_min = 20000;
+inline constexpr unsigned long long farm_tail_max = 75000;
+inline constexpr unsigned long long farm_tail_overrun_extra = 10000;     // a tail that overran counts this much over what it had
+inline constexpr unsigned long long farm_margin = 3000;                  // slack kept on top of the tail and the next camp
+inline constexpr int altar_lock_every = 4;                               // bank scoring: re-read an altar's lock this often
+inline constexpr int fight_score_max = 3;                                // score at most this many enemies (the nearest; channelling ones too)
+inline constexpr unsigned long long fight_enemy_fuel = 3000;             // score another enemy only with this much above the reserve
 inline constexpr unsigned long long think_floor = 60000;                  // keep last turn's plan when less fuel than this is left before thinking (0: off)
 inline constexpr unsigned long long fuel_for_full_scoring = 75000;   // score max_scored_groups only above this
 inline constexpr int bfs_radius = 48;
@@ -323,6 +415,19 @@ inline constexpr int hop_min_gain = 3;
 inline constexpr int tank_priority = 10;            // tanks act first each round (0: draft order)
 inline constexpr bool opening_routes = true;       // follow the draft's per-champion opening routes
 inline constexpr bool opening_camp = true;         // the crew without routes opens on the draft's party camp
+// combatBotv3: team opening. The whole team opens on the best party camp on our side, routes and
+// all, judged with the whole team's health; other camps wait (eight: every top team takes its
+// own two elks with all five first, ignoring the single wolf; we split and lost the middle).
+// combatBotv3: capture hold. Live (v4): we broke 197 captures (left the tiles before it completed)
+// to their 55, 130 with no enemy within 6, mostly answering a regroup call or chasing a fight.
+// On a reward's tiles with no enemy champion this close, we stay: no regroup, fights x factor.
+inline constexpr int capture_hold_radius = 4;      // 0: off
+inline constexpr int capture_hold_after = 2;       // ...only once we have stood on the tiles this many rounds (nearly done)
+inline constexpr float capture_hold_fight_factor = 1.0f;  // 0.1 tested: fewer kills (eight, monolith, swirl), off
+inline constexpr bool team_opening = true;
+inline constexpr int team_opening_min_bodies = 5;
+inline constexpr float team_opening_max_ratio = 0.6f;  // ...and at most this share of the enemy's distance to it from our spawn    // ...on maps with centre camps we leave to them, with at least this many bodies
+inline constexpr float team_opening_other_factor = 0.1f;  // other camps' farm score while it is on
 inline constexpr int opening_camp_radius = 30;      // the draft's opening camp is at most this walk from spawn...
 inline constexpr int opening_camp_rounds = 60;      // ...and steers the champions without a route until captured or this round
 inline constexpr float opening_camp_bonus = 1.5f;   // its farm score multiplier while it does
@@ -363,6 +468,7 @@ inline constexpr unsigned long long draft_describe_floor = 45000; // below this,
 
 // ---- raids: their team is down (all but tune::raid_max_alive bodies dead)
 inline constexpr int raid_max_alive = 1;             // at most this many enemy bodies alive
+inline constexpr int enemy_stat_every = 8;           // combatBotv3: re-read an enemy's item stats (max health, strength, focus, range) this often
 inline constexpr int enemy_alive_every = 4;          // check enemy deaths every this many rounds (fuel)
 inline constexpr float raid_cluster_factor = 3.0f;   // gem/gold clusters on their half (at full health)
 inline constexpr float raid_camp_factor = 1.5f;      // monster camps on their half (at full health); x1 at half health
@@ -390,6 +496,37 @@ inline constexpr float cohesion_away_factor = 0.75f;  // camps elsewhere
 inline constexpr float cohesion_alone_fight = 0.3f;   // fights with less than half the active team near
 inline constexpr bool invade_needs_lead = false;       // farm, fight or bank on their half only with more of us alive
 inline constexpr float no_invade_factor = 0.02f;
+// combatBotv3: ranged champions do not invade alone. A farm, fight or bank spot on their half with
+// none of our melee champions alive within invade_melee_radius scores x invade_no_melee_factor
+// (banks there are skipped); fights against an enemy already in range are exempt.
+inline constexpr bool invade_needs_melee = false;
+inline constexpr int invade_melee_radius = 8;
+inline constexpr bool invade_melee_ahead = false;  // ...and that melee ally must be in front of us (no farther from their spawn)
+// combatBotv3 probe: ranged champions shoot camps from the diagonal corners of their range,
+// outside a circular monster reach (squared straight-line distance > camp_reach_euclid_sq; (3,2)
+// = 13 is still hit, so a range-3 corner (3,3) = 18 is the candidate).
+inline constexpr bool camp_corner_stand = false;
+inline constexpr int camp_reach_euclid_sq = 13;
+inline constexpr bool probe_spell_only_camps = false;  // lab probe: ranged never basic-attack monsters that hit back (spells only)
+// combatBotv3 spell clear: a ranged champion whose damage spell reaches beyond monster_range clears a
+// camp's attacking monsters alone with spells only, from tiles outside their reach (no ally within
+// spell_clear_ally_radius of the camp; with one there, the usual nearest-tanks play).
+inline constexpr bool spell_clear_camps = false;
+inline constexpr int spell_clear_ally_radius = 4;
+// ...and as a scored option: camp scoring also prices clearing alone by spells (no damage, no party,
+// spell speed) and takes it when it beats the usual fight.
+inline constexpr bool spell_clear_option = true;
+inline constexpr float spell_clear_far_frac = 0.4f;   // ...Stellar only, camps at least this x map size from our spawn
+inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a quiet game (see below)
+inline constexpr bool spell_clear_force_quiet = true;   // ...in a quiet game on a large map (side >= large_map_side) Stellar always takes her best far camp by spells (user; expanse +150, other maps -31 overall)
+inline constexpr float spell_clear_force_bonus = 3.0f;   // ...scoring it x this
+inline constexpr bool spell_clear_near_side = true;     // ...cast from the spell-range tiles nearest our spawn (within 1 of the nearest)
+// Quiet game: from quiet_min_round, no death seen yet and no enemy champion within quiet_enemy_radius
+// of us for quiet_rounds (both teams just farming their own sides).
+inline constexpr int quiet_min_round = 100;
+inline constexpr int quiet_enemy_radius = 10;
+inline constexpr int quiet_rounds = 60;
+inline constexpr float invade_no_melee_factor = 0.1f;
 inline constexpr bool wards = false;                  // place a ward on the halfway line when crossing it
 // ---- rangeBot: ranged champions' fights
 inline constexpr bool ranged_hold_range = true;   // an enemy champion in range: hit it instead of walking to the chosen one
@@ -400,6 +537,28 @@ inline constexpr int ranged_front_radius = 6;     // melee allies this close to 
 inline constexpr int ranged_front_slack = 1;      // ...and we may stand this many tiles nearer the enemy than it
 // combatBotv3: Cassi & Issac are one pick and die together, so each of them is two lives (live,
 // 50 games of v4: 122 pair deaths, Cassi falling first in 84; eight 22 vs their 6).
+// combatBotv3: peel back. Live (v4, 50 games): 282 of our 341 deaths to champions came in even or
+// better numbers, with ~1.8 allies within 4, from above 60% to dead in a median 4 rounds: burst
+// down beside teammates. A champion losing health that fast steps back behind its allies.
+// combatBotv3: target choice. Live (v4): with 2+ enemies in reach, they hit the lowest-health one 63%
+// of the time, we 47% (our chosen / team target outranked it). 0: as before; 1: an enemy we can
+// kill within finish_hits hits comes first; 2: always the lowest health in reach.
+// combatBotv3: far spawns, few picks: fights are rare, farming decides. With 3 picks and spawns at
+// least this far apart, draft Varg (farmer) in Ren's place (expanse live: 0-28; the teams that
+// beat us without a single death drafted Cassi & Issac, Stellar, Varg). 0: off.
+inline constexpr int far_spawn_farmer_dist = 50;
+// combatBotv3: with this much fuel left at farm scoring, score at least min_scored_rich camps in full
+// (not stopping at the first bound below the best): far but richer camps get a real score (expanse:
+// the wolf pair 37 tiles out was never scored in 323 traced turns). 0: off.
+inline constexpr unsigned long long rich_fuel = 0;  // 80000 tested on expanse: no change (farm options are rarely rescored; g22 never in the top bounds): off
+inline constexpr int min_scored_rich = 3;
+inline constexpr int target_mode = 0;  // 1 tested +496 vs +507 (weakest picks unchanged), 2: +371: off
+inline constexpr float finish_hits = 2.0f;
+inline constexpr bool peel_back = false;  // tested vs loopBot: +450 vs +507, deaths 202 vs 191 (swirl, monolith, rushbait worse): off
+inline constexpr float peel_drop = 0.25f;     // lost this share of max health over the last 2 rounds...
+inline constexpr float peel_max_hp = 0.6f;    // ...and below this health (tanks: peel_tank_hp)
+inline constexpr float peel_tank_hp = 0.4f;
+inline constexpr int peel_enemy_radius = 4;   // with an enemy champion this close
 inline constexpr bool pair_lives = true;
 inline constexpr int pair_front_slack = 1;        // Cassi's slack ahead of our front (= ranged_front_slack: off; -1, a tile behind it, tested worse)
 inline constexpr float pair_risk = 1.5f;          // flee / retreat judge time to death this much shorter for either of them
@@ -410,6 +569,37 @@ inline constexpr int ranged_kite_ally_radius = 3; // a melee ally this close mea
 inline constexpr bool ranged_hold_always = true;  // the same hold and front rules on farm walks, regroups, hunts and idling
 inline constexpr bool ward_any_bush = true;           // ward any hidden bush in placement range, whichever way we move
 inline constexpr unsigned long long ward_table_fuel = 50000;  // combatBotv2: build the bush tables only with this much fuel left
+// combatBotv3: ranged exposure gradient (nav/navigator.cpp exposure()): stepping with an enemy seen
+// within exposure_radius in the last exposure_ghost_age rounds, a ranged champion picks the least
+// exposed of the steps that make progress (4 = one step of progress).
+inline constexpr bool outnumbered_ranged_pair = false;  // combatBotv3: fewer of us alive: ranged need a teammate for a monster camp
+inline constexpr bool ranged_scout_ward = false;        // combatBotv3: ranged farming alone, nothing in sight: ward toward their spawn
+inline constexpr int enemy_side_min_party = 0;   // combatBotv3: camps nearer their spawn than ours need this many of us (0: off)
+inline constexpr float ranged_contested_factor = 1.0f;  // combatBotv3: ranged, camp not clearly ours and risky (enemy seen / bush beside): x this
+inline constexpr bool contested_all = true;             // ...for every champion (ranged only split the team: swirl deaths 14 -> 21)
+inline constexpr float own_side_ratio = 0.8f;           // ...clearly ours: our spawn distance at most this x theirs
+inline constexpr int contested_seen_rounds = 30;        // ...risky: an enemy seen near it this recently
+inline constexpr bool ranged_exposure = true;
+inline constexpr int exposure_radius = 12;
+inline constexpr unsigned long long exposure_table_fuel = 60000;
+inline constexpr bool exposure_unseen_only = true;  // bushes we can see into do not count
+inline constexpr bool melee_cover = true;           // melee: tie-break toward standing in front of our ranged
+inline constexpr int melee_cover_weight = 3;        // ...per tile not ahead of our nearest ranged ally
+inline constexpr int melee_cover_radius = 6;        // ...ranged allies this close
+inline constexpr bool exposure_hp_scale = false;   // exposure weighs more when hurt (x1 full .. x3 near death)
+inline constexpr int exposure_spread = 0;          // ranged: per other ranged ally adjacent to the tile (0: off)
+inline constexpr int exposure_no_backtrack = 2;    // stepping back onto last round's tile (0: off)
+inline constexpr bool exposure_stand = true;        // ranged: in range already, step to a clearly safer tile still in range
+inline constexpr int exposure_step_gain = 3;        // ...at least this much less exposed  // build the bush-distance table only with this much fuel left
+inline constexpr int exposure_ghost_age = 3;
+inline constexpr int exposure_front_weight = 3;   // per tile nearer the enemy than our nearest melee
+inline constexpr int exposure_bush_weight = 2;    // per tile closer than 3 to a bush (not standing in one)
+inline constexpr bool ward_fail_tile_only = true;
+// combatBotv3: a champion moves its one ward on to a hidden bush at least this far from where it
+// put the last one. Ranged champions gain most from the vision (range in fights, seeing who waits
+// in a bush before walking past it); melee can dash or tank out (user). Was 3 for everyone.
+inline constexpr int ward_respace_ranged = 1;
+inline constexpr int ward_respace_melee = 3;     // combatBotv3: a failed bush ward skips that tile only (was: 3 tiles around it, as if ours)
 inline constexpr bool ward_bushes = true;             // moving toward an unseen bush: one ward on it (wards last forever, recharge in a round)
 inline constexpr int ward_line_width = 1;            // halfway line: |dist to our spawn - dist to theirs| <= this
 inline constexpr bool ward_once = false;             // one ward per champion, then stop trying
@@ -439,6 +629,14 @@ inline constexpr int flee_dash_gain = 1;            // flee home: dash when it b
 inline constexpr bool flee_dash_then_walk = true;   // flee home: walk on after a dash in the same turn
 inline constexpr int flee_bush_bonus = 4;           // flee home: a bush tile is worth this many steps (0: off)...
 inline constexpr int flee_bush_chase = 8;           // ...while the nearest enemy is 3 to this many tiles away
+// combatBotv3: walk around unseen bushes in the middle of the map (ambush spots): the bush and
+// this many tiles around it are avoided while a route around costs at most centre_bush_detour extra
+// steps; carrying centre_bush_gems or more, one tile wider and a longer detour is accepted.
+inline constexpr int centre_bush_ring = -1;         // -1: off (A/B: 3 detours a game, deaths near bushes not lower, -26 banked)
+inline constexpr float centre_bush_region = 0.35f;  // middle: within this fraction of the half-width/height from the centre
+inline constexpr int centre_bush_detour = 4;
+inline constexpr int centre_bush_gems = 20;
+inline constexpr int centre_bush_detour_gems = 8;
 inline constexpr bool flee_homeward = true;         // fleeing: equally quick escapes go toward home; else walk home
 inline constexpr bool tank_opens = true;            // ranged hold fire on a sleeping camp until the tank is beside it...
 inline constexpr int tank_open_radius = 15;         // ...if a tank claiming it is this close to the camp...

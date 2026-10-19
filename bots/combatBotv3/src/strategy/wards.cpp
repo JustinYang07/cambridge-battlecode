@@ -1,5 +1,6 @@
 #include "wards.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "../core/statics.h"
 #include "../core/trace.h"
 #include "../core/world.h"
+#include "../brain/option.h"
 
 namespace bc = cambc;
 
@@ -61,6 +63,12 @@ RawBuf<std::uint8_t> bushB;  // per tile: a bush
 RawBuf<std::uint16_t> bushDist;  // per tile: Chebyshev distance to the nearest bush
 bool noBushes = false;
 bc::vec2 lastPos{-1, -1}, lastWard{-100, -100};
+// combatBotv3: bush tiles a placement failed on (a teammate's ward stands there). Vision is not
+// shared, so a teammate's ward shows us nothing: we skip only that tile. Marking it as our own last
+// ward blocked every bush within 3 of it (contest vs Snowcrab: Tavi never warded the centre ring
+// after Stellar's ward took its first bush; their team warded it ~20 times by round 38).
+std::array<bc::vec2, 8> failedAt{};
+int failedCount = 0, failedNext = 0;
 
 // Bushes hide whoever stands in them (bushes block line of sight; from inside one you see out).
 // A champion walking toward bushes it cannot see into puts its ward beside or in them: wards last
@@ -114,7 +122,10 @@ void scoutBushes(World& w) {
             const bc::vec2 b{x, y};
             if (!bushB[static_cast<std::size_t>(y * s.width + x)]) continue;
             if (!tune::ward_any_bush && (x - pos.x) * dx + (y - pos.y) * dy < 0) continue;
-            if (dist(b, lastWard) <= 3 || w.isVisible(b)) continue;
+            if (dist(b, lastWard) <= (w.ranged ? tune::ward_respace_ranged : tune::ward_respace_melee) || w.isVisible(b)) continue;
+            bool failed = false;
+            for (int k = 0; k < failedCount; ++k) failed = failed || failedAt[static_cast<std::size_t>(k)] == b;
+            if (failed) continue;
             const int d = dist(b, pos);
             if (d < bestD) { bestD = d; best = b; }
         }
@@ -128,14 +139,63 @@ void scoutBushes(World& w) {
             trace().note((msg << "bush ward at " << best.x << ',' << best.y).view());
         }
     } catch (const bc::error& e) {
-        lastWard = best;  // do not retry this bush every turn
+        // Do not retry this bush every turn; the rest stay open.
+        if (tune::ward_fail_tile_only) {
+            failedAt[static_cast<std::size_t>(failedNext)] = best;
+            failedNext = (failedNext + 1) % static_cast<int>(failedAt.size());
+            failedCount = std::min(failedCount + 1, static_cast<int>(failedAt.size()));
+        } else {
+            lastWard = best;
+        }
         trace().note(std::string("scout ward failed: ") + e.message());
     }
 }
 } // namespace
 
+namespace {
+// combatBotv3: a ranged champion farming alone with no enemy in sight moves its ward toward their
+// spawn, at the edge of placement reach: whoever walks at us is seen before they arrive (elkring vs
+// alfungus: Stellar opened an elk alone while four of them walked in from out of sight; user).
+void scoutAhead(World& w) {
+    if (!tune::ranged_scout_ward || !w.ranged || !w.enemies.empty() || (w.round + w.slot) % 3 != 0) return;
+    if (w.lastOption != static_cast<int>(OptionKind::farm) && w.lastOption != static_cast<int>(OptionKind::capture)) return;
+    for (const auto& a : w.allies)
+        if (dist(a.pos, w.pos) <= 6) return;  // a teammate with us: not alone
+    const auto& s = Statics::get();
+    const int reach = static_cast<int>(bc::constants::ward_placement_radius);
+    const bc::vec2 to = s.enemySpawnCenter;
+    const int dx = (to.x > w.pos.x) - (to.x < w.pos.x), dy = (to.y > w.pos.y) - (to.y < w.pos.y);
+    bc::vec2 best{-1, -1};
+    for (int k = reach; k >= 1 && best.x < 0; --k) {
+        const bc::vec2 t{w.pos.x + dx * k, w.pos.y + dy * k};
+        if (t.x < 0 || t.y < 0 || t.x >= s.width || t.y >= s.height || s.terrain.is_set(t)) continue;
+        best = t;
+    }
+    if (best.x < 0 || dist(best, lastWard) <= 2) return;
+    try {
+        const auto st = bc::self().state();
+        if (st.contains(bc::champion_state::recalling) || st.contains(bc::champion_state::submitting_gems) || st.contains(bc::champion_state::teleporting)) return;
+        if (bc::self().place_ward(best)) {
+            lastWard = best;
+            FixedStr<48> msg;
+            trace().note((msg << "scout ward at " << best.x << ',' << best.y).view());
+        }
+    } catch (const bc::error&) {
+    }
+}
+} // namespace
+
+int bushDistance(bc::vec2 t) {
+    if (noBushes) return 255;
+    if (bushDist.empty()) return -1;
+    const auto& s = Statics::get();
+    if (t.x < 0 || t.y < 0 || t.x >= s.width || t.y >= s.height) return 255;
+    return bushDist[static_cast<std::size_t>(t.y * s.width + t.x)];
+}
+
 void update(World& w) {
     if (tune::ward_bushes && w.alive) scoutBushes(w);
+    if (w.alive) scoutAhead(w);
     if (!tune::wards || !w.alive) return;
     if (!init) setup(w);
     if (done || w.round < nextTry || (w.round + w.slot) % 2 != 0) return;

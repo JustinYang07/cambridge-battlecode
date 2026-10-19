@@ -69,6 +69,7 @@ struct Kit {
     float spellModifiers = 0;  // sum of damage-spell focus multipliers
     float spellDps = 0;        // average damage per turn from damage spells over their cooldown
     float dashRange = 0;       // tiles a dash ability covers (0 = no dash)
+    int spellRange = 0;        // combatBotv3: longest reach of our damaging spells (kite farming)
 };
 
 class World {
@@ -121,6 +122,9 @@ public:
     }
     // The tile is on their half (nearer their spawn than ours).
     bool theirHalf(cambc::vec2 p) const;
+    // combatBotv3: a ranged champion's spot on their half with none of our melee champions alive
+    // within tune::invade_melee_radius of it: too risky to invade alone (tune::invade_needs_melee).
+    bool invadeWithoutMelee(cambc::vec2 at) const;
     int enemyRespawnAt = -1;       // round the first dead enemy comes back (-1: none dead)
     cambc::bitboard visible, occupied;
     cambc::bitboard danger;        // tiles within reach of live, damaging monsters we can see
@@ -128,6 +132,10 @@ public:
     // combatBotv3: which allies are in our vision this round (bit per slot). Reading an ally out of
     // sight throws "not in vision", and a thrown error costs ~2-3k fuel: every per-ally read asks this first.
     mutable unsigned allyVisMask_ = 0;
+    mutable int observedRound_ = -1;
+    mutable std::array<float, 16> observedDps_{};
+    mutable std::array<int, 16> observedAt_{};
+    void observeEnemyDamage() const;
     mutable int allyVisRound_ = -1;
     mutable std::array<cambc::vec2, 8> allyPosCache_{};
     mutable int allyPosRound_ = -1;     // combatBotv2: outnumbered here, so no dash on ordinary moves this turn
@@ -190,6 +198,12 @@ public:
     bool campsInRangeOf(cambc::vec2 tile, int range) const;
     // Enemy champion damage per turn that could be on `at` soon (visible + recently seen, decayed).
     float enemyPressure(cambc::vec2 at, int radius) const;
+    // combatBotv3: an enemy's damage per turn: the larger of its stats' estimate and what we have
+    // seen it deal lately (to us or a visible ally, no monster in the way). A health-stacked Ryth
+    // (elkring vs Rhodes: 6,400 health) hits far harder than strength + focus suggests.
+    float enemyDps(int enemyIndex, float model) const;
+    // combatBotv3: the ally in `slot` is dead (works out of sight).
+    bool allyDeadNow(int slot) const;
     // Our side's damage per turn around `at`: us plus visible allies within `radius`.
     float alliedPower(cambc::vec2 at, int radius) const;
     int alliesWithin(cambc::vec2 at, int radius) const;
@@ -226,6 +240,27 @@ public:
     // An ally's carried gems by draft slot (-1 when unknown or dead).
     int allyGems(int slot) const;
     void spentAbility(int slot) { ready_[slot] = 0; }
+    // Lab fight data (traced builds only): features of this turn's best-scored fight option, and
+    // the exploration state (a share of contacts do the opposite of the scorer for a while).
+    struct FightFeat {
+        int round = -1, enemy = -1, us = 0, them = 0, ghosts = 0, tgtBag = 0, theirBags = 0, enemyStuns = 0, tx = 0, ty = 0, dist = 0;
+        float score = -1, edge = 0, ourHp = 0, theirHp = 0, ourDps = 0, theirDps = 0, tgtHpFrac = 0, theirHpFrac = 0, monster = 0, winChance = 0;
+    };
+    // combatBotv3 commitment: once we pick a fight (or a flight) we keep it until commitUntil.
+    int commitKind = -1, commitTarget = -1, commitUntil = -1;
+    int spellClearGroup = -1;  // combatBotv3: this turn's plan clears this group with spells from range
+    // combatBotv3 quiet game: no enemy death seen and we never died, and no enemy champion within
+    // tune::quiet_enemy_radius of us for tune::quiet_rounds, from tune::quiet_min_round.
+    bool anyDeathSeen = false;
+    int lastEnemyNearRound = 0;
+    bool quietGame() const {
+        return !anyDeathSeen && round >= tune::quiet_min_round && round - lastEnemyNearRound >= tune::quiet_rounds;
+    }
+    FightFeat bestFight;
+    int lastContactRound = -100, exploreUntil = -1, exploreMode = 0;  // mode 1: declined, 2: forced
+    int exploreForced = -1;  // option index forced this turn (mode 2)
+    // Allies (not us) within `radius` of `at` with a stun off cooldown (host reads: lab only).
+    int alliesStunReadyNear(cambc::vec2 at, int radius) const;
 
 private:
     void loadNearbyCamps();
@@ -237,6 +272,10 @@ private:
     mutable std::array<AllyHp, 8> allyHpCache_{};
     void readAllyHp(int s) const;
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
+    // combatBotv3: per roster index, stats that change only with items (max health, strength,
+    // focus, range) and the round they were read: re-read every tune::enemy_stat_every rounds.
+    struct EnemyStats { int round = -1000; float maxHp = 0, strength = 0, focus = 0; int range = 1; };
+    std::array<EnemyStats, 8> enemyStats_{};
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};
     std::array<cambc::vec2, 8> enemyPrevPos_{};          // where each enemy stood when last seen

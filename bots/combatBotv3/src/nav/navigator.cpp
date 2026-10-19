@@ -2,12 +2,14 @@
 #include "fields.h"
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <vector>
 #include "../core/config.h"
 #include "../core/fixed_str.h"
 #include "../core/trace.h"
 #include "../brain/scorers.h"
+#include "../strategy/wards.h"
 
 namespace bc = cambc;
 
@@ -130,6 +132,179 @@ bool isBush(bc::vec2 t) {
     return bits[static_cast<std::size_t>(t.y * st.width + t.x)] != 0;
 }
 
+// combatBotv3: exposure. Stepping toward a goal (and choosing where to stand), a champion picks
+// among the moves that make progress the one least exposed:
+//   ranged: not nearer the enemy than our melee front, not beside a bush we cannot see into (anyone
+//   may wait in one), farther from the enemy (eight: Stellar and Cassi walked along the central bush
+//   wall ahead of our melee, user);
+//   melee (with a ranged ally near): in front of our ranged, so the hits land on us first.
+// One map per round, a window around us filled on demand: every caller that round shares it.
+constexpr int kBig = 1 << 20;
+
+bool meleeDesign(bc::champion_type t) {
+    static std::array<std::int8_t, 16> cache{};
+    const auto i = static_cast<std::size_t>(t);
+    if (i >= cache.size()) return false;
+    if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
+    return cache[i] == 1;
+}
+
+// Bush distances come from the bush-ward table (wards::bushDistance), built cheaply by a distance
+// field on a turn with fuel to spare. Stamping our own table cost 75k+ on corners and lost the turn.
+bool ensureBushList(const World& w) {
+    (void)w;
+    return wards::bushDistance(w.pos) >= 0;
+}
+int bushNearAt(bc::vec2 t) {
+    const int d = wards::bushDistance(t);
+    return d < 0 ? 3 : std::min(d, 3);
+}
+
+// combatBotv3: unseen bushes in the middle of the map, and the tiles around them (wider when
+// carrying gems): whoever waits in one ambushes anyone walking past. Bushes we can see into (our
+// ward on them) are fine. Only bushes within 10 tiles of us; false when there are none. The
+// centre bush list is built once (a per-call scan of the area cost ~30k fuel a turn).
+bool centreBushZone(const World& w, bc::bitboard& zone) {
+    static std::vector<bc::vec2> centre;
+    static bool built = false;
+    if (tune::centre_bush_ring < 0) return false;
+    if (!built) {
+        built = true;
+        const auto& st = Statics::get();
+        const float hx = static_cast<float>(st.width) / 2.0f, hy = static_cast<float>(st.height) / 2.0f;
+        for (auto t : bc::map::bushes().positions()) {
+            const float cx = std::abs(static_cast<float>(t.x) + 0.5f - hx) / hx, cy = std::abs(static_cast<float>(t.y) + 0.5f - hy) / hy;
+            if (std::max(cx, cy) <= tune::centre_bush_region) centre.push_back(t);
+        }
+    }
+    if (centre.empty()) return false;
+    const int ring = w.gems >= tune::centre_bush_gems ? tune::centre_bush_ring + 1 : tune::centre_bush_ring;
+    bool any = false;
+    for (const auto t : centre) {
+        if (dist(t, w.pos) > 10 || w.isVisible(t)) continue;
+        if (!any) zone.clear();
+        zone.draw_chebyshev(t, static_cast<float>(ring));
+        any = true;
+    }
+    return any;
+}
+
+struct ExMap {
+    static constexpr int R = 5, N = 2 * R + 1, HB = R + 2, HN = 2 * HB + 1;
+    bool on = false, melee = false;
+    int round = -1;
+    bc::vec2 origin{-100, -100};
+    std::array<bc::vec2, 12> foes{};
+    int nf = 0;
+    int front = kBig;        // ranged: our nearest melee ally's distance to the enemy
+    int rangedFront = kBig;  // melee: our nearest ranged ally's distance to the enemy
+    int scale = 4;           // quarters: health-scaled weight (exposure_hp_scale)
+    std::array<bc::vec2, 8> rangedMates{};  // our other ranged champions near (exposure_spread)
+    int nr = 0;
+    bc::vec2 lastPos{-100, -100};  // the tile we stepped from last round (exposure_no_backtrack)
+    // Generation-tagged memo: no clearing each round.
+    std::uint16_t gen = 0;
+    std::array<std::int16_t, N * N> memo{};
+    std::array<std::uint16_t, N * N> memoGen{};
+    const World* world = nullptr;  // this round's (for vision into bushes)
+
+    // Distance from t to the nearest bush tile we cannot see into (3: none within 2). Only tiles beside
+    // a bush look further, and only for the tiles asked about (stamping every bush cost ~1.9k a round).
+    int hiddenBush(bc::vec2 t) const {
+        const auto& st = Statics::get();
+        const int b = bushNearAt(t);
+        if (b == 0 || b >= 3 || !tune::exposure_unseen_only) return b;
+        int best = 3;
+        for (int dy = -2; dy <= 2; ++dy)
+            for (int dx = -2; dx <= 2; ++dx) {
+                const int x = t.x + dx, y = t.y + dy, d = std::max(std::abs(dx), std::abs(dy));
+                if (d >= best || x < 0 || y < 0 || x >= st.width || y >= st.height) continue;
+                if (bushNearAt({x, y}) != 0) continue;  // not a bush
+                if (!world->isVisible({x, y})) best = d;
+            }
+        return best;
+    }
+
+    int cost(bc::vec2 t) const {
+        int nd = kBig;
+        for (int k = 0; k < nf; ++k) nd = std::min(nd, dist(t, foes[static_cast<std::size_t>(k)]));
+        if (melee) return rangedFront < kBig && nd >= rangedFront ? tune::melee_cover_weight * (nd - rangedFront + 1) : 0;
+        int c = -std::min(nd, 10);
+        if (front < kBig && nd < front) c += tune::exposure_front_weight * (front - nd);
+        const int hb = hiddenBush(t);
+        if (hb > 0 && hb < 3) c += tune::exposure_bush_weight * (3 - hb);  // beside an unseen bush, not in one
+        // Area spells (Ryth's stun) punish our ranged standing together.
+        if (tune::exposure_spread > 0)
+            for (int k = 0; k < nr; ++k)
+                if (dist(t, rangedMates[static_cast<std::size_t>(k)]) <= 1) c += tune::exposure_spread;
+        c = c * scale / 4;
+        if (tune::exposure_no_backtrack > 0 && t == lastPos) c += tune::exposure_no_backtrack;
+        return c;
+    }
+    int at(bc::vec2 t) {
+        const int x = t.x - origin.x + R, y = t.y - origin.y + R;
+        if (x < 0 || y < 0 || x >= N || y >= N) return cost(t);
+        const auto i = static_cast<std::size_t>(y * N + x);
+        if (memoGen[i] != gen) {
+            memoGen[i] = gen;
+            memo[i] = static_cast<std::int16_t>(cost(t));
+        }
+        return memo[i];
+    }
+};
+
+ExMap& exposureMap(const World& w) {
+    static ExMap x;
+    static bc::vec2 prevPos{-100, -100};
+    static int prevRound = -100;
+    if (x.round == w.round && x.origin == w.pos) return x;
+    if (x.round != w.round) {
+        // The tile we left last round (one step back would undo it).
+        x.lastPos = (prevRound == w.round - 1 && prevPos != w.pos) ? prevPos : bc::vec2{-100, -100};
+        prevRound = w.round;
+        prevPos = w.pos;
+    }
+    x.round = w.round;
+    x.origin = w.pos;
+    x.on = false;
+    x.nf = 0;
+    x.nr = 0;
+    x.front = x.rangedFront = kBig;
+    x.melee = !w.ranged;
+    // Below full health, exposure counts for more (x1 at full, up to x3 near death).
+    x.scale = tune::exposure_hp_scale ? 4 + static_cast<int>(8.0f * std::clamp(1.0f - w.hpFrac(), 0.0f, 1.0f)) : 4;
+    if (x.melee ? !tune::melee_cover : !tune::ranged_exposure) return x;
+    if (!ensureBushList(w)) return x;
+    for (const auto& g : w.ghosts)
+        if (w.round - g.round <= tune::exposure_ghost_age && dist(g.pos, w.pos) <= tune::exposure_radius && x.nf < static_cast<int>(x.foes.size()))
+            x.foes[static_cast<std::size_t>(x.nf++)] = g.pos;
+    if (x.nf == 0) return x;
+    for (int s = 0; s < w.allyCount && s < 8; ++s) {
+        if (s == w.slot) continue;
+        const bool m = meleeDesign(w.allyTypes[static_cast<std::size_t>(s)]);
+        if (m == x.melee) {
+            if (!m && tune::exposure_spread > 0 && x.nr < static_cast<int>(x.rangedMates.size())) {
+                const auto q = w.allyPosCached(s);
+                if (q.x >= 0 && dist(q, w.pos) <= 3) x.rangedMates[static_cast<std::size_t>(x.nr++)] = q;
+            }
+            continue;  // ranged look at our melee, melee at our ranged
+        }
+        const auto p = w.allyPosCached(s);
+        if (p.x < 0 || dist(p, w.pos) > (x.melee ? tune::melee_cover_radius : tune::exposure_radius)) continue;
+        int d = kBig;
+        for (int k = 0; k < x.nf; ++k) d = std::min(d, dist(p, x.foes[static_cast<std::size_t>(k)]));
+        (x.melee ? x.rangedFront : x.front) = std::min(x.melee ? x.rangedFront : x.front, d);
+    }
+    if (x.melee && x.rangedFront >= kBig) return x;  // no ranged ally to cover
+    if (++x.gen == 0) {  // wrapped: clear the tags once
+        x.memoGen.fill(0);
+        x.gen = 1;
+    }
+    x.world = &w;
+    x.on = true;
+    return x;
+}
+
 bool dashTo(World& w, int slot, bc::vec2 to) {
     try {
         if (w.abilities()[static_cast<std::size_t>(slot)].use(to)) {
@@ -145,6 +320,25 @@ bool dashTo(World& w, int slot, bc::vec2 to) {
     return false;
 }
 }  // namespace
+
+bool Navigator::dashAcross(World& w, bc::vec2 target) {
+    if (!tune::dash_straight_travel || w.kit.dashRange < 2 || w.reserveDash) return false;
+    const auto& st = Statics::get();
+    bc::vec2 from{-1, -1}, to{-1, -1};
+    if (st.dashLine(w.pos, target, &from, &to) != 1 || from.x < 0 || to.x < 0) return false;
+    if (w.pos == from) {
+        if (const int slot = readyDash(w); slot >= 0 && st.dashLegal(w.pos, to) && !w.occupied.is_set(to)) {
+            trace().note("dash across the ditch");
+            return dashTo(w, slot, to);
+        }
+        trace().action("hold");  // at the ditch, dash cooling down
+        return true;
+    }
+    bc::bitboard goal;
+    goal.clear();
+    goal.set(from);
+    return stepToward(w, goal, false);
+}
 
 bool Navigator::enterPocket(World& w, const GroupInfo& g) {
     if (w.pos == g.dashFrom) {
@@ -225,13 +419,19 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
     }
     if (!bc::self().can_move()) return false;
     static constexpr std::array<bc::vec2, 8> kCompass{{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}};
+    auto& ex = exposureMap(w);
     for (int attempt = 0; attempt < 2; ++attempt) {
         bc::vec2 best{-1, -1};
-        int bestD = here;
+        int bestD = here, bestScore = 1 << 30;
         for (const auto dir : kCompass) {
             const bc::vec2 t = w.pos + dir;
             const int d = value(t);
-            if (d < here && (best.x < 0 || better(t, d, best, bestD))) { best = t; bestD = d; }
+            if (d >= here) continue;
+            if (ex.on) {
+                // Progress first (4 per step), exposure second: a step less progress for a much safer tile.
+                const int sc = d * 4 + ex.at(t);
+                if (best.x < 0 || sc < bestScore || (sc == bestScore && better(t, d, best, bestD))) { best = t; bestD = d; bestScore = sc; }
+            } else if (best.x < 0 || better(t, d, best, bestD)) { best = t; bestD = d; }
         }
         if (best.x < 0) return false;  // blocked or only into danger: let the search route round it
         if (tryMove(w, best)) return true;  // tryMove marks a hidden blocker occupied: retry once
@@ -268,10 +468,17 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
         }
         if (any) avoid = &merged;
     }
-    // Set paths: far from the goal, walk the precomputed field (built now if it is missing).
+    // combatBotv3: unseen centre bushes near us (zone built once here, used by both walks below).
+    bc::bitboard bushes;
+    const bool haveBushes = tune::centre_bush_ring >= 0 && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor &&
+                            centreBushZone(w, bushes);
+    // Set paths: far from the goal, walk the precomputed field (built now if it is missing). Its
+    // step never enters a bush zone; with no step around one, the search below decides.
     if (tune::set_paths && far.read && aim.x >= 0 && dist(w.pos, aim) > tune::field_walk_tiles) {
         if (far.read(far.id, w.pos) < 0 && far.ensure && bc::fuel_remaining() > tune::field_build_fuel) far.ensure(far.id);
-        if (stepByField(w, far, blockedNow, avoid, allowDash, aim)) return true;
+        bc::bitboard farAvoid;
+        if (haveBushes) farAvoid = (avoid ? *avoid | bushes : bushes) & ~goals;
+        if (stepByField(w, far, blockedNow, haveBushes ? &farAvoid : avoid, allowDash, aim)) return true;
     }
     bc::distance_field field;
     bc::bitboard visited, here;
@@ -280,7 +487,37 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     // While a decision is marked stuck (we were bouncing between two tiles), ignore the avoid
     // layer: a safe route and the plain fallback pointing opposite ways caused exactly that.
     // Short of fuel: skip the safe-route search (one path search fewer) rather than overrun.
-    if (avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
+    // combatBotv3: route around unseen centre bushes (plus the usual avoid zones) when the detour
+    // is short; otherwise fall through to the usual avoid handling.
+    bool bushRoute = false;
+    {
+        if (haveBushes) {
+            auto zone = (avoid ? *avoid | bushes : bushes) & ~goals;
+            if (zone.is_set(w.pos)) {
+                bc::bitboard bubble;
+                bubble.clear();
+                bubble.draw_chebyshev(w.pos, 1.0f);
+                zone = zone & ~bubble;
+            }
+            auto walls = blockedNow | zone;
+            walls.set(w.pos, false);
+            field.compute_to(walls, goals, here, visited);
+            if (visited.is_set(w.pos)) {
+                bc::distance_field plain;
+                bc::bitboard plainVisited;
+                plain.compute_to(blockedNow, goals, here, plainVisited);
+                const int detour = plainVisited.is_set(w.pos) ? static_cast<int>(field.get(w.pos)) - static_cast<int>(plain.get(w.pos)) : 0;
+                const int cap = w.gems >= tune::centre_bush_gems ? tune::centre_bush_detour_gems : tune::centre_bush_detour;
+                if (detour <= cap) {
+                    blockedNow = walls;
+                    bushRoute = true;
+                    if (detour > 0) trace().note("around a centre bush");
+                }
+            }
+            if (!bushRoute) visited.clear();
+        }
+    }
+    if (!bushRoute && avoid && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor) {
         // First try a route that never enters the avoided zones. If we are already inside one,
         // free a small bubble around us so the safe route can lead out of it; otherwise every
         // step from in here fell back to the plain route, which pointed back the way we came.
@@ -312,9 +549,12 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     if (!me.can_move()) return moved;
 
     const auto origin = w.pos;
+    auto& ex = exposureMap(w);
     for (int attempt = 0; attempt < 2; ++attempt) {
         bc::vec2 best = w.pos;
         auto bestD = field.get(w.pos);
+        const auto hereD = bestD;
+        int bestScore = 1 << 30;
         auto stepWalls = blockedNow | w.occupied;
         stepWalls.set(w.pos, false);
         for (auto t : stepWalls.reachable_tiles(w.pos, 1).positions()) {
@@ -322,8 +562,16 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
             // written and read as distance 0: without this check we walked *away* from goals.
             if (t == w.pos || !visited.is_set(t)) continue;
             const auto d = field.get(t);
-            if (d < bestD || (d == bestD && best != w.pos && aim.x >= 0 &&
-                              (t - aim).length_squared() < (best - aim).length_squared())) {
+            if (ex.on) {
+                if (d >= hereD) continue;  // progress only
+                const int sc = static_cast<int>(d) * 4 + ex.at(t);
+                if (sc < bestScore || (sc == bestScore && aim.x >= 0 && (t - aim).length_squared() < (best - aim).length_squared())) {
+                    bestScore = sc;
+                    bestD = d;
+                    best = t;
+                }
+            } else if (d < bestD || (d == bestD && best != w.pos && aim.x >= 0 &&
+                                     (t - aim).length_squared() < (best - aim).length_squared())) {
                 bestD = d;
                 best = t;
             }
@@ -337,6 +585,26 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
 bool Navigator::stepToward(World& w, bc::vec2 target, int range, bool allowDash, const bc::bitboard* avoid) {
     auto goals = standTiles(w, target, range);
     return stepToward(w, goals, allowDash, avoid, target);
+}
+
+bool Navigator::saferStep(World& w, const bc::bitboard& keepIn) {
+    if (!bc::self().can_move()) return false;
+    auto& ex = exposureMap(w);
+    if (!ex.on) return false;
+    const int here = ex.at(w.pos);
+    auto stepWalls = blocked(w) | w.occupied;
+    stepWalls.set(w.pos, false);
+    bc::vec2 best = w.pos;
+    int bestC = here;
+    for (auto t : stepWalls.reachable_tiles(w.pos, 1).positions()) {
+        if (t == w.pos || !keepIn.is_set(t) || w.danger.is_set(t)) continue;
+        const int c = ex.at(t);
+        if (c < bestC) { bestC = c; best = t; }
+    }
+    if (best == w.pos || here - bestC < tune::exposure_step_gain) return false;
+    if (!tryMove(w, best)) return false;
+    trace().note("safer tile");
+    return true;
 }
 
 bool Navigator::stepAway(World& w, const std::vector<bc::vec2>& threats, int keepRange) {

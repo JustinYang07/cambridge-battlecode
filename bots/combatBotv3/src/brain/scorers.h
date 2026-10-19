@@ -24,5 +24,11 @@ bool allyHoldingOf(const World& w, int groupId);
 float gemValue(const World& w);
 // farm.cpp: a team rush is on for this group (the map's main gem camp, enough of us alive).
 bool teamRushOn(const World& w, int groupId);
+// combatBotv3: capturing now (on a reward's spawn tiles) with no enemy champion within capture_hold_radius.
+bool captureHold(const World& w);
+// combatBotv3: we can farm group g from outside its monsters' reach with spells (no melee ally there).
+bool kiteFarmable(const World& w, const GroupInfo& g);
+// combatBotv3: a bush within 3 tiles of the group's centre (cached per group).
+bool bushBeside(const GroupInfo& g);
 
 } // namespace scorers

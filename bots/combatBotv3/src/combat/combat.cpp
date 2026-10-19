@@ -66,9 +66,12 @@ EnemySeen* enemyInRange(World& w, int range, const Focus& focus) {
         const bool chosen = focus.enemy && e.handle == *focus.enemy;
         // Allies attacking it (claims), or the first enemy we saw take damage (the team target).
         const bool allyFocus = comms::focusMask(e.index, w.slot) != 0 || (e.index >= 0 && e.index == w.teamTarget);
-        const bool wanted = chosen || allyFocus || focus.anyEnemy || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling;
+        const bool fighting = focus.enemy || focus.anyEnemy || allyFocus;
+        // combatBotv3: one we can finish now (target_mode 1), or the weakest (2), comes first.
+        const bool finish = tune::target_mode == 1 && fighting && e.hp <= tune::finish_hits * std::max(w.strength, 1.0f);
+        const bool wanted = chosen || allyFocus || focus.anyEnemy || finish || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling;
         if (!wanted) continue;
-        const int rank = chosen ? 2 : allyFocus ? 1 : 0;
+        const int rank = tune::target_mode == 2 && fighting ? 0 : finish ? 3 : chosen ? 2 : allyFocus ? 1 : 0;
         if (rank > bestRank || (rank == bestRank && e.hp < best->hp)) {
             best = &e;
             bestRank = rank;
@@ -93,6 +96,8 @@ bool basicAttack(World& w, const Focus& focus) {
             return true;
         }
         if (auto* c = campInRange(w, focus.groupId, w.range)) {
+            // Lab probe: ranged champions hit attacking monsters with spells only (aggro test).
+            if (tune::probe_spell_only_camps && w.ranged && c->strength > 0) return false;
             me.attack(*c->handle);
             w.lastAttacked = c->pos;
             refresh(*c);
@@ -169,14 +174,20 @@ bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
                 for (const auto& e : w.enemies) enemyInReach = enemyInReach || (e.hp > 0 && dist(e.pos, w.pos) <= range + radius);
                 if (tune::aoe_champions_first && enemyInReach) {
                     // Every tile in reach that touches an enemy (a spot between two of them hits both).
-                    for (int dx = -range; dx <= range; ++dx)
-                        for (int dy = -range; dy <= range; ++dy) {
-                            const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
-                            if (t.x < 0 || t.y < 0 || t.x >= Statics::get().width || t.y >= Statics::get().height) continue;
-                            bool near = false;
-                            for (const auto& e : w.enemies) near = near || (e.hp > 0 && dist(e.pos, t) <= radius);
-                            if (near) consider(t);
-                        }
+                    // combatBotv3: count champions per tile first; camps only on the tiles hitting the
+                    // most champions (the rest cannot win: champions weigh 100 each). Counting camps
+                    // on every tile cost up to ~40k in a crowded fight.
+                    int mostChamps = 0;
+                    for (int pass = 0; pass < 2; ++pass)
+                        for (int dx = -range; dx <= range; ++dx)
+                            for (int dy = -range; dy <= range; ++dy) {
+                                const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
+                                if (t.x < 0 || t.y < 0 || t.x >= Statics::get().width || t.y >= Statics::get().height) continue;
+                                int champs = 0;
+                                for (const auto& e : w.enemies) champs += e.hp > 0 && dist(e.pos, t) <= radius;
+                                if (pass == 0) mostChamps = std::max(mostChamps, champs);
+                                else if (champs > 0 && champs == mostChamps) consider(t);
+                            }
                 } else {
                     for (const auto& e : w.enemies) consider(e.pos);
                 }
@@ -338,6 +349,16 @@ void act(World& w, const Focus& focus, bool beforeMove) {
         castOnTargets(w, focus, false);
     }
     if (attacked) resetAndAttack(w, focus);
+}
+
+int damageSpellRange(const World& w) {
+    int best = 0;
+    for (const auto& a : w.abilities()) {
+        if (!(a.is_damage() || a.is_aoe_damage() || a.is_cc())) continue;
+        const auto s = shape(a);
+        if (s.modifier > 0) best = std::max(best, static_cast<int>(s.range));
+    }
+    return best;
 }
 
 bool castFromRange(World& w, const Focus& focus) {

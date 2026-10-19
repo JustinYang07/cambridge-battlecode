@@ -60,6 +60,8 @@ void World::refresh(bool firstTurn) {
             if (!(a.is_damage() || a.is_aoe_damage() || a.is_cc()) || !a.info()) continue;
             std::visit([&](const auto& x) {
                 if constexpr (requires { x.modifier; }) kit.spellModifiers += x.modifier;
+                if constexpr (requires { x.range; })
+                    if (a.is_damage() || a.is_aoe_damage()) kit.spellRange = std::max(kit.spellRange, static_cast<int>(x.range));
             }, *a.info());
         }
     }
@@ -152,6 +154,7 @@ void World::refresh(bool firstTurn) {
         }
         if (enemyRespawnAt < 0 || back < enemyRespawnAt) enemyRespawnAt = back;
     }
+    if (enemyRespawnAt >= 0 || !alive) anyDeathSeen = true;  // an enemy is down, or we are
     fuel::mark("refresh.enemyAlive");
     if (!enemyTiles.is_empty()) {
         for (const auto& c : bc::vision::champions(bc::team::enemy)) {
@@ -161,11 +164,24 @@ void World::refresh(bool firstTurn) {
             for (std::size_t k = 0; k < enemyHandles_.size(); ++k)
                 if (enemyHandles_[k] == c) e.index = static_cast<int>(k);
             e.hp = c.health();
-            e.maxHp = c.max_health();
-            e.strength = c.strength();
-            e.focus = c.focus();
+            // combatBotv3: item stats are re-read only every enemy_stat_every rounds (each read is a
+            // host call; five enemies in a fight cost ~6k a turn for numbers that rarely change).
+            if (e.index >= 0 && e.index < static_cast<int>(enemyStats_.size())) {
+                auto& st = enemyStats_[static_cast<std::size_t>(e.index)];
+                if (round - st.round >= tune::enemy_stat_every || e.hp > st.maxHp) {
+                    st = {round, c.max_health(), c.strength(), c.focus(), static_cast<int>(c.attack_range())};
+                }
+                e.maxHp = st.maxHp;
+                e.strength = st.strength;
+                e.focus = st.focus;
+                e.range = st.range;
+            } else {
+                e.maxHp = c.max_health();
+                e.strength = c.strength();
+                e.focus = c.focus();
+                e.range = c.attack_range();
+            }
             e.gems = static_cast<int>(c.gem_count());
-            e.range = c.attack_range();
             e.tributing = c.is_submitting_gems();
             e.channeling = c.is_recalling() || e.tributing;
             if (e.index >= 0 && e.index < static_cast<int>(enemyStun_.size())) {
@@ -204,6 +220,8 @@ void World::refresh(bool firstTurn) {
             lastSeenPos_[k] = e.pos;
             lastSeenRound_[k] = round;
         }
+    for (const auto& e : enemies)
+        if (e.hp > 0 && dist(e.pos, pos) <= tune::quiet_enemy_radius) lastEnemyNearRound = round;
     // Team target: keep it while it is alive and seen recently; otherwise the first enemy seen
     // losing health since the last round we saw it (the most hurt one if several at once).
     if (teamTarget >= 0 && round - teamTargetSeen > tune::team_target_memory) teamTarget = -1;
@@ -476,7 +494,11 @@ bool World::allyVisible(int s) const {
         allyVisRound_ = round;
         allyVisMask_ = 0;
         // The occupancy board already says whether any ally is in sight: none, no host call.
-        if (!allies.empty()) {
+        // combatBotv3: every other ally is on the board: all are in sight, no host call (4.4k).
+        if (!allies.empty() && static_cast<int>(allies.size()) >= allyCount - 1) {
+            for (int k = 0; k < static_cast<int>(allyHandles_.size()) && k < 8; ++k)
+                if (k != slot) allyVisMask_ |= 1u << k;
+        } else if (!allies.empty()) {
             try {
                 for (const auto& c : bc::vision::champions(bc::team::ally))
                     for (int k = 0; k < static_cast<int>(allyHandles_.size()) && k < 8; ++k)
@@ -487,6 +509,28 @@ bool World::allyVisible(int s) const {
         }
     }
     return (allyVisMask_ >> s) & 1u;
+}
+
+int World::alliesStunReadyNear(bc::vec2 at, int radius) const {
+    int n = 0;
+    for (int i = 0; i < static_cast<int>(allyHandles_.size()) && i < 8; ++i) {
+        if (i == slot) continue;
+        const auto p = allyPosCached(i);
+        if (p.x < 0 || dist(p, at) > radius) continue;
+        try {
+            const auto abilities = allyHandles_[static_cast<std::size_t>(i)].abilities();
+            for (const auto& a : abilities) {
+                const auto& info = a.info();
+                const auto* aoe = info ? std::get_if<bc::ability_aoe_damage>(&*info) : nullptr;
+                if ((a.is_cc() || (aoe && aoe->duration > 0)) && a.cooldown() == 0) {
+                    ++n;
+                    break;
+                }
+            }
+        } catch (const bc::error&) {
+        }
+    }
+    return n;
 }
 
 int World::allyGems(int s) const {
@@ -620,6 +664,66 @@ bool World::abilityReady(int slot) {
     return r == 1;
 }
 
+bool World::allyDeadNow(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size())) return false;
+    try {
+        return !allyHandles_[static_cast<std::size_t>(s)].is_alive();
+    } catch (const bc::error&) {
+        return false;
+    }
+}
+
+void World::observeEnemyDamage() const {
+    if (observedRound_ == round) return;
+    static float prevOwnHp = -1;
+    static int prevOwnRound = -100;
+    static std::array<float, 8> prevAllyHp{};
+    static std::array<int, 8> prevAllyRound{};
+    observedRound_ = round;
+    // Split a loss over the enemy champions that could have dealt it.
+    auto attribute = [&](bc::vec2 at, float loss) {
+        int k = 0;
+        for (const auto& e : enemies) k += e.hp > 0 && dist(e.pos, at) <= e.range + 1;
+        if (k == 0) return;
+        for (const auto& e : enemies) {
+            if (e.hp <= 0 || dist(e.pos, at) > e.range + 1 || e.index < 0 || e.index >= 16) continue;
+            const auto i = static_cast<std::size_t>(e.index);
+            const float sample = loss / static_cast<float>(k);
+            observedDps_[i] = round - observedAt_[i] <= tune::observed_dps_memory ? 0.5f * observedDps_[i] + 0.5f * sample : sample;
+            observedAt_[i] = round;
+        }
+    };
+    if (tune::observed_enemy_dps && !enemies.empty()) {
+        // Our own loss, when no monster is hitting us.
+        if (prevOwnRound == round - 1 && prevOwnHp > hp + 0.5f && incoming <= 0) attribute(pos, prevOwnHp - hp);
+        // Visible allies' losses, with no damaging monster within its reach of them.
+        for (int s = 0; s < allyCount && s < 8; ++s) {
+            if (s == slot) continue;
+            const auto p = allyPosCached(s);
+            if (p.x < 0) { prevAllyRound[static_cast<std::size_t>(s)] = -100; continue; }
+            const float h = allyHp(s);
+            const auto si = static_cast<std::size_t>(s);
+            if (prevAllyRound[si] == round - 1 && prevAllyHp[si] > h + 0.5f) {
+                bool monster = false;
+                for (const auto& c : camps) monster = monster || (c.hp > 0 && c.strength > 0 && dist(c.pos, p) <= tune::monster_range);
+                if (!monster) attribute(p, prevAllyHp[si] - h);
+            }
+            prevAllyHp[si] = h;
+            prevAllyRound[si] = round;
+        }
+    }
+    prevOwnHp = hp;
+    prevOwnRound = round;
+}
+
+float World::enemyDps(int index, float model) const {
+    if (!tune::observed_enemy_dps || index < 0 || index >= 16) return model;
+    observeEnemyDamage();
+    const auto i = static_cast<std::size_t>(index);
+    if (round - observedAt_[i] > tune::observed_dps_memory) return model;
+    return std::max(model, observedDps_[i]);
+}
+
 float World::enemyPressure(bc::vec2 at, int radius) const {
     float total = 0;
     for (const auto& g : ghosts) {
@@ -707,6 +811,21 @@ bool World::tributeAtRisk(bc::vec2 altar, int bag) const {
 bool World::theirHalf(cambc::vec2 p) const {
     const auto& s = Statics::get();
     return dist(p, s.enemySpawnCenter) < dist(p, s.spawnCenter);
+}
+
+bool World::invadeWithoutMelee(bc::vec2 at) const {
+    if (!tune::invade_needs_melee || !ranged || !theirHalf(at)) return false;
+    for (int s = 0; s < allyCount && s < 8; ++s) {
+        if (s == slot) continue;
+        const auto t = static_cast<std::size_t>(allyTypes[static_cast<std::size_t>(s)]);
+        if (t >= bc::champion_designs.size() || bc::champion_designs[t].base_stats().base_attack_range > 1) continue;
+        const auto p = allyPosCached(s);
+        if (p.x < 0 || dist(p, at) > tune::invade_melee_radius) continue;
+        // invade_melee_ahead: it must also be in front of us (no farther from their spawn than we are).
+        if (tune::invade_melee_ahead && dist(p, Statics::get().enemySpawnCenter) > dist(pos, Statics::get().enemySpawnCenter)) continue;
+        return false;
+    }
+    return true;
 }
 
 bool World::enemyClosingOn(int index, cambc::vec2 now, cambc::vec2 target) const {

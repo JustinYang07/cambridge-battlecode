@@ -23,6 +23,11 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# @F row columns (bots/combatBotv3/src/bot.cpp logFight).
+FIGHT_FIELDS = ["r", "u", "enemy", "chose", "explore", "edge100", "us", "them", "ghosts", "ourHp", "theirHp", "ourDps",
+                "theirDps", "myHpPct", "tgtHpPct", "theirHpPct", "myBag", "tgtBag", "theirBags", "myStun", "allyStuns",
+                "enemyStunners", "toOurSpawn", "toTheirSpawn", "monsterDps", "dist", "tx", "ty", "winPct"]
+
 ACTION_CODES = [
     (re.compile(r"^m(-?\d+),(-?\d+)$"), "move to ({0},{1})"),
     (re.compile(r"^d(-?\d+),(-?\d+)$"), "dash to ({0},{1})"),
@@ -60,6 +65,8 @@ class TeamLog:
     turns: list[dict] = field(default_factory=list)    # compact, one per champion turn
     details: list[dict] = field(default_factory=list)  # full option breakdowns
     drafts: list[dict] = field(default_factory=list)
+    fights: list[dict] = field(default_factory=list)   # @F fight-feature rows (combatBotv3 lab data)
+    bushes: list[list[int]] = field(default_factory=list)  # @B bush tiles
     other: list[dict] = field(default_factory=list)    # {"pos": n, "text": "..."}
     groups: dict[int, dict] = field(default_factory=dict)
     altars: list[list[int]] = field(default_factory=list)
@@ -101,6 +108,8 @@ class _Decoder:
             log.groups[ident] = {"label": label, "x": x, "y": y}
         elif tag == "@A":
             log.altars = value
+        elif tag == "@B" and isinstance(value, list):
+            log.bushes = [[value[i], value[i + 1]] for i in range(0, len(value) - 1, 2)]
         elif tag == "@U":
             log.units[value[0]] = value[1]
         elif tag == "@P" and isinstance(value, list) and len(value) >= 3:
@@ -123,6 +132,8 @@ class _Decoder:
                 })
             log.details.append({"r": r, "u": u, "hp": hp, "mhp": mhp, "gm": gm, "au": au, "fuel": fuel,
                                 "lost": lost, "opts": decoded, "act": act, "note": note, "pos": pos})
+        elif tag == "@F" and isinstance(value, list):
+            log.fights.append(dict(zip(FIGHT_FIELDS, value)))
         elif tag == "@D" and isinstance(value, dict):
             value["pos"] = pos
             log.drafts.append(value)
@@ -137,7 +148,7 @@ def _parse_stdout(raw: bytes, limit_other: int = 4000) -> TeamLog:
             continue
         for line in segment.splitlines():
             tag = line[:2]
-            if tag in ("@t", "@T", "@D", "@K", "@G", "@A", "@U", "@P"):
+            if tag in ("@t", "@T", "@D", "@K", "@G", "@A", "@U", "@P", "@F", "@B"):
                 try:
                     value = json.loads(line[2:])
                 except json.JSONDecodeError:
@@ -156,7 +167,7 @@ def read_bundle(path: Path) -> dict:
         for side in ("a", "b"):
             name = f"team-{side}.stdout"
             log = _parse_stdout(bundle.read(name)) if name in names else TeamLog()
-            out["teams"][side] = {"turns": log.turns, "details": log.details, "drafts": log.drafts,
+            out["teams"][side] = {"turns": log.turns, "details": log.details, "drafts": log.drafts, "fights": log.fights, "bushes": log.bushes,
                                   "other": log.other, "groups": log.groups, "altars": log.altars, "units": log.units, "plan": log.plan,
                                   "stdoutBytes": log.stdout_bytes}
     return out

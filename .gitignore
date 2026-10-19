@@ -8,3 +8,6 @@ bots/*/target/
 lab/data/
 bots/snap-*/
 __pycache__/
+
+# lab/nn datasets (rebuilt by lab/nn/*_dataset.py)
+lab/nn/*.npz

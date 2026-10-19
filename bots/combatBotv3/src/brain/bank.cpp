@@ -40,6 +40,26 @@ float altarExposure(const World& w, int altarIdx) {
     return tiles * bagScale;
 }
 
+// An enemy altar lock on altar i (two vision calls), re-read every altar_lock_every rounds: bank
+// scoring asked for every altar each turn (~10k a turn on lanes), and locks are rare and last.
+bool enemyLock(const World& w, int i) {
+    static std::array<int, 16> readRound = [] { std::array<int, 16> a{}; a.fill(-1000); return a; }();
+    static std::array<bool, 16> locked{};
+    const auto at = Statics::get().altars[static_cast<std::size_t>(i)];
+    const bool cache = i >= 0 && i < static_cast<int>(readRound.size());
+    if (cache && w.round - readRound[static_cast<std::size_t>(i)] < tune::altar_lock_every) return locked[static_cast<std::size_t>(i)];
+    bool l = false;
+    try {
+        l = bc::vision::has_altar_lock(at) && bc::vision::altar_lock_at(at).is_enemy();
+    } catch (const bc::error&) {
+    }
+    if (cache) {
+        readRound[static_cast<std::size_t>(i)] = w.round;
+        locked[static_cast<std::size_t>(i)] = l;
+    }
+    return l;
+}
+
 void bank(World& w, std::vector<Option>& out) {
     if (w.gems < tune::bank_min_gems) return;
     const auto& altars = Statics::get().altars;
@@ -65,11 +85,8 @@ void bank(World& w, std::vector<Option>& out) {
         if (k < 0 || estimate >= bestCost) continue;  // walking never beats the estimate
         const auto i = static_cast<std::size_t>(k);
         if (!w.mayInvade() && w.theirHalf(altars[i])) continue;  // no invading without a numbers lead
-        bool locked = false;
-        try {
-            locked = bc::vision::has_altar_lock(altars[i]) && bc::vision::altar_lock_at(altars[i]).is_enemy();
-        } catch (const bc::error&) {
-        }
+        if (w.invadeWithoutMelee(altars[i])) continue;           // nor, ranged, without our melee there
+        const bool locked = enemyLock(w, k);
         if (locked && !tune::break_altar_locks) continue;
         const int exact = fields::toAltar(k, w.pos);
         const int d = exact >= 0 ? exact : nav().distToRange(w, altars[i], 1);
@@ -92,14 +109,10 @@ void bank(World& w, std::vector<Option>& out) {
     // After a recall the nearest altar is the one nearest spawn, not the one nearest us.
     if (tune::bank_recall_any_altar && viaHome < 1e8f) {
         for (int i = 0; i < static_cast<int>(altars.size()); ++i) {
-            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)]))) continue;
-            bool locked = false;
-            try {
-                locked = bc::vision::has_altar_lock(altars[static_cast<std::size_t>(i)]) &&
-                         bc::vision::altar_lock_at(altars[static_cast<std::size_t>(i)]).is_enemy();
-            } catch (const bc::error&) {
-            }
-            if (locked) continue;
+            if (i == bestIdx || (!w.mayInvade() && w.theirHalf(altars[static_cast<std::size_t>(i)])) ||
+                w.invadeWithoutMelee(altars[static_cast<std::size_t>(i)]))
+                continue;
+            if (enemyLock(w, i)) continue;
             if (const float t = recallBankTurns(w, i) + altarExposure(w, i) - altarExposure(w, o.target); t < viaHome) {
                 viaHome = t;
                 o.target = i;

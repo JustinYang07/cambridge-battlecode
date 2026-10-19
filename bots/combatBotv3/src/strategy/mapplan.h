@@ -72,6 +72,7 @@ struct Plan {
     // take together), and how many bodies that is. -1: none.
     int openingCamp = -1;
     int openingParty = 0;
+    bool teamOpening = false;  // combatBotv3: the whole team opens on it (tune::team_opening)
 };
 inline constexpr int kNeighbours = 3;
 

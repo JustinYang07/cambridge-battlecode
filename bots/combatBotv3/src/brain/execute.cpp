@@ -181,6 +181,36 @@ bool rushPull(World& w, const GroupInfo& g, int need) {
     return true;
 }
 
+// combatBotv3 probe (camp_corner_stand): tiles from which a ranged champion reaches a live member of
+// the group (Chebyshev range) while more than camp_reach_euclid_sq (squared straight-line distance)
+// from every member that attacks: the diagonal corners, if monsters reach in a circle.
+bc::bitboard cornerTiles(const World& w, const GroupInfo& g) {
+    bc::bitboard out;
+    out.clear();
+    const auto& st = Statics::get();
+    const int r = w.range;
+    for (const auto& c : w.camps) {
+        if (c.groupId != g.id || c.hp <= 0) continue;
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+                for (int k = 0; k <= 1; ++k) {
+                    const bc::vec2 t{c.pos.x + sx * r, c.pos.y + sy * (r - k)};
+                    const bc::vec2 t2{c.pos.x + sx * (r - k), c.pos.y + sy * r};
+                    for (const auto q : {t, t2}) {
+                        if (q.x < 0 || q.y < 0 || q.x >= st.width || q.y >= st.height || st.terrain.is_set(q)) continue;
+                        bool safe = true;
+                        for (const auto& m : w.camps) {
+                            if (m.groupId != g.id || m.hp <= 0 || m.strength <= 0) continue;
+                            const int dx = q.x - m.pos.x, dy = q.y - m.pos.y;
+                            if (dx * dx + dy * dy <= tune::camp_reach_euclid_sq) { safe = false; break; }
+                        }
+                        if (safe) out.set(q);
+                    }
+                }
+    }
+    return out & ~g.tileMask;
+}
+
 void farmGroup(World& w, const GroupInfo& g, int need) {
     combat::Focus focus{.groupId = g.id};
     const auto status = w.groups[static_cast<std::size_t>(g.id)].status;
@@ -191,11 +221,108 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         return;
     }
     if (scorers::teamRushOn(w, g.id) && rushPull(w, g, need)) return;
+    // combatBotv3: kite farming: stand within spell reach of a live member, outside every damaging
+    // member's reach, and cast; basic attacks only reach harmless members from there.
+    if (status == GroupStatus::alive && scorers::kiteFarmable(w, g)) {
+        bc::bitboard inReach, monsterReach;
+        inReach.clear();
+        monsterReach.clear();
+        bool any = false;
+        for (const auto& c : w.camps)
+            if (c.groupId == g.id && c.hp > 0) {
+                inReach.draw_chebyshev(c.pos, static_cast<float>(w.kit.spellRange));
+                if (c.strength > 0) monsterReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+                any = true;
+            }
+        auto goals = inReach & ~monsterReach & ~g.tileMask & Statics::get().reach;
+        if (any && !goals.is_empty()) {
+            if (goals.is_set(w.pos)) {
+                combat::act(w, focus, true);
+                trace().note("kite: casting from outside their reach");
+                return;
+            }
+            auto avoid = w.dangerExcept(g.id) | monsterReach;
+            nav().stepToward(w, goals, false, &avoid, g.center);
+            combat::act(w, focus, false);
+            return;
+        }
+    }
     if (waitForParty(w, g, need)) return;
     const bool holdFire = holdForTank(w, g);
+    // combatBotv3 spell clear: a ranged champion whose damage spell outranges the monsters, alone on
+    // this camp, clears its attacking monsters with spells only from outside their reach (camps only
+    // hit whoever attacks them, and only within monster_range): no damage taken.
+    if ((tune::spell_clear_camps || w.spellClearGroup == g.id) && w.ranged && !holdFire) {
+        const int sr = combat::damageSpellRange(w);
+        bool attackers = false, allyHere = false;
+        for (const auto& c : w.camps) attackers = attackers || (c.groupId == g.id && c.hp > 0 && c.strength > 0);
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+            if (sl == w.slot) continue;
+            const auto p = w.allyPosCached(sl);
+            allyHere = allyHere || (p.x >= 0 && dist(p, g.center) <= tune::spell_clear_ally_radius);
+        }
+        if (sr > tune::monster_range && attackers && (!allyHere || w.spellClearGroup == g.id)) {
+            bc::bitboard inReach, inSpell;
+            inReach.clear();
+            inSpell.clear();
+            for (const auto& c : w.camps)
+                if (c.groupId == g.id && c.hp > 0 && c.strength > 0) {
+                    inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+                    inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
+                }
+            auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
+            // Cast from the tiles nearest our side, not from deep in their half (user).
+            if (tune::spell_clear_near_side && !goals.is_empty()) {
+                const auto home = Statics::get().spawnCenter;
+                int best = 1 << 20;
+                for (auto t : goals.positions()) best = std::min(best, dist(t, home));
+                bc::bitboard near;
+                near.clear();
+                for (auto t : goals.positions())
+                    if (dist(t, home) <= best + 1) near.set(t);
+                goals = near;
+            }
+            if (!goals.is_empty()) {
+                combat::Focus spellFocus{.groupId = g.id};
+                if (goals.is_set(w.pos)) {
+                    if (!combat::castFromRange(w, spellFocus)) trace().action("hold");
+                } else {
+                    combat::castFromRange(w, spellFocus);
+                    nav().stepToward(w, goals, false, &w.danger, g.center);
+                }
+                trace().note("spell clear");
+                return;
+            }
+        }
+    }
     if (groupMemberInRange(w, g.id)) {
+        // combatBotv3 probe: ranged in range but not on a corner: step to a corner within 2 tiles.
+        if (tune::camp_corner_stand && w.ranged && !holdFire && bc::self().can_move()) {
+            const auto corners = cornerTiles(w, g);
+            if (!corners.is_empty() && !corners.is_set(w.pos)) {
+                bc::bitboard nearCorner;
+                nearCorner.clear();
+                nearCorner.draw_chebyshev(w.pos, 2.0f);
+                if (!(corners & nearCorner).is_empty()) {
+                    combat::act(w, focus, true);
+                    nav().stepToward(w, corners & nearCorner, false);
+                    trace().note("camp corner");
+                    return;
+                }
+            }
+        }
+        // combatBotv3: ranged with enemies about: shoot from the safest tile still in range of a member.
+        bool stepped = false;
+        if (tune::exposure_stand && w.ranged && !w.enemies.empty()) {
+            bc::bitboard keep;
+            keep.clear();
+            for (const auto& c : w.camps)
+                if (c.groupId == g.id && c.hp > 0) keep |= nav().standTiles(w, c.pos, w.range);
+            keep = keep & ~g.tileMask & ~w.dangerExcept(g.id);
+            stepped = !keep.is_empty() && nav().saferStep(w, keep);
+        }
         if (holdFire) trace().action("hold");
-        else combat::act(w, focus, true);
+        else combat::act(w, focus, !stepped);
     } else {
         // Aim at members that are still standing; dead members' tiles are empty and standing
         // next to one leaves us out of reach of the rest (a melee champion would idle forever).
@@ -218,6 +345,9 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         if (const auto open = goals & Statics::get().reach; !open.is_empty()) goals = open;
         // Monsters hit the nearest champion: ranged allies stand at full range so whoever is
         // closer (ideally the tank) soaks the hits.
+        if (tune::camp_corner_stand && w.ranged) {
+            if (const auto corners = cornerTiles(w, g) & goals; !corners.is_empty()) goals = corners;
+        }
         if (w.ranged) {
             bc::bitboard closeIn;
             closeIn.clear();
@@ -227,6 +357,11 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
         }
         auto avoid = w.dangerExcept(g.id);
         if (w.gems >= tune::bag_avoid_gems) avoid |= w.enemyReach();
+        // combatBotv3: dashers cross a ditch on the straight line instead of walking round it.
+        if (dist(w.pos, g.center) > 4 && nav().dashAcross(w, g.center)) {
+            if (!holdFire) combat::act(w, focus, false);
+            return;
+        }
         // Casters hit from 4 tiles: spend the turn casting rather than walking into range.
         if (!holdFire) combat::castFromRange(w, focus);
         nav().stepToward(w, goals, dist(w.pos, g.center) > 4, &avoid, g.center, groupPath(g.id));
@@ -471,20 +606,20 @@ void flee(World& w) {
         const auto avoid = w.enemyReach();
         if (nav().stepToward(w, ally, 1, true, &avoid)) {
             trace().note("fleeing to an ally");
-            combat::act(w, combat::Focus{}, false);
+            if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
             return;
         }
     }
     // Run home around their reach (43% of our deaths came while fleeing, a third of those flights
     // drifting away from home: the nearest tile out of reach is often deeper in their half).
     if (tune::flee_home_weighted && nav().stepHome(w)) {
-        combat::act(w, combat::Focus{}, false);
+        if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
         return;
     }
     // Nothing to escape out of: head home along the spawn path rather than just away from them.
     if (!nav().stepEscape(w) && !(tune::flee_homeward ? false : nav().stepAway(w, threats, 6)))
         nav().stepToward(w, Statics::get().allySpawn, true, nullptr, Statics::get().spawnCenter, spawnPath());
-    combat::act(w, combat::Focus{}, false);
+    if (!tune::flee_no_attack) combat::act(w, combat::Focus{}, false);
 }
 
 // Melee champion types (attack range 1), from the designs: they form the front line.
@@ -807,6 +942,11 @@ bool rangedFight(World& w, const Option& o) {
         }
     }
     if (goals.is_set(w.pos)) {
+        // combatBotv3: in range already: a clearly safer tile that is still in range first.
+        if (tune::exposure_stand && nav().saferStep(w, goals)) {
+            combat::act(w, focus, false);
+            return true;
+        }
         combat::act(w, focus, true);
         return true;
     }
@@ -934,7 +1074,7 @@ bool outmatchedAhead(World& w) {
         if (dist(e.pos, st.enemySpawnCenter) <= tune::enemy_spawn_radius &&
             !(tune::forecast_spawn_approachers && w.enemyApproaching(e.index, e.pos)))
             continue;
-        const float dps = std::max(e.strength + e.focus * 1.5f / tune::spell_cooldown, 1.0f);
+        const float dps = std::max(w.enemyDps(e.index, e.strength + e.focus * 1.5f / tune::spell_cooldown), 1.0f);
         theirHp += e.hp;
         theirDps += dps;
         ++theirCount;
@@ -992,6 +1132,49 @@ bool outmatchedAhead(World& w) {
     return true;
 }
 
+// combatBotv3: the fight turned. An ally died within fight_turned_radius in the last
+// fight_turned_rounds while an enemy within 6 still has more than fight_turned_hp of its health,
+// and we do not outnumber them here: fall back instead of feeding (elkring vs Rhodes Island r544-560:
+// Cassi & Issac died to a 5,000-health Ryth, then Stellar at 337 and Ren alone at 388 kept hitting it).
+bool fightTurned(World& w) {
+    static std::array<bc::vec2, 8> lastSeen{};
+    static std::array<int, 8> lastSeenRound{};
+    static int deathRound = -100;
+    // combatBotv3: no enemy in sight, no fight to have turned (and no ally reads: ~2k a turn).
+    if (w.enemies.empty()) return false;
+    for (int s = 0; s < w.allyCount && s < 8; ++s) {
+        if (s == w.slot) continue;
+        const auto si = static_cast<std::size_t>(s);
+        const auto p = w.allyPosCached(s);
+        if (p.x >= 0) { lastSeen[si] = p; lastSeenRound[si] = w.round; continue; }
+        // Gone from sight since last round, from beside us: dead?
+        if (lastSeenRound[si] == w.round - 1 && dist(lastSeen[si], w.pos) <= tune::fight_turned_radius && w.allyDeadNow(s)) {
+            deathRound = w.round;
+            lastSeenRound[si] = -100;
+        }
+    }
+    if (w.round - deathRound > tune::fight_turned_rounds) return false;
+    int them = 0;
+    bool healthy = false;
+    float theirHp = 0, theirDps = 0;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= 6) {
+            ++them;
+            healthy = healthy || e.hp > tune::fight_turned_hp * e.maxHp;
+            theirHp += e.hp;
+            theirDps += std::max(w.enemyDps(e.index, e.strength + e.focus * 1.5f / tune::spell_cooldown), 1.0f);
+        }
+    if (!healthy) return false;
+    // Whole sides, not heads: their health-stacked tanks beat more of us (elkring vs Rhodes).
+    const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
+    const auto ours = w.ourSide(w.pos, 6, -1, myDps);
+    const float edge = (ours.hp / std::max(theirDps, 1.0f)) / std::max(theirHp / std::max(ours.dps, 1.0f), 0.1f);
+    if (edge >= tune::fight_turned_edge) return false;
+    FixedStr<64> msg;
+    trace().note((msg << "fight turned: ally died, " << ours.count << "v" << them << " edge x10 " << static_cast<int>(edge * 10) << ", falling back").view());
+    return true;
+}
+
 void execute(World& w, const Option& o) {
     // combatBotv2: outnumbered where we stand, a dasher keeps its dash for escaping (eight: Issac
     // dashed in, then had none left to get out while four of them beat him down).
@@ -1006,7 +1189,7 @@ void execute(World& w, const Option& o) {
     if (o.kind == OptionKind::fight) comms::claimEnemy(w.slot, o.target);
     else if (o.kind == OptionKind::wait && o.target == 2) comms::claimRegroup(w.slot);
     else if (farming) comms::claimGroup(w.slot, o.target, dist(w.pos, statics.groups[static_cast<std::size_t>(o.target)].center));
-    else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold || tune::ranged_follow_front)) comms::claimRetreat(w.slot);
+    else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold || tune::ranged_follow_front || tune::team_fight_call)) comms::claimRetreat(w.slot);
     else comms::clear(w.slot);
 
     // combatBotv3: outmatched by a group closing on us: leave before contact, whatever we were doing
@@ -1044,6 +1227,38 @@ void execute(World& w, const Option& o) {
         }
         return;
     }
+    // combatBotv3: peel back. Burst down fast (peel_drop of max health in 2 rounds) with an enemy
+    // champion close: step toward the nearest ally further from the threat, so the attackers have
+    // to walk into our team to finish us, and still hit what is in reach.
+    if (tune::peel_back && o.kind != OptionKind::flee && o.kind != OptionKind::heal) {
+        static std::array<float, 3> hpAgo{};  // health 1, 2 rounds ago
+        static int hpRound = -100;
+        if (w.round - hpRound != 1) hpAgo = {w.hp, w.hp, w.hp};
+        hpRound = w.round;
+        const float drop = hpAgo[1] - w.hp;
+        hpAgo[1] = hpAgo[0];
+        hpAgo[0] = w.hp;
+        const float limit = isTank(w.type) ? tune::peel_tank_hp : tune::peel_max_hp;
+        bool close = false;
+        for (const auto& e : w.enemies) close = close || (e.hp > 0 && dist(e.pos, w.pos) <= tune::peel_enemy_radius);
+        if (close && w.alive && drop >= tune::peel_drop * w.maxHp && w.hpFrac() < limit) {
+            const auto to = retreatTarget(w);
+            if (to.x >= 0 && nav().stepToward(w, to, 1, true)) {
+                combat::act(w, combat::Focus{.anyEnemy = true}, false);
+                FixedStr<48> msg;
+                trace().note((msg << "peel back: lost " << static_cast<int>(drop) << " in 2 rounds").view());
+                return;
+            }
+        }
+    }
+    if (tune::fight_turned_retreat && o.kind != OptionKind::flee && o.kind != OptionKind::heal && fightTurned(w)) {
+        comms::claimRetreat(w.slot);
+        auto to = retreatTarget(w);
+        if (to.x < 0) to = Statics::get().spawnCenter;
+        if (!nav().stepToward(w, to, 1, true)) nav().stepHome(w);
+        combat::act(w, combat::Focus{.anyEnemy = true}, false);
+        return;
+    }
     // rangeBot: an enemy in range or our front behind us outranks the walk (not captures,
     // banking, healing or fleeing: those have their own reasons to be where they are).
     const bool held = (o.kind == OptionKind::farm || o.kind == OptionKind::wait) && defendAlly(w)
@@ -1060,7 +1275,9 @@ void execute(World& w, const Option& o) {
             nav().enterPocket(w, g);
             combat::act(w, combat::Focus{.groupId = g.id}, false);
         } else if (o.kind == OptionKind::farm) {
+            w.spellClearGroup = o.spellClear ? g.id : -1;
             farmGroup(w, g, o.need);
+            w.spellClearGroup = -1;
         } else {
             capture(w, g);
         }

@@ -239,6 +239,8 @@ void regroupOption(World& w, std::vector<Option>& out) {
     const auto at = regroup::at();
     const int d = dist(w.pos, at);
     if (d <= tune::regroup_arrive) return;  // grouped: farm near the spotter or fight
+    // combatBotv3: finish the capture we are standing on first (it takes a few rounds).
+    if (captureHold(w)) return;
     Option o;
     o.kind = OptionKind::wait;
     o.target = 2;  // regroup (idle is -1)

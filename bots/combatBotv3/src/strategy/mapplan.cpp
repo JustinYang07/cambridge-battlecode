@@ -1002,22 +1002,33 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
     {
         // The crew: champions without a route, and those whose route starts far from spawn (rows:
         // Varg's route went to the gold in the far corner; the wolves need it as their tank).
+        // combatBotv3: a team opening where the map looks like eight: centre camps that we leave to
+        // them (farm own side) and a full team. Rows (no centre) and packs (contested centre)
+        // lost both sides head to head with it, eight and monolith won both.
+        const bool teamOpening = tune::team_opening && A.f.centreGroups > 0 && !p.contestCentre &&
+                                 static_cast<int>(champs.size()) >= tune::team_opening_min_bodies;
         std::vector<int> crew;
         for (std::size_t c = 0; c < champs.size(); ++c) {
             const int g1 = first[c];
-            if (g1 < 0 || A.dOur[static_cast<std::size_t>(g1)] > tune::opening_camp_radius) crew.push_back(static_cast<int>(c));
+            if (teamOpening || g1 < 0 || A.dOur[static_cast<std::size_t>(g1)] > tune::opening_camp_radius) crew.push_back(static_cast<int>(c));
         }
         if (static_cast<int>(crew.size()) >= 2) {
-            float dps = 0, tankHp = 0, poolHp = 0;
+            float dps = 0, tankHp = 0, poolHp = 0, secondHp = 0;
             for (int c : crew) {
+                const float hp = champs[static_cast<std::size_t>(c)].hp;
                 dps += champs[static_cast<std::size_t>(c)].dps;
-                tankHp = std::max(tankHp, champs[static_cast<std::size_t>(c)].hp);
-                poolHp += champs[static_cast<std::size_t>(c)].hp;
+                if (hp > tankHp) { secondHp = tankHp; tankHp = hp; }
+                else secondHp = std::max(secondHp, hp);
+                poolHp += hp;
             }
             // combatBotv2: monsters hit the nearest champion, and a melee-heavy crew spreads the hits
             // over several tanks: budget the whole crew's health, not one tank's (eight: our 2-elk
             // camp was rejected at 3,665 vs 684 while their same comp took theirs first).
             if (tune::opening_hp_pool) tankHp = std::max(tankHp, poolHp);
+            // combatBotv3: a whole-team opening has two front-liners to take turns at the front
+            // (monsters hit the nearest champion, so the hits land on them, not on the pool): eight's
+            // two elks fit (~1,700 vs ~2,100), its three-elk camp does not (~3,800).
+            else if (teamOpening) tankHp += secondHp;
             float bestScore = 0;
             for (int g = 0; g < n; ++g) {
                 const auto gi = static_cast<std::size_t>(g);
@@ -1028,6 +1039,9 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
                 // Clearly ours: a camp about as near them pulls both teams into a fight there
                 // (eight's central wolves: 27-33 of our deaths in the A/B).
                 if (A.dOur[gi] + tune::opening_safe_margin > A.dEnemy[gi]) continue;
+                // combatBotv3: the whole team goes only to a camp that is clearly ours (eight 12 vs
+                // 26, monolith 10 vs 35; corners' 25 vs 32 lost ~240 a game vs loopBot).
+                if (teamOpening && static_cast<float>(A.dOur[gi]) > tune::team_opening_max_ratio * static_cast<float>(A.dEnemy[gi])) continue;
                 const float kill = grp.totalHealth / std::max(dps, 1.0f);
                 if (kill * grp.totalStrength * tune::party_focus_share > tune::route_max_hp_use * tankHp) continue;
                 const float sc = value(grp) / (static_cast<float>(A.dOur[gi]) + kill + tune::capture_turns);
@@ -1035,6 +1049,7 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
                     bestScore = sc;
                     p.openingCamp = g;
                     p.openingParty = static_cast<int>(crew.size());
+                    p.teamOpening = teamOpening;
                 }
             }
             // Crew members with a (far) route open on the camp instead.
@@ -1052,7 +1067,7 @@ void write(const Plan& p) {
     std::vector<std::uint8_t> bytes(kHeader, 0);
     bytes[0] = kMagic;
     bytes[1] = kVersion;
-    bytes[2] = static_cast<std::uint8_t>((p.valid ? 1 : 0) | (p.contestCentre ? 2 : 0));
+    bytes[2] = static_cast<std::uint8_t>((p.valid ? 1 : 0) | (p.contestCentre ? 2 : 0) | (p.teamOpening ? 4 : 0));
     bytes[3] = static_cast<std::uint8_t>(std::min<std::size_t>(p.centre.size(), kMaxGroups));
     for (std::size_t i = 0; i < p.centre.size() && i < kMaxGroups; ++i)
         if (p.centre[i]) bytes[4 + i / 8] |= static_cast<std::uint8_t>(1u << (i % 8));
@@ -1118,7 +1133,7 @@ std::string describe(const Plan& p) {
             out += st == kAltarStep ? std::string("altar") : "g" + num(st);
         }
     }
-    if (p.openingCamp >= 0) out += "; opening g" + num(p.openingCamp) + " x" + num(p.openingParty);
+    if (p.openingCamp >= 0) out += "; opening g" + num(p.openingCamp) + " x" + num(p.openingParty) + (p.teamOpening ? " (team)" : "");
     return out;
 }
 
@@ -1131,6 +1146,7 @@ const Plan& read() {
         if (m.size() <= kHeader || at(0) != kMagic || at(1) != kVersion) return readCache;
         readCache.valid = at(2) & 1;
         readCache.contestCentre = at(2) & 2;
+        readCache.teamOpening = at(2) & 4;
         const int groups = at(3);
         readCache.centre.assign(static_cast<std::size_t>(groups), 0);
         for (int i = 0; i < groups; ++i)
