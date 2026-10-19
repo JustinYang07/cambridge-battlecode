@@ -1,0 +1,217 @@
+#include "trace.h"
+#include <algorithm>
+#include <cambc.h>
+#include <cstdio>
+#include "config.h"
+#include "json.h"
+#include "statics.h"
+
+Trace& trace() {
+    static Trace instance;
+    return instance;
+}
+
+namespace {
+Json& buffer() {
+    static Json j;  // fixed 8 KiB buffer, reused for every line
+    return j;
+}
+} // namespace
+
+void Trace::configure(int teamBodies, int slot, const char* champion) {
+    // ~1 MiB per team, shared by every champion's bot instance, with headroom.
+    budget_ = 950000L / std::max(teamBodies, 1);
+    slot_ = slot;
+    auto& j = buffer();
+    j.reset();
+    j.raw("@U");
+    j.array().value(static_cast<long long>(slot)).value(champion).endArray();
+    write(j.view());
+}
+
+void Trace::write(std::string_view line) {
+#ifndef BB_NO_TRACE
+    written_ += static_cast<long>(line.size()) + 1;
+    std::fwrite(line.data(), 1, line.size(), stdout);
+    std::fputc('\n', stdout);
+#else
+    (void)line;
+#endif
+}
+
+int Trace::intern(const char* name, char op) {
+    for (int i = 0; i < dictSize_; ++i)
+        if (dict_[static_cast<std::size_t>(i)].name == name && dict_[static_cast<std::size_t>(i)].op == op) return i;
+    if (dictSize_ >= static_cast<int>(dict_.size())) return 0;
+    const int id = dictSize_++;
+    dict_[static_cast<std::size_t>(id)] = {name, op};
+    auto& j = buffer();
+    j.reset();
+    j.raw("@K");
+    const char opText[2] = {op, 0};
+    j.array().value(static_cast<long long>(slot_)).value(static_cast<long long>(id)).value(name).value(opText).endArray();
+    write(j.view());
+    return id;
+}
+
+void Trace::legend() {
+    // Written once, on slot 0's first turn (which has a doubled fuel budget).
+    const auto& s = Statics::get();
+    auto& j = buffer();
+    for (const auto& g : s.groups) {
+        j.reset();
+        j.raw("@G");
+        j.array().value(static_cast<long long>(g.id)).value(std::string_view(g.label))
+            .value(static_cast<long long>(g.center.x)).value(static_cast<long long>(g.center.y)).endArray();
+        write(j.view());
+    }
+    j.reset();
+    j.raw("@A");
+    j.array();
+    for (auto a : s.altars) j.array().value(static_cast<long long>(a.x)).value(static_cast<long long>(a.y)).endArray();
+    j.endArray();
+    write(j.view());
+    // Bush tiles (lab analysis: deaths near bushes), as flat x,y pairs.
+    j.reset();
+    j.raw("@B");
+    j.array();
+    for (auto b : cambc::map::bushes().positions()) j.value(static_cast<long long>(b.x)).value(static_cast<long long>(b.y));
+    j.endArray();
+    write(j.view());
+    std::fflush(stdout);
+}
+
+void Trace::plan(int regions, const std::vector<int>& groupRegion, const std::array<int, 8>& slotRegion, int bodies) {
+    auto& j = buffer();
+    j.reset();
+    j.raw("@P");
+    j.array().value(static_cast<long long>(regions)).array();
+    for (int r : groupRegion) j.value(static_cast<long long>(r));
+    j.endArray().array();
+    for (int i = 0; i < bodies && i < 8; ++i) j.value(static_cast<long long>(slotRegion[static_cast<std::size_t>(i)]));
+    j.endArray().endArray();
+    write(j.view());
+}
+
+void Trace::beginTurn(int round, int slot, const char* champion) {
+    round_ = round;
+    slot_ = slot;
+    champion_ = champion;
+    count_ = 0;
+    actions_.clear();
+    notes_.clear();
+    alive_ = false;
+    full_ = false;
+}
+
+void Trace::state(int x, int y, float hp, float maxHp, int gems, int gold, bool alive) {
+    x_ = x, y_ = y, hp_ = hp, maxHp_ = maxHp, gems_ = gems, gold_ = gold, alive_ = alive;
+}
+
+void Trace::candidates(const Candidate* const* list, int count, bool decisionChanged) {
+    count_ = std::min(count, kMaxCandidates);
+    for (int i = 0; i < count_; ++i) list_[static_cast<std::size_t>(i)] = *list[i];
+    full_ = full_ || decisionChanged || ++sinceFull_ >= tune::full_trace_every;
+}
+
+void Trace::action(std::string_view text) {
+    if (!actions_.empty()) actions_ << ';';
+    actions_ << text;
+}
+
+void Trace::note(std::string_view text) {
+    if (!notes_.empty()) notes_ << "; ";
+    notes_.sanitized(text);  // notes can carry engine error messages
+}
+
+bool Trace::writeFull(const FullSnapshot& s) {
+    auto& j = buffer();
+    const auto left = cambc::fuel_remaining();
+    // Intern first: dictionary lines must precede the line that uses them.
+    std::array<int, kMaxCandidates> kinds{};
+    std::array<std::array<int, 14>, kMaxCandidates> factorIds{};
+    for (int i = 0; i < s.count; ++i) {
+        const auto& c = s.list[static_cast<std::size_t>(i)];
+        kinds[static_cast<std::size_t>(i)] = intern(c.kind, 'k');
+        for (int k = 0; k < c.factorCount; ++k)
+            factorIds[static_cast<std::size_t>(i)][static_cast<std::size_t>(k)] =
+                intern(c.factors[static_cast<std::size_t>(k)].name, c.factors[static_cast<std::size_t>(k)].op);
+    }
+    j.reset();
+    j.raw("@T");
+    j.array();
+    for (long long v : {static_cast<long long>(s.round), static_cast<long long>(s.slot), static_cast<long long>(s.hp),
+                        static_cast<long long>(s.maxHp), static_cast<long long>(s.gems), static_cast<long long>(s.gold),
+                        static_cast<long long>(s.fuelUsed), static_cast<long long>(s.lost)})
+        j.value(v);
+    j.array();
+    for (int i = 0; i < s.count; ++i) {
+        const auto& c = s.list[static_cast<std::size_t>(i)];
+        j.array().value(static_cast<long long>(kinds[static_cast<std::size_t>(i)])).value(c.target.view())
+            .value(static_cast<double>(static_cast<int>(c.score * 10.0f)) / 10.0)
+            .value(static_cast<long long>(c.x)).value(static_cast<long long>(c.y)).value(c.note.view());
+        j.array();
+        for (int k = 0; k < c.factorCount; ++k)
+            j.array().value(static_cast<long long>(factorIds[static_cast<std::size_t>(i)][static_cast<std::size_t>(k)]))
+                .value(static_cast<double>(c.factors[static_cast<std::size_t>(k)].value)).endArray();
+        j.endArray().endArray();
+    }
+    j.endArray().value(s.actions.view()).value(s.notes.view()).endArray();
+    const auto t1 = cambc::fuel_remaining();
+    // Output costs ~33 fuel per byte: a write that cannot finish suspends the bot mid-write and
+    // loses the next turn (traced overruns spent 27k on average here). Skip it instead.
+    if (static_cast<unsigned long long>(j.view().size()) * tune::trace_fuel_per_byte + tune::fuel_reserve_trace > t1) return false;
+    write(j.view());
+    lastFullBuild_ = static_cast<long>(left - t1);
+    lastFullWrite_ = static_cast<long>(t1 - cambc::fuel_remaining());
+    lastFullBytes_ = static_cast<long>(j.view().size());
+    return true;
+}
+
+void Trace::flush(unsigned long long fuelUsed) {
+#ifndef BB_NO_TRACE
+    if (written_ > budget_) return;
+    // Output costs ~33 fuel/byte; running dry mid-write suspends the bot and loses the next turn.
+    const auto left = cambc::fuel_remaining();
+    if (left < tune::fuel_reserve_trace) return;
+    auto& j = buffer();
+    const char* idleKind = alive_ ? "channel" : "dead";
+    const bool room = written_ < budget_ * 8 / 10 && left > tune::fuel_reserve_full_trace;
+    if (hasPending_ && room && writeFull(pending_)) hasPending_ = false;
+    if (full_ && count_ > 0) {
+        FullSnapshot now;
+        now.round = round_, now.slot = slot_, now.lost = lost_, now.hp = hp_, now.maxHp = maxHp_;
+        now.gems = gems_, now.gold = gold_, now.fuelUsed = fuelUsed, now.count = count_;
+        for (int i = 0; i < count_; ++i) now.list[static_cast<std::size_t>(i)] = list_[static_cast<std::size_t>(i)];
+        now.actions << actions_.view();
+        now.notes << notes_.view();
+        if (written_ < budget_ * 8 / 10 && cambc::fuel_remaining() > tune::fuel_reserve_full_trace) {
+            sinceFull_ = 0;
+            if (!writeFull(now) && !hasPending_) {
+                pending_ = now;
+                hasPending_ = true;
+            }
+        } else if (!hasPending_) {
+            sinceFull_ = 0;
+            pending_ = now;
+            hasPending_ = true;
+        }
+    }
+    const Candidate* pick = count_ > 0 ? &list_[0] : nullptr;
+    const int kind = intern(pick ? pick->kind : idleKind, 'k');
+    j.reset();
+    j.raw("@t");
+    j.array();
+    for (long long v : {static_cast<long long>(round_), static_cast<long long>(slot_), static_cast<long long>(x_),
+                        static_cast<long long>(y_), static_cast<long long>(hp_), static_cast<long long>(gems_),
+                        static_cast<long long>(gold_), static_cast<long long>(kind),
+                        static_cast<long long>(pick ? pick->score : 0.0f), static_cast<long long>(fuelUsed)})
+        j.value(v);
+    j.value(pick ? pick->target.view() : std::string_view("")).value(actions_.view())
+        .value(static_cast<long long>(lost_)).endArray();
+    write(j.view());
+    std::fflush(stdout);
+#else
+    (void)fuelUsed;
+#endif
+}
