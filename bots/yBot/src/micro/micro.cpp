@@ -143,13 +143,19 @@ Ctx context(const World& w) {
 // that ally instead: half weight (the front-line lesson, in damage terms).
 float takenAt(const World& w, const Ctx& c, bc::vec2 t, int* hitters) {
     float total = 0;
+    // A bush hides us from champions outside it ("from outside, you cannot see into a bush"), and
+    // they cannot target what they cannot see: standing in one denies them a turn of damage (user).
+    // One standing in a bush close by may share our bush and see us.
+    const bool inBush = tune::micro_bush_cover && bushNear(t) == 0;
     for (const auto& e : w.enemies) {
         if (e.hp <= 0) continue;
         const int reach = e.range + (e.range <= 1 ? 1 : 0);
         const int d = dist(e.pos, t);
         if (d > reach) continue;
-        if (!e.stunned) ++*hitters;
+        const bool blind = inBush && !(bushNear(e.pos) == 0 && d <= tune::micro_bush_share_radius);
+        if (!e.stunned && !blind) ++*hitters;
         float dps = enemyDps(e);
+        if (blind) dps *= tune::micro_bush_cover_factor;
         if (e.stunned) dps *= tune::micro_stunned;
         for (int k = 0; k < c.na; ++k) {
             const int ad = dist(c.allies[static_cast<std::size_t>(k)], e.pos);
