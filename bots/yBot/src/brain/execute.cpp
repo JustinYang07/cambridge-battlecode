@@ -455,7 +455,7 @@ void capture(World& w, const GroupInfo& g) {
                 }
         }
     }
-    combat::act(w, combat::Focus{}, false);
+    combat::act(w, combat::Focus{.awakeCampsOnly = true}, false);  // never wake a sleeping camp (patch: monoliths reach 5)
 }
 
 void offTeammateCapture(World& w);
@@ -473,7 +473,7 @@ void bank(World& w, int altarIdx) {
         if (dist(w.pos, altar) <= 1 || w.enemyPressure(w.pos, 3) > 0) {
             if (!nav().stepEscape(w)) nav().stepToward(w, Statics::get().allySpawn, true);
         }
-        combat::act(w, combat::Focus{}, false);
+        combat::act(w, combat::Focus{.awakeCampsOnly = true}, false);  // never wake a sleeping camp (patch: monoliths reach 5)
         return;
     }
     // Recall first when it is clearly quicker than walking, and nothing can cancel it (damage does).
@@ -507,7 +507,7 @@ void bank(World& w, int altarIdx) {
             trace().note(std::string("tribute failed: ") + e.message());
         }
     }
-    combat::act(w, combat::Focus{}, false);
+    combat::act(w, combat::Focus{.awakeCampsOnly = true}, false);  // never wake a sleeping camp (patch: monoliths reach 5)
 }
 
 std::vector<bc::vec2> nearbyThreats(const World& w) {

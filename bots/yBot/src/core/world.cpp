@@ -340,7 +340,7 @@ void World::refresh(bool firstTurn) {
         const bool awake = groupAwake(c);
         if (awake) groups[static_cast<std::size_t>(c.groupId)].awakeRound = round;
         if (!awake) continue;
-        if (d <= 3 && awake) {
+        if (d <= c.range && awake) {  // patch: elk and golem reach 4, monoliths 5
             incoming += c.strength;
             if (d < engagedDist) { engagedDist = d; engagedGroup = c.groupId; }
         }
@@ -743,7 +743,7 @@ bool World::campsInRangeOf(bc::vec2 tile, int r) const {
 float World::incomingCampDamage(bc::vec2 tile) const {
     float total = 0;
     for (const auto& c : camps)
-        if (c.hp > 0 && dist(c.pos, tile) <= 3) total += c.strength;
+        if (c.hp > 0 && dist(c.pos, tile) <= c.range) total += c.strength;
     return total;
 }
 

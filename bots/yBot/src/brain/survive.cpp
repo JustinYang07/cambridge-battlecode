@@ -31,7 +31,7 @@ float nnRecallLogit(const World& w) {
     for (const auto& e : w.enemies) en += e.hp > 0 && dist(e.pos, w.pos) <= 8;
     for (const auto& a : w.allies) al += dist(a.pos, w.pos) <= 6;
     bool campNear = false;
-    for (const auto& c : w.camps) campNear = campNear || (c.hp > 0 && c.strength > 0 && dist(c.pos, w.pos) <= 3);
+    for (const auto& c : w.camps) campNear = campNear || (c.hp > 0 && c.strength > 0 && dist(c.pos, w.pos) <= c.range);  // "a monster can hit us"
     const bool justCap = w.lastOption == static_cast<int>(OptionKind::capture);
     const std::array<float, nnrecall::kIn> x{
         w.hpFrac(), static_cast<float>(w.gems) / 60.0f, static_cast<float>(dist(w.pos, st.spawnCenter)) / 40.0f,
