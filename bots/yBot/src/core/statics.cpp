@@ -1,6 +1,7 @@
 #include "statics.h"
 #include <algorithm>
 #include <array>
+#include "config.h"
 #include "json.h"
 #include "trace.h"
 
@@ -350,10 +351,35 @@ void Statics::init() {
     std::vector<int> dashOf(groups.size(), -1);
     for (std::size_t k = 0; k < src.dash.size(); ++k)
         if (static_cast<std::size_t>(src.dash[k][0]) < groups.size()) dashOf[static_cast<std::size_t>(src.dash[k][0])] = static_cast<int>(k);
+    // Draft: 01islands seals most camps on islands, and this search cost ~900k of the 1M first
+    // turn (the pick then went random). The landing search only visits pocket tiles near walkable
+    // ones and reads byte tables (bitboard calls per tile cost ~30-300 fuel each); the draft also
+    // stops searching at a fuel floor.
+    std::vector<std::uint8_t> reachBits, terrainBits, blockBits;
+    bc::bitboard nearReach;
+    auto bitAt = [&](const std::vector<std::uint8_t>& bits, int x, int y) {
+        const auto i = static_cast<std::size_t>(y * width + x);
+        return ((bits[i >> 3] >> (i & 7)) & 1) != 0;
+    };
+    auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < width && y < height; };
+    // dashLegal on the byte tables.
+    auto legal = [&](bc::vec2 from, bc::vec2 to) {
+        const int d = dist(from, to);
+        if (d < 1 || d > 2 || !inside(to.x, to.y) || bitAt(terrainBits, to.x, to.y)) return false;
+        if (d == 1) return true;
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) {
+                const bc::vec2 m{from.x + dx, from.y + dy};
+                if (!inside(m.x, m.y) || dist(m, to) > 1) continue;
+                if (!bitAt(blockBits, m.x, m.y)) return true;
+            }
+        return false;
+    };
     try {
         for (auto& g : groups) {
             if (g.reachable || g.tiles.empty()) continue;
             if (src.dashKnown && dashOf[static_cast<std::size_t>(g.id)] < 0) continue;
+            if (draft && bc::fuel_remaining() < tune::draft_dash_floor) break;
             bc::bitboard seeds;
             seeds.clear();
             for (auto t : g.tiles) seeds.draw_chebyshev(t, 1.0f);
@@ -372,16 +398,27 @@ void Statics::init() {
                 continue;
             }
             int best = 1 << 20;
-            for (auto p : pocket.positions()) {
-                if (g.tileMask.is_set(p)) continue;
-                bc::bitboard near;
-                near.clear();
-                near.draw_chebyshev(p, 2.0f);
-                for (auto e : (near & reach).positions()) {
-                    if (!dashLegal(e, p)) continue;
-                    const int cost = dist(p, g.center) * 4 + dist(e, spawnCenter);
-                    if (cost < best) { best = cost; g.dashFrom = e; g.dashTo = p; }
-                }
+            if (reachBits.empty()) {
+                reachBits = reach.export_linear_buffer();
+                terrainBits = terrain.export_linear_buffer();
+                blockBits = dashBlock.export_linear_buffer();
+                // Tiles within 2 of a walkable tile (a superset if shifts wrap): only these can be landings.
+                bc::bitboard row = reach;
+                for (int k : {1, 2, -1, -2}) row |= reach.shift_right(k);
+                nearReach = row;
+                for (int k : {1, 2, -1, -2}) nearReach |= row.shift_up(k);
+            }
+            for (auto p : (pocket & nearReach).positions()) {
+                if (onGroup(g, p)) continue;
+                // Walkable tiles within 2, in positions() order (row-major), as the bitboard gave them.
+                for (int y = p.y - 2; y <= p.y + 2; ++y)
+                    for (int x = p.x - 2; x <= p.x + 2; ++x) {
+                        if (!inside(x, y) || !bitAt(reachBits, x, y)) continue;
+                        const bc::vec2 e{x, y};
+                        if (!legal(e, p)) continue;
+                        const int cost = dist(p, g.center) * 4 + dist(e, spawnCenter);
+                        if (cost < best) { best = cost; g.dashFrom = e; g.dashTo = p; }
+                    }
             }
             if (best < (1 << 20)) {
                 g.dashIn = true;

@@ -468,6 +468,7 @@ inline constexpr unsigned long long draft_fuel_reserve = 350000;  // first draft
 inline constexpr unsigned long long draft_plan_floor = 50000;     // below this, routes skip the lookahead
 inline constexpr unsigned long long draft_prepare_floor = 150000; // first turn: neighbour lists stop here
 inline constexpr unsigned long long draft_describe_floor = 45000; // below this, the draft trace skips the route text
+inline constexpr unsigned long long draft_dash_floor = 350000;   // first draft turn: the dash-pocket search (statics) stops here (01islands: ~590k, ends ~330k)
 
 // ---- raids: their team is down (all but tune::raid_max_alive bodies dead)
 inline constexpr int raid_max_alive = 1;
