@@ -522,15 +522,15 @@ inline constexpr bool spell_clear_camps = false;
 inline constexpr int spell_clear_ally_radius = 4;
 // ...and as a scored option: camp scoring also prices clearing alone by spells (no damage, no party,
 // spell speed) and takes it when it beats the usual fight.
-inline constexpr bool spell_clear_option = true;
+inline constexpr bool spell_clear_option = false;  // patch: off (user): elks reach 4 like Stellar's spells, so edge casting is no longer damage-free
 inline constexpr float spell_clear_far_frac = 0.4f;   // ...Stellar only, camps at least this x map size from our spawn
 inline constexpr float spell_clear_quiet_bonus = 1.5f; // ...and x this in a quiet game (see below)
-inline constexpr bool spell_clear_force_quiet = true;   // yBot: off (see stellar_steal_large); ...in a quiet game on a large map (side >= large_map_side) Stellar always takes her best far camp by spells (user; expanse +150, other maps -31 overall)
+inline constexpr bool spell_clear_force_quiet = false; // patch: off with spell_clear_option (user). Before: yBot: off (see stellar_steal_large); ...in a quiet game on a large map (side >= large_map_side) Stellar always takes her best far camp by spells (user; expanse +150, other maps -31 overall)
 inline constexpr float spell_clear_force_bonus = 3.0f;   // ...scoring it x this
 inline constexpr bool spell_clear_near_side = true;     // ...cast from the spell-range tiles nearest our spawn (within 1 of the nearest)
 // Steal mode (user): on large maps Stellar goes for the far camps from stellar_steal_round, quiet or
 // not; near camps score x stellar_steal_near_factor for her.
-inline constexpr bool stellar_steal_large = true;  // yBot: off (expanse: 180 rounds for one far elk capture; Fish farms the rotation)
+inline constexpr bool stellar_steal_large = false; // patch: off with spell_clear_option (user). Before: yBot: off (expanse: 180 rounds for one far elk capture; Fish farms the rotation)
 inline constexpr int stellar_steal_round = 0;
 inline constexpr float stellar_steal_near_factor = 0.05f;
 inline constexpr int steal_back_off_radius = 8;    // stealing and an enemy champion this close: run back toward our side...
