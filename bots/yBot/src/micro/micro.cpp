@@ -25,7 +25,7 @@ constexpr int kFar = 1 << 20;
 bool meleeDesign(bc::champion_type t) {
     static std::array<std::int8_t, 16> cache{};
     const auto i = static_cast<std::size_t>(t);
-    if (i >= cache.size()) return false;
+    if (i >= cache.size() || i >= bc::champion_designs.size()) return false;
     if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
     return cache[i] == 1;
 }
@@ -230,6 +230,10 @@ void score(const World& w, const Ctx& c, const Request& r, Tile& x) {
     if (inRange) x.edge = D * tune::micro_edge * static_cast<float>(std::min(nd, w.range));
     // Never nearer the enemy than our front line (rangeBot), per tile ahead of it.
     if (c.front < kFar && nd < c.front) x.front = D * tune::micro_front * static_cast<float>(c.front - nd);
+    // yBot: Stellar stands off at spell range, outside their ranged champions' attacks (ladder: ours spent
+    // 22% of rounds near an enemy at 2-3 tiles, Fish's 8%; ours died 3.5x as often).
+    if (tune::stellar_standoff > 0 && w.type == cambc::champion_type::stellar && nd < tune::stellar_standoff)
+        x.front += D * tune::stellar_standoff_weight * static_cast<float>(tune::stellar_standoff - nd);
     const int hb = hiddenBush(c, x.t);
     if (hb > 0 && hb < 3) x.bush = D * tune::micro_bush * static_cast<float>(3 - hb);
     if (x.t == c.lastPos) x.back = D * tune::micro_backtrack;

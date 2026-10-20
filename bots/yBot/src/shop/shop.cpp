@@ -109,6 +109,25 @@ std::vector<Step> plan(bc::champion_type type) {
         std::vector<Step> s;
         auto add = [&](F f, Stat st) { s.push_back({f, st}); };
         Stat last = Stat::focus;
+        // yBot: Fish's orders (their ladder replays, first three emblems per champion), Power after,
+        // and no farming-map Jungle/Monster swaps (Fish never buys Jungle).
+        if (tune::fish_builds) {
+            switch (type) {
+            case T::stellar: add(F::power, Stat::focus); add(F::home, Stat::health); add(F::durability, Stat::health); last = Stat::focus; break;
+            case T::ren:     add(F::bruiser, Stat::health); add(F::durability, Stat::health); add(F::power, Stat::focus); last = Stat::focus; break;
+            case T::cassi:   add(F::power, Stat::focus); add(F::durability, Stat::focus); add(F::bruiser, Stat::health); last = Stat::focus; break;
+            case T::issac:   add(F::power, Stat::strength); add(F::home, Stat::health); add(F::durability, Stat::health); last = Stat::strength; break;
+            case T::ryth:    add(F::bruiser, Stat::health); add(F::durability, Stat::health); add(F::power, Stat::strength); last = Stat::strength; break;
+            case T::varg:    add(F::power, Stat::strength); add(F::home, Stat::health); add(F::durability, Stat::health); last = Stat::strength; break;
+            case T::tavi:    add(F::treasure, Stat::focus); add(F::durability, Stat::focus); add(F::power, Stat::focus); last = Stat::focus; break;
+            case T::prism:   add(F::power, Stat::focus); last = Stat::focus; break;
+            default: break;
+            }
+            if (!s.empty()) {
+                for (int i = 0; i < 12; ++i) add(F::power, last);
+                return s;
+            }
+        }
         switch (type) {
         case T::cassi:   add(F::bruiser, Stat::health); add(F::durability, Stat::focus); last = Stat::focus; break;
         case T::issac:   add(F::durability, Stat::health); last = Stat::strength; break;

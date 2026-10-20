@@ -13,6 +13,9 @@ import zlib from "node:zlib";
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
 const every = Number(args[args.indexOf("--every") + 1]) || 1;
+// --shards: append [strength, focus, health] stat shards owned (item counts at o+48: index
+// family*6 + stat*2 + emblem; an emblem is five shards, a Power emblem (family 1) six).
+const withShards = args.includes("--shards");
 let wasmPath = args.includes("--wasm") ? args[args.indexOf("--wasm") + 1] : null;
 if (!wasmPath) {
   const root = path.join(os.homedir(), "Library/Caches/cambc/assets");
@@ -86,6 +89,12 @@ const CHAMPS = "Ryth VesperVale Vendetta Cassi Issac Stellar Prism Marcella Will
 function read() {
   check(E.Game_Visualiser_ReadTimelineState(game, snap), "read state");
   const v = view(), u = (o) => v.getUint32(snap + o, true), i = (o) => v.getInt32(snap + o, true), f = (o) => v.getFloat32(snap + o, true);
+  const shardsOf = (o) => {
+    if (!withShards) return null;
+    const t = [0, 0, 0];
+    for (let j = 0; j < 42; j++) t[(j % 6) >> 1] += u(o + 48 + 4 * j) * (j % 2 ? (Math.floor(j / 6) === 1 ? 6 : 5) : 1);
+    return t;
+  };
   if (u(0) !== 1 || u(4) !== 40152) throw new Error("unsupported snapshot ABI");
   const kind = u(68);
   const head = {
@@ -99,7 +108,7 @@ function read() {
     const o = 196 + k * 252;
     champs.push({ idx: u(o + 4), team: u(o + 8), type: CHAMPS[u(o + 12)] ?? u(o + 12), x: i(o + 16), y: i(o + 20),
                   hp: Math.round(f(o + 24)), maxHp: Math.round(f(o + 28)), alive: !!u(o + 32), gold: u(o + 36),
-                  gems: u(o + 40), kills: u(o + 44) });
+                  gems: u(o + 40), kills: u(o + 44), shards: shardsOf(o) });
   }
   const groups = [];
   for (let k = 0, n = u(180); k < n; k++) groups.push({ reward: !!u(18228 + k * 8), captureTeam: u(18228 + k * 8 + 4) });
@@ -117,7 +126,7 @@ for (let guard = 0; guard < 5e6; guard++) {
   if (["Move", "Attack", "Cast", "Recall", "SubmitGems", "Shop", "Consumable", "AltarLock", "Capture", "GemsSubmitted"].includes(st.kind))
     actions.push([s.head.round, st.kind, st.actor.kind, st.actor.index, st.from, st.to, st.slot ?? -1]);
   if (s.head.round !== lastRound && s.head.round % every === 0) {
-    rounds.push({ r: s.head.round, gems: s.head.gems, champs: s.champs.map((c) => [c.idx, c.team, c.type, c.x, c.y, c.hp, c.maxHp, c.alive ? 1 : 0, c.gold, c.gems, c.kills]),
+    rounds.push({ r: s.head.round, gems: s.head.gems, champs: s.champs.map((c) => [c.idx, c.team, c.type, c.x, c.y, c.hp, c.maxHp, c.alive ? 1 : 0, c.gold, c.gems, c.kills, ...(withShards ? c.shards : [])]),
                   groups: s.groups.map((g) => (g.reward ? 1 : 0) + 2 * g.captureTeam) });
     lastRound = s.head.round;
   }

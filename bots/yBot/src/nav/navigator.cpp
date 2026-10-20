@@ -144,7 +144,7 @@ constexpr int kBig = 1 << 20;
 bool meleeDesign(bc::champion_type t) {
     static std::array<std::int8_t, 16> cache{};
     const auto i = static_cast<std::size_t>(t);
-    if (i >= cache.size()) return false;
+    if (i >= cache.size() || i >= bc::champion_designs.size()) return false;
     if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
     return cache[i] == 1;
 }

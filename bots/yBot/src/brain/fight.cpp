@@ -10,9 +10,152 @@
 #include "../nav/navigator.h"
 #include "../strategy/cohesion.h"
 #include "../strategy/regroup.h"
+#include "nnfight.h"
+#include "nnpolicy.h"
 #include "scorers.h"
 
 namespace scorers {
+
+namespace {
+// yBot: the fight network's inputs (lab/nn/fight_engage_dataset.py, --bot set) around the spot
+// between us and the target. Shards owned = (stat - base) / growth for the champion's type.
+struct Shards { float str = 0, foc = 0, hp = 0; };
+Shards shardsOf(int type, float strength, float focus, float maxHp) {
+    static std::array<cambc::champion_stats, 16> base{};
+    static std::array<bool, 16> loaded{};
+    if (type < 0 || type >= 16 || static_cast<std::size_t>(type) >= cambc::champion_designs.size()) return {};
+    const auto t = static_cast<std::size_t>(type);
+    if (!loaded[t]) {
+        loaded[t] = true;
+        try {
+            base[t] = cambc::champion_designs[t].base_stats();
+        } catch (const cambc::error&) {
+        }
+    }
+    const auto& b = base[t];
+    auto n = [](float v, float b0, float g) { return g > 0 ? std::max(0.0f, (v - b0) / g) : 0.0f; };
+    return {n(strength, b.base_strength, b.strength_growth), n(focus, b.base_focus, b.focus_growth), n(maxHp, b.base_health, b.health_growth)};
+}
+
+// The local picture around our own tile shared by the fight and policy networks: the first 46
+// inputs of each (fight_engage_dataset.side_feats without the fog-hidden totals).
+constexpr int kSide = 46;
+void sideFeatures(const World& w, std::array<float, kSide>& x) {
+    const cambc::vec2 m = w.pos;
+    // Indices into x, in the trainer's column order.
+    enum { us8, them8, us14, them14, hpUs8, hpThem8, maxUs8, maxThem8, hpUs14, hpThem14, fracUs8, fracThem8, bagUs8, bagThem8,
+           strUs8, focUs8, hpShUs8, strThem8, focThem8, hpShThem8, dOur, dTheir, types, end = types + 24 };
+    static_assert(end == kSide);
+    auto add = [&](bool ours, cambc::vec2 p, float hp, float maxHp, float str, float foc, int gems, int type) {
+        const int d = dist(p, m);
+        if (d > 14) return;
+        const int o = ours ? 0 : 1;
+        x[static_cast<std::size_t>(us14 + o)] += 1;
+        x[static_cast<std::size_t>(hpUs14 + o)] += hp / 1000.0f;
+        if (d > 8) return;
+        x[static_cast<std::size_t>(us8 + o)] += 1;
+        x[static_cast<std::size_t>(hpUs8 + o)] += hp / 1000.0f;
+        x[static_cast<std::size_t>(maxUs8 + o)] += maxHp / 1000.0f;
+        x[static_cast<std::size_t>(fracUs8 + o)] += hp / std::max(maxHp, 1.0f);
+        x[static_cast<std::size_t>(bagUs8 + o)] += static_cast<float>(gems) / 50.0f;
+        if (type >= 0) {
+            const auto sh = shardsOf(type, str, foc, maxHp);
+            x[static_cast<std::size_t>((ours ? strUs8 : strThem8) + 0)] += sh.str / 50.0f;
+            x[static_cast<std::size_t>((ours ? strUs8 : strThem8) + 1)] += sh.foc / 50.0f;
+            x[static_cast<std::size_t>((ours ? strUs8 : strThem8) + 2)] += sh.hp / 50.0f;
+            if (type < 12) x[static_cast<std::size_t>(types + 2 * type + o)] += 1;
+        }
+    };
+    add(true, w.pos, w.hp, w.maxHp, w.strength, w.focus, w.gems, static_cast<int>(w.type));
+    for (int i = 0; i < w.allyCount && i < 8; ++i) {
+        if (i == w.slot) continue;
+        const auto p = w.allyPosCached(i);
+        if (p.x < 0 || dist(p, m) > 14) continue;
+        const auto a = w.allyStats(i);
+        if (a.alive) add(true, p, a.hp, a.maxHp, a.strength, a.focus, a.gems, static_cast<int>(w.allyTypes[static_cast<std::size_t>(i)]));
+        else add(true, p, 1000.0f, 1000.0f, 0, 0, 0, -1);  // out of vision: counted, stats unknown
+    }
+    for (const auto& e : w.enemies)
+        if (e.hp > 0) add(false, e.pos, e.hp, e.maxHp, e.strength, e.focus, e.gems, e.type);
+    // Enemies seen in the last two rounds and gone from view still count.
+    for (const auto& g : w.ghosts) {
+        const int age = w.round - g.round;
+        if (age <= 0 || age > 2) continue;
+        add(false, g.pos, 1000.0f, 1000.0f, 0, 0, 0, -1);
+    }
+    for (int o = 0; o < 2; ++o)
+        if (x[static_cast<std::size_t>(us8 + o)] > 0) x[static_cast<std::size_t>(fracUs8 + o)] /= x[static_cast<std::size_t>(us8 + o)];
+    const auto& st = Statics::get();
+    const float D = static_cast<float>(std::max(dist(st.spawnCenter, st.enemySpawnCenter), 1));
+    x[dOur] = static_cast<float>(dist(m, st.spawnCenter)) / D;
+    x[dTheir] = static_cast<float>(dist(m, st.enemySpawnCenter)) / D;
+}
+
+// Around our own tile, once per turn (per enemy cost up to ~23k fuel on fight turns).
+float nnFightBadLogit(const World& w) {
+    static_assert(nnfight::kIn == kSide + 1);
+    std::array<float, kSide> side{};
+    sideFeatures(w, side);
+    std::array<float, nnfight::kIn> x{};
+    std::copy(side.begin(), side.end(), x.begin());
+    x[kSide] = static_cast<float>(w.round) / 1000.0f;
+    return nnfight::logit(x);
+}
+} // namespace
+
+std::array<float, 4> nnPolicy(const World& w) {
+    // Top teams' fight policy (lab/nn/train_policy.py): hold / engage / retreat / recall here
+    // (all -1: no enemy within 6). Once per turn.
+    static int round = -1;
+    static std::array<float, 4> p{-1, -1, -1, -1};
+    if (round == w.round) return p;
+    round = w.round;
+    p = {-1, -1, -1, -1};
+    const EnemySeen* near = nullptr;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= 6 && (!near || dist(e.pos, w.pos) < dist(near->pos, w.pos))) near = &e;
+    if (!near) return p;
+    static_assert(nnpolicy::kIn == kSide + 9 + 1 + 12);
+    std::array<float, kSide> side{};
+    sideFeatures(w, side);
+    std::array<float, nnpolicy::kIn> x{};
+    std::copy(side.begin(), side.end(), x.begin());
+    const auto sh = shardsOf(static_cast<int>(w.type), w.strength, w.focus, w.maxHp);
+    float* q = x.data() + kSide;
+    q[0] = w.hp / std::max(w.maxHp, 1.0f);
+    q[1] = w.maxHp / 1000.0f;
+    q[2] = static_cast<float>(w.gems) / 50.0f;
+    q[3] = sh.str / 50.0f;
+    q[4] = sh.foc / 50.0f;
+    q[5] = sh.hp / 50.0f;
+    q[6] = static_cast<float>(dist(near->pos, w.pos)) / 6.0f;
+    q[7] = near->hp / std::max(near->maxHp, 1.0f);
+    q[8] = near->maxHp / 1000.0f;
+    q[9] = static_cast<float>(w.round) / 1000.0f;
+    if (const int t = static_cast<int>(w.type); t >= 0 && t < 12) q[10 + t] = 1.0f;
+    p = nnpolicy::probs(x);
+    return p;
+}
+
+float nnPolicyLeave(const World& w) {
+    const auto p = nnPolicy(w);
+    return p[0] < 0 ? -1.0f : p[2] + p[3];
+}
+
+float nnFightBad(const World& w) {
+    // Once per turn (fight scoring and the retreat check share it); -1 with no enemy within 8 tiles.
+    static int round = -1;
+    static float p = -1.0f;
+    if (round == w.round) return p;
+    round = w.round;
+    p = -1.0f;
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= 8) {
+            p = 1.0f / (1.0f + std::exp(-nnFightBadLogit(w)));
+            break;
+        }
+    return p;
+}
 
 void fight(World& w, std::vector<Option>& out) {
     const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
@@ -31,6 +174,8 @@ void fight(World& w, std::vector<Option>& out) {
                 tune::fight_score_max <= 0 || k < tune::fight_score_max || e.channeling || (e.index >= 0 && e.index == w.teamTarget);
         }
     }
+    // yBot: the fight network, once this turn, only with an enemy within 8 tiles (-1: not computed).
+    const float pBadNow = tune::nn_fight ? nnFightBad(w) : -1.0f;
     std::array<const GroupInfo*, 16> cleared{};
     int nCleared = 0;
     for (const auto& g : Statics::get().groups)
@@ -92,7 +237,7 @@ void fight(World& w, std::vector<Option>& out) {
         o.at = e.pos;
         o.c.target << 'e' << static_cast<int>(static_cast<cambc::handle_champion_t>(e.handle));
         o.add("their bag", static_cast<float>(e.gems));
-        o.add("kill gold", tune::kill_gold_value * goldValue(w));
+        o.add("kill gold", static_cast<float>(cambc::constants::kill_gold) * goldValue(w));
         // Standing on a cleared camp's spawn tiles, it blocks our capture: killing it frees the reward.
         for (int k = 0; k < nCleared; ++k) {
             const auto& g = *cleared[static_cast<std::size_t>(k)];
@@ -146,7 +291,7 @@ void fight(World& w, std::vector<Option>& out) {
                 // Pot odds: what a win gains (their bag, the kill gold, them out for 60 rounds)
                 // against what a loss costs (our bag, us out for 60 rounds). Carrying a big bag we
                 // walk away from even fights; against a full bag a long shot can still pay.
-                const float gain = static_cast<float>(e.gems) + tune::kill_gold_value * goldValue(w) + tune::kill_denial_value;
+                const float gain = static_cast<float>(e.gems) + static_cast<float>(cambc::constants::kill_gold) * goldValue(w) + tune::kill_denial_value;
                 const float stake = static_cast<float>(w.gems) + tune::death_time_value;
                 if (winChance * gain <= (1.0f - winChance) * stake) o.mul("mid game: bad odds", tune::fight_mid_factor);
                 o.c.note << "odds " << static_cast<int>(winChance * gain) << " vs " << static_cast<int>((1.0f - winChance) * stake) << "; ";
@@ -154,6 +299,19 @@ void fight(World& w, std::vector<Option>& out) {
                 o.mul("mid game: under win cutoff", tune::fight_mid_factor);
             }
             o.c.note << "win " << static_cast<int>(winChance * 100.0f) << "%; ";
+        }
+        // yBot: the fight network (learned on 490 ladder games, every team): the chance we lose more
+        // champions than they do near here within 15 rounds. Risky fights score down.
+        if (tune::nn_fight && !e.channeling && pBadNow >= 0) {
+            const float pBad = pBadNow;
+            o.c.note << "nn bad " << static_cast<int>(pBad * 100.0f) << "%; ";
+            if (pBad > tune::nn_fight_bad) o.mul("nn: risky fight", tune::nn_fight_factor);
+        }
+        // yBot: where the top teams would press (distilled policy), press: 32% of our contact rows
+        // held or backed off where they engage, and those spots were safe (5-7% deaths in 10 rounds).
+        if (tune::nn_policy_engage > 0 && !e.channeling) {
+            const auto pol = nnPolicy(w);
+            if (pol[1] >= tune::nn_policy_engage) o.mul("nn: top teams press", tune::nn_policy_engage_bonus);
         }
         if (comms::focusMask(e.index, w.slot) != 0) o.mul("focus fire", tune::focus_fire_bonus);
         else if (e.index == w.teamTarget) o.mul("team target", tune::team_target_bonus);

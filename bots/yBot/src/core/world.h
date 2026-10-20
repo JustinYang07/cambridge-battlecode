@@ -37,6 +37,7 @@ struct EnemySeen {
     bool tributing = false;
     bool stun = false;        // has a crowd-control ability (Tavi, Ren, Cassi, ...)
     bool stunned = false;     // stunned right now (read within tune::stun_check_radius)
+    int type = -1;            // yBot: cambc::champion_type (-1 unknown)
 };
 
 // Where an enemy was last seen; vision is not shared, so remembering recent sightings
@@ -224,6 +225,9 @@ public:
     float allyMissingHp(int slot) const;
     // An ally's current health by draft slot (0 when unknown or dead).
     float allyHp(int slot) const;
+    // yBot: an ally's live stats this turn (read with its health; alive false when out of vision or dead).
+    struct AllyStats { float hp = 0, maxHp = 1, strength = 0, focus = 0; int gems = 0; bool alive = false; };
+    AllyStats allyStats(int slot) const;
     // combatBotv2: an ally's damage per turn on a camp group (strength with splash, plus its spells
     // from focus), read once per turn; 0 when unknown or dead.
     float allyCampDps(int slot, const GroupInfo& g) const;
@@ -268,9 +272,10 @@ private:
     std::vector<std::uint8_t> visibleBits_, campBits_;
     std::vector<cambc::champion> allyHandles_;  // by draft slot
     std::vector<cambc::champion> enemyHandles_; // enemy roster order: the shared focus-fire id
-    struct AllyHp { int round = -1; float hp = 0, maxHp = 1, strength = 0; bool alive = false; };
+    struct AllyHp { int round = -1; float hp = 0, maxHp = 1, strength = 0; bool alive = false; float focus = 0; int gems = 0; bool extra = false; };
     mutable std::array<AllyHp, 8> allyHpCache_{};
     void readAllyHp(int s) const;
+    std::array<signed char, 8> enemyType_{-1, -1, -1, -1, -1, -1, -1, -1};  // yBot: per roster index
     std::array<signed char, 8> enemyStun_{-1, -1, -1, -1, -1, -1, -1, -1};  // per roster index: has cc (-1 unknown)
     std::array<int, 8> enemyDeadSince_{-1, -1, -1, -1, -1, -1, -1, -1};  // round we first saw each one dead
     std::array<std::uint8_t, 8> allyAlive_{1, 1, 1, 1, 1, 1, 1, 1};

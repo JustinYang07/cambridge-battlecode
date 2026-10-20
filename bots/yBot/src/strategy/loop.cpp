@@ -122,6 +122,11 @@ bool capturer(const World& w, int groupId) {
     const float myMissing = w.maxHp - w.hp;
     for (int sl = 0; sl < comms::alert_byte; ++sl) {
         if (!((mates >> sl) & 1u) || comms::claimOf(sl) != groupId || comms::claimBracket(sl) != 0) continue;
+        if (tune::keeper_stellar_first) {  // yBot: Stellar keeps it
+            const bool meS = w.type == cambc::champion_type::stellar, themS = w.allyTypes[static_cast<std::size_t>(sl)] == cambc::champion_type::stellar;
+            if (meS && !themS) continue;
+            if (themS && !meS) return false;
+        }
         if (tune::keeper_tank_first && isTank(w.type) != isTank(w.allyTypes[static_cast<std::size_t>(sl)])) {
             if (isTank(w.type)) continue;  // we are the tank: we keep it
             return false;                  // the tank keeps it

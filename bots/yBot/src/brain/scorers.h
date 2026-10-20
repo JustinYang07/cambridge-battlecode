@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 // Each scorer proposes options of one kind. Add a new behaviour by writing a
 // scorer and registering it in brain.cpp.
 #include <vector>
@@ -11,6 +12,12 @@ void farm(World& w, std::vector<Option>& out);      // farm.cpp: clear and captu
 void bank(World& w, std::vector<Option>& out);      // bank.cpp: tribute carried gems
 void survive(World& w, std::vector<Option>& out);   // survive.cpp: heal, flee
 void fight(World& w, std::vector<Option>& out);     // fight.cpp: attack enemy champions
+// yBot: the fight network's chance we lose more champions than them near us within 15 rounds
+// (-1: no enemy within 8 tiles). Computed once per turn.
+float nnFightBad(const World& w);
+// yBot: top teams' fight policy: chance they would retreat or recall here (-1: no enemy within 6).
+float nnPolicyLeave(const World& w);
+std::array<float, 4> nnPolicy(const World& w);  // hold, engage, retreat, recall (-1s: no enemy within 6)
 void idle(World& w, std::vector<Option>& out);      // survive.cpp: fallback positioning
 void regroupOption(World& w, std::vector<Option>& out);
 void hunt(World& w, std::vector<Option>& out);       // survive.cpp: after being stuck, go after enemies  // survive.cpp: join an ally who sees an enemy

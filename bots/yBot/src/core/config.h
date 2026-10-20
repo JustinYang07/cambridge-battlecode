@@ -29,6 +29,8 @@ inline constexpr bool camp_focus_fire = false;         // rangeBot: every champi
 inline constexpr bool keeper_most_damaged = true;     // combatBotv2: of the champions at a dead camp, the one missing the most health keeps the capture (then recalls: banks and heals)
 inline constexpr float keeper_missing_margin = 40.0f;  // ...by more than this much health (else the older rules)
 inline constexpr int keeper_near_radius = 4;
+inline constexpr bool keeper_stellar_first = false;  // yBot: Stellar at the camp keeps the capture (Fish: Stellar takes 7.3 captures a game, ours 2.3)
+inline constexpr int stellar_keeper_radius = 6;  // ...from this far from the camp, even when a teammate is already on its tiles
 inline constexpr bool late_heal = true;              // combatBotv2: tanking a camp, heal by damage taken: leave ~death_margin_turns before death
 inline constexpr float death_margin_turns = 3.0f;     // ...turns of hits kept in hand after the walk out of reach
 inline constexpr float late_heal_window = 2.0f;       // ...urgency ramps over this many turns before that
@@ -163,7 +165,10 @@ inline constexpr float heal_enemy_margin = 0.35f;   // both shift up this much w
 inline constexpr float shop_trip_hp = 0.6f;           // yBot: shopping adds to a trip home only below this health...
 inline constexpr int shop_trip_wait = 80;            // ...or to complete an emblem affordable this many rounds
 inline constexpr int altar_lock_every = 4;            // yBot: bank scoring re-reads an altar's lock this often
-inline constexpr bool cast_first = true;             // yBot: fights cast a ready movement-forfeiting spell that can hit before stepping
+inline constexpr bool cast_first = true;
+inline constexpr int recall_near_enemy = 0;  // yBot: heal recalls with enemy champions close (0: walk home around them; 1 always; 2 unless one can hit us next turn)
+inline constexpr int attack_first = 0;  // yBot: hit an enemy champion in basic range before moving (0 off; 1 any, any option but heal/bank: A1 worse; 2 in fights or enemies that can hit us)
+inline constexpr bool free_cast = false;             // yBot: cast movement-forfeiting spells at enemies on turns we did not move             // yBot: fights cast a ready movement-forfeiting spell that can hit before stepping
 inline constexpr float bank_target_scale = 1.5f;     // yBot: x every role's bank target (Fish tributes bigger bags)
 inline constexpr float heal_first_min_missing = 0.6f; // yBot: 0.9 -> 0.6 // yBot: "heal first" only below this health
 inline constexpr float heal_first_factor = 0.5f;    // a camp that needs a trip home first
@@ -251,6 +256,7 @@ inline constexpr bool farm_map_jungle = true;      // combatBotv3: on farming ma
 inline constexpr int medium_map_side = 50;         // map editor size classes by the longest side: small < 50 <= medium < 75 <= large
 inline constexpr int large_map_side = 75;
 inline constexpr float farming_walk_ratio = 1.5f;  // medium maps: spawn-to-spawn walk at least this x the straight line = farming
+inline constexpr bool fish_builds = true;        // yBot: Fish's per-champion emblem orders (shop/shop.cpp), no farming-map swaps
 inline constexpr bool champion_builds = true;     // combatBotv3: shop/shop.cpp per-champion item orders (Cassi, Issac, Ryth, Stellar, Tavi, Prism, Ren, Varg)
 inline constexpr int build_variant = 12;           // 0 default, 1 treasure rush, 2 treasure on Vesper, 3 monster first,
                                                  // 4 power early, 5 home early, 6 durability on carries,
@@ -270,7 +276,7 @@ inline constexpr float alone_bank_factor = 0.8f;    // solo champions bank at th
 inline constexpr int bag_avoid_gems = 20;           // carrying this many gems, path around enemy reach
 
 // ---- fighting enemy champions
-inline constexpr float kill_gold_value = 50.0f;
+inline constexpr float kill_gold_value = 50.0f;  // unused since the balance patch: fight scoring reads cambc::constants::kill_gold
 inline constexpr float fight_our_dps_scale = 1.0f;  // our side's damage in fight estimates (measured real/predicted ~0.21)
 inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit
 // Mid/late-game fights (combatBotv3): from fight_mid_round, a fight whose estimated win chance is
@@ -306,6 +312,18 @@ inline constexpr float fight_win_fit_a = -0.144f;
 inline constexpr float fight_win_fit_b = 0.510f;
 // Fight win model: 0 the curve above; 1 the edge curve refit on 1,800 self-play games (resolved
 // fights we took, win = first death near the fight is theirs); 2 eight features on the same fights.
+// yBot: fight network (brain/nnfight.h, lab/nn/train_fight.py --bot): fights it rates likely to cost
+// us more champions than them (P > nn_fight_bad) score x nn_fight_factor.
+inline constexpr bool nn_fight = false;
+inline constexpr bool nn_policy = false;          // yBot: retreat where the distilled top-team policy (brain/nnpolicy.h) would leave...
+inline constexpr float nn_policy_leave = 0.45f;
+inline constexpr float nn_policy_engage = 0.0f;       // yBot: fight options score x bonus where the policy engages with this chance (0: off)
+inline constexpr float nn_policy_engage_bonus = 1.5f;  // ...with at least this chance of retreat + recall
+inline constexpr bool nn_retreat = false;             // yBot: retreat when the fight network rates our spot above...
+inline constexpr float nn_retreat_bad = 0.40f;       // ...this chance of losing more champions than them
+inline constexpr bool nn_retreat_before_contact = false;  // ...only before any enemy has us in reach
+inline constexpr float nn_fight_bad = 0.35f;
+inline constexpr float nn_fight_factor = 0.2f;
 inline constexpr int fight_win_model = 2;
 inline constexpr float fight_win_refit_a = -1.1700f;
 inline constexpr float fight_win_refit_b = 0.4630f;
@@ -566,6 +584,8 @@ inline constexpr bool pair_lives = true;
 inline constexpr int pair_front_slack = 1;        // Cassi's slack ahead of our front (= ranged_front_slack: off; -1, a tile behind it, tested worse)
 inline constexpr float pair_risk = 1.5f;          // flee / retreat judge time to death this much shorter for either of them
 inline constexpr float pair_heal_margin = 0.0f;   // and heal urgency dominates this much higher (0.1 tested neutral: off)
+inline constexpr int stellar_standoff = 4;            // yBot: Stellar's fight tiles nearer an enemy than this cost (0: off)
+inline constexpr float stellar_standoff_weight = 1.5f;  // ...this x D per tile nearer
 inline constexpr bool ranged_kite = false;        // alone with an enemy melee near: step away from it toward our melee or spawn (off: ranged deaths 68 -> 91 vs routeBot5)
 inline constexpr int ranged_kite_from = 2;        // ...when it is this close (2: it could step in and hit us this turn)
 inline constexpr int ranged_kite_ally_radius = 3; // a melee ally this close means we are not alone: keep shooting

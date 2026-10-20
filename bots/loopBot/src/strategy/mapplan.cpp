@@ -1207,8 +1207,9 @@ void endRoute(const char* why) {
 void follow(World& w) {
     if (!followInit) {
         followInit = true;
-        for (const auto& r : read().routes)
-            if (r.type == w.type) mine = &r;
+        if (tune::opening_routes)
+            for (const auto& r : read().routes)
+                if (r.type == w.type) mine = &r;
         ended = mine == nullptr || mine->len == 0;
         trace().note("route: " + routeText());
     }
@@ -1251,6 +1252,7 @@ bool routeActive() { return followInit && !ended; }
 
 bool openingActive(const World& w) {
     static bool done = false;
+    if (!tune::opening_camp) return false;
     const auto& p = read();
     if (done || p.openingCamp < 0 || p.openingCamp >= static_cast<int>(w.groups.size())) return false;
     // Over once it has been captured (it respawns) or the opening is past.

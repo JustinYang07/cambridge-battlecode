@@ -1,4 +1,8 @@
-"""Debug drawing for the visualiser."""
+"""Debug drawing for the visualiser during draft and gameplay.
+
+Drawings last for the current round. Both teams' drawings clear at the next
+round; the final draft round clears when gameplay begins.
+"""
 
 from __future__ import annotations
 

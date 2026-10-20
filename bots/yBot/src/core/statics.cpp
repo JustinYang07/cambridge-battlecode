@@ -293,6 +293,7 @@ void Statics::init() {
             if (strength > 0) {
                 g.harmless = false;
                 g.reach.draw_chebyshev(p, static_cast<float>(c.range));
+                g.maxRange = std::max(g.maxRange, c.range);
             }
             g.killOrder.push_back({health, strength});
             if (tileCamps_.size() < 255) {

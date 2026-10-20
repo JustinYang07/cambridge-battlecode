@@ -274,11 +274,11 @@ Step walked(Step st, int travel) {
 
 // Built once at the end of the first draft turn (10x fuel): every champion type's camp steps
 // and each group's walk to the nearest altar, so later picks only assign and look ahead.
-std::array<std::vector<Step>, 12> stepTable;
+std::array<std::vector<Step>, 16> stepTable;  // per champion type (room for new champions)
 constexpr std::size_t kSpawnTop = 10, kNearList = 6;
-std::array<std::vector<std::pair<float, int>>, 12> spawnTop;  // per type: best first camps from spawn
+std::array<std::vector<std::pair<float, int>>, 16> spawnTop;  // per type: best first camps from spawn
 std::vector<std::vector<std::pair<int, int>>> nearList;       // per group: (walk, group), nearest first
-std::array<bool, 12> typeReady{};
+std::array<bool, 16> typeReady{};
 std::vector<std::uint8_t> nearReady;
 std::vector<int> pool;  // every group a route could use (our side or the centre)
 std::vector<int> altarT;
@@ -886,7 +886,7 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
     const int n = A.n;
     std::vector<Champ> champs;
     for (auto t : roster) champs.push_back(champ(t));
-    auto typeOf = [&](std::size_t c) { return static_cast<std::size_t>(champs[c].type) % 12; };
+    auto typeOf = [&](std::size_t c) { return static_cast<std::size_t>(champs[c].type) % 16; };
     for (std::size_t c = 0; c < champs.size(); ++c) ensureType(typeOf(c));
     auto stepOf = [&](std::size_t c, int g, int travel) { return walked(stepTable[typeOf(c)][static_cast<std::size_t>(g)], travel); };
     // Each pair costs ~200 fuel on a 100k pick turn, so everything below reads the tables

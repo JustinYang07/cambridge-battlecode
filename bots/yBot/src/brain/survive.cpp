@@ -232,6 +232,42 @@ void survive(World& w, std::vector<Option>& out) {
             }
         }
     }
+    // yBot: the fight network says this spot loses us more champions than them: leave before it does
+    // (ladder: 40 contacts a game vs Fish's 25; moving in went bad 25% of the time vs Fish's 8%).
+    if (tune::nn_retreat && w.alive) {
+        const float pBad = nnFightBad(w);
+        bool contact = false;
+        for (const auto& e : w.enemies) contact = contact || (e.hp > 0 && dist(e.pos, w.pos) <= e.range + 1);
+        if (pBad > tune::nn_retreat_bad && !(tune::nn_retreat_before_contact && contact)) {
+            Option o;
+            o.kind = OptionKind::flee;
+            o.c.target << "retreat";
+            const float danger = std::clamp((pBad - tune::nn_retreat_bad) / (1.0f - tune::nn_retreat_bad) + 0.4f, 0.0f, 1.0f);
+            o.add("nn: losing spot", danger * tune::flee_value);
+            o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
+            o.turns("lost farming", 25.0f);
+            o.c.note << "nn bad " << static_cast<int>(pBad * 100.0f) << "%";
+            o.finish();
+            out.push_back(std::move(o));
+        }
+    }
+    // yBot: where the top teams would leave (distilled policy), leave. In replays, staying where it
+    // says leave (p >= 0.45) died 37-64% of the time within 10 rounds vs 16-24% for leaving.
+    if (tune::nn_policy && w.alive) {
+        const float pLeave = nnPolicyLeave(w);
+        if (pLeave >= tune::nn_policy_leave) {
+            Option o;
+            o.kind = OptionKind::flee;
+            o.c.target << "retreat";
+            const float danger = std::clamp((pLeave - tune::nn_policy_leave) / (1.0f - tune::nn_policy_leave) + 0.5f, 0.0f, 1.0f);
+            o.add("nn: top teams leave", danger * tune::flee_value);
+            o.add("bag", static_cast<float>(w.gems) * 1.5f * danger);
+            o.turns("lost farming", 25.0f);
+            o.c.note << "leave " << static_cast<int>(pLeave * 100.0f) << "%";
+            o.finish();
+            out.push_back(std::move(o));
+        }
+    }
     // combatBotv3: ranged follow the front. A melee ally near us retreating with enemies about leaves
     // us without a front line: go with it now (eight r33: Ren retreated ahead of their five, Stellar
     // kept farming and was caught).
@@ -243,7 +279,7 @@ void survive(World& w, std::vector<Option>& out) {
         if (enemiesNear)
             for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
                 const auto t = static_cast<std::size_t>(w.allyTypes[static_cast<std::size_t>(s)]);
-                const bool melee = t < 16 && bc::champion_designs[t].base_stats().base_attack_range <= 1;
+                const bool melee = t < bc::champion_designs.size() && bc::champion_designs[t].base_stats().base_attack_range <= 1;
                 if (s == w.slot || !comms::retreating(s) || !melee) continue;
                 const auto p = w.allyPosCached(s);
                 if (p.x < 0 || dist(p, w.pos) > tune::retreat_team_radius) continue;

@@ -170,6 +170,16 @@ void World::refresh(bool firstTurn) {
             e.focus = c.focus();
             e.gems = static_cast<int>(c.gem_count());
             e.range = c.attack_range();
+            if ((tune::nn_fight || tune::nn_retreat || tune::nn_policy || tune::nn_policy_engage > 0) && e.index >= 0 && e.index < static_cast<int>(enemyType_.size())) {
+                auto& t = enemyType_[static_cast<std::size_t>(e.index)];
+                if (t < 0) {
+                    try {
+                        t = static_cast<signed char>(static_cast<int>(c.champion_name()));
+                    } catch (const bc::error&) {
+                    }
+                }
+                e.type = t;
+            }
             e.tributing = c.is_submitting_gems();
             e.channeling = c.is_recalling() || e.tributing;
             if (e.index >= 0 && e.index < static_cast<int>(enemyStun_.size())) {
@@ -478,7 +488,7 @@ bool World::allyTanking(int groupId) const {
     bool anyNear = false;
     for (const auto& c : camps)
         if (c.groupId == groupId && c.hp > 0 && c.strength > 0)
-            for (const auto& a : allies) anyNear |= dist(a.pos, c.pos) <= tune::monster_range;
+            for (const auto& a : allies) anyNear |= dist(a.pos, c.pos) <= Statics::get().campRange(groupId);
     if (!anyNear) return false;
     for (int i = 0; i < static_cast<int>(allyHandles_.size()); ++i) {
         if (i == slot) continue;
@@ -487,7 +497,7 @@ bool World::allyTanking(int groupId) const {
         for (const auto& c : camps) {
             if (c.groupId != groupId || c.hp <= 0 || c.strength <= 0) continue;
             const int d = dist(at, c.pos);
-            if (d <= tune::monster_range && (d < range || (d == range && i < slot))) return true;
+            if (d <= Statics::get().campRange(groupId) && (d < range || (d == range && i < slot))) return true;
         }
     }
     return false;
@@ -608,6 +618,24 @@ void World::readAllyHp(int s) const {
         if (a.is_alive()) c = {round, a.health(), a.max_health(), a.strength(), true};
     } catch (const bc::error&) {
     }
+}
+
+World::AllyStats World::allyStats(int s) const {
+    if (s < 0 || s >= static_cast<int>(allyHandles_.size()) || s >= 8) return {};
+    readAllyHp(s);
+    auto& c = allyHpCache_[static_cast<std::size_t>(s)];
+    // Focus and bag only for the fight network, once per round (reading them with every health
+    // read cost ~120 lost turns a game).
+    if (c.alive && !c.extra) {
+        c.extra = true;
+        try {
+            const auto& a = allyHandles_[static_cast<std::size_t>(s)];
+            c.focus = a.focus();
+            c.gems = static_cast<int>(a.gem_count());
+        } catch (const bc::error&) {
+        }
+    }
+    return {c.hp, c.maxHp, c.strength, c.focus, c.gems, c.alive};
 }
 
 float World::allyHpFrac(int s) const {

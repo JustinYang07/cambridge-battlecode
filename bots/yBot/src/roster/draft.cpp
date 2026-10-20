@@ -37,13 +37,21 @@ bc::champion_type representative(bc::champion_draft pick) {
     case bc::champion_draft::ren: return bc::champion_type::ren;
     case bc::champion_draft::varg: return bc::champion_type::varg;
     case bc::champion_draft::tavi: return bc::champion_type::tavi;
+    default: break;
     }
     return bc::champion_type::ryth;
 }
 
+// yBot: picks with a profile (a champion added by a patch has none until we write one).
+bool known(bc::champion_draft pick) { return static_cast<int>(pick) <= static_cast<int>(bc::champion_draft::tavi); }
+
 Scored score(bc::champion_draft pick, int teamSize, bool firstPick) {
     const auto& p = profile(representative(pick));
     Scored s{pick, 0, p.farmPower, p.survivability, 1.0f};
+    if (!known(pick)) {
+        s.score = -1e9f;
+        return s;
+    }
     if (pick == bc::champion_draft::cassi_and_issac) {
         // A second body farms in parallel; worth more on small rosters, but the linked death hurts.
         s.bodies = 1.0f + 0.55f * (3.0f / static_cast<float>(std::max(teamSize, 3)));

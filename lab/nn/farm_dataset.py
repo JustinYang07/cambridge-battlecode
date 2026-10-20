@@ -45,12 +45,14 @@ def features(me, g, gi, st, r, champs, T, sp_us, sp_them, last_target, heading=0
             cheb(cen, sp_us) / 40.0, r / 1000.0, 1.0 if status == 'reward' else 0.0, wait,
             allies_me / 3.0, 1.0 if last_target == gi else 0.0, me[6] / 1500.0, enemies_me / 3.0, heading / 3.0]
 
-def process(meta, path):
-    side = 'A' if (meta.get('teamA') or {}).get('teamName') == TEAM else 'B' if (meta.get('teamB') or {}).get('teamName') == TEAM else None
+def process(meta, path, team=None):
+    team = team or TEAM
+    side = 'A' if (meta.get('teamA') or {}).get('teamName') == team else 'B' if (meta.get('teamB') or {}).get('teamName') == team else None
     if side is None: return []
-    out = subprocess.run(['node', f'{ROOT}/lab/tools/decode_replay.mjs', path, '--wasm', WASM], capture_output=True, text=True)
-    if out.returncode != 0: return []
-    d = json.loads(out.stdout); o = {}
+    import fingerprint as FP  # decode cache (lab/data/decoded26)
+    d = FP.decode(path, meta['matchId'])
+    if d is None: return []
+    o = {}
     for x in d['rounds']: o.setdefault(x['r'], x)
     M = mapfor(meta['map'], d, o)
     if not M: return []
@@ -100,25 +102,39 @@ def process(meta, path):
             rows.append((np.array(F, np.float32), cands.index(nxt), meta['matchId'], meta['map']))
     return rows
 
+def _job(args):
+    m, p, team = args
+    try:
+        return team, process(m, p, team)
+    except Exception:
+        return team, []
+
 def main():
+    # <team[,team...]>: every listed team's champions in every game it played (since --since).
     global TEAM
-    TEAM = sys.argv[1]; OUT = sys.argv[2]
+    TEAM = sys.argv[1]; OUT = sys.argv[2]; teams = TEAM.split(',')
     MAX = int(sys.argv[sys.argv.index('--max') + 1]) if '--max' in sys.argv else 10**9
-    metas = []
+    SINCE = sys.argv[sys.argv.index('--since') + 1] if '--since' in sys.argv else '2026-10-17'
+    JOBS = int(sys.argv[sys.argv.index('--jobs') + 1]) if '--jobs' in sys.argv else 8
+    jobs = []
     for f in glob.glob(f'{ROOT}/lab/data/scraped/*.json'):
         m = json.load(open(f))
-        if TEAM in ((m.get('teamA') or {}).get('teamName'), (m.get('teamB') or {}).get('teamName')):
-            metas.append((m, f[:-5] + '.repl26a'))
-    metas.sort(key=lambda t: t[0].get('createdAt') or '', reverse=True)
-    allrows = []; used = 0
-    for m, p in metas[:MAX]:
-        rows = process(m, p)
-        if rows: used += 1
-        allrows += rows
-        print(f"{m['map']:12s} {len(rows):5d} samples", file=sys.stderr)
+        if (m.get('createdAt') or '') < SINCE or not m.get('map'): continue
+        m['map'] = m['map'].replace('_', '-')
+        for t in teams:
+            if t in ((m.get('teamA') or {}).get('teamName'), (m.get('teamB') or {}).get('teamName')):
+                jobs.append((m, f[:-5] + '.repl26a', t))
+    jobs = jobs[:MAX]
+    from multiprocessing import Pool
+    allrows = []; used = 0; teamOf = []
+    with Pool(JOBS) as pool:
+        for i, (t, rows) in enumerate(pool.imap_unordered(_job, jobs, chunksize=2)):
+            if rows: used += 1
+            allrows += rows; teamOf += [t] * len(rows)
+            if i % 100 == 0: print(f'  {i}/{len(jobs)} games, {len(allrows)} samples', file=sys.stderr)
     X = np.concatenate([r[0] for r in allrows]); off = np.cumsum([0] + [len(r[0]) for r in allrows])
     y = np.array([r[1] for r in allrows]); game = np.array([r[2] for r in allrows]); mp = np.array([r[3] for r in allrows])
-    np.savez(OUT, X=X, off=off, y=y, game=game, map=mp)
+    np.savez(OUT, X=X, off=off, y=y, game=game, map=mp, team=np.array(teamOf))
     print(f'games {used}, samples {len(allrows)}, rows {len(X)}', file=sys.stderr)
 
 if __name__ == '__main__':

@@ -137,9 +137,10 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     bc::bitboard ring, inner;
     ring.clear();
     inner.clear();
+    const int R = Statics::get().campRange(g.id);
     for (auto t : g.tiles) {
-        ring.draw_chebyshev(t, static_cast<float>(tune::monster_range + 2));
-        inner.draw_chebyshev(t, static_cast<float>(tune::monster_range));
+        ring.draw_chebyshev(t, static_cast<float>(R + 2));
+        inner.draw_chebyshev(t, static_cast<float>(R));
     }
     auto goals = ring & ~inner & ~w.danger;  // never wait inside another monster's reach
     FixedStr<24> msg;
@@ -160,16 +161,17 @@ bool rushPull(World& w, const GroupInfo& g, int need) {
     inner.clear();
     reach.clear();
     bool live = false;
+    const int R = Statics::get().campRange(g.id);
     for (const auto& c : w.camps)
         if (c.groupId == g.id && c.hp > 0) {
-            inner.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
-            reach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range + 1));
+            inner.draw_chebyshev(c.pos, static_cast<float>(R));
+            reach.draw_chebyshev(c.pos, static_cast<float>(R + 1));
             live = true;
         }
     if (!live)
         for (auto t : g.tiles) {
-            inner.draw_chebyshev(t, static_cast<float>(tune::monster_range));
-            reach.draw_chebyshev(t, static_cast<float>(tune::monster_range + 1));
+            inner.draw_chebyshev(t, static_cast<float>(R));
+            reach.draw_chebyshev(t, static_cast<float>(R + 1));
         }
     const combat::Focus focus{.groupId = g.id};
     if (w.ranged) combat::castFromRange(w, focus);
@@ -256,7 +258,7 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
                 return;
             }
         }
-        if (sr > tune::monster_range && attackers && (!allyHere || w.spellClearGroup == g.id)) {
+        if (sr > Statics::get().campRange(g.id) && attackers && (!allyHere || w.spellClearGroup == g.id)) {
             bc::bitboard inReach, inSpell;
             inReach.clear();
             inSpell.clear();
@@ -264,7 +266,7 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
                 if (c.hp <= 0 || c.strength <= 0) continue;
                 // Out of reach of every attacking monster we can see, not just this group's: the
                 // neighbouring groups sit a few tiles away (expanse: Stellar died to them 1.5 a game).
-                inReach.draw_chebyshev(c.pos, static_cast<float>(tune::monster_range));
+                inReach.draw_chebyshev(c.pos, static_cast<float>(Statics::get().campRange(c.groupId)));
                 if (c.groupId == g.id) inSpell.draw_chebyshev(c.pos, static_cast<float>(sr));
             }
             auto goals = inSpell & ~inReach & ~w.danger & ~Statics::get().terrain;
@@ -510,10 +512,18 @@ void bank(World& w, int altarIdx) {
     combat::act(w, combat::Focus{}, false);
 }
 
+// yBot: the longest reach among monsters near us (stepping away clears this).
+int nearbyCampRange(const World& w) {
+    int r = 0;
+    for (const auto& c : w.camps)
+        if (c.strength > 0 && c.hp > 0 && dist(c.pos, w.pos) <= 8) r = std::max(r, Statics::get().campRange(c.groupId));
+    return r > 0 ? r : tune::monster_range;
+}
+
 std::vector<bc::vec2> nearbyThreats(const World& w) {
     std::vector<bc::vec2> threats;
     for (const auto& c : w.camps)
-        if (c.strength > 0 && dist(c.pos, w.pos) <= tune::monster_range + 1) threats.push_back(c.pos);
+        if (c.strength > 0 && dist(c.pos, w.pos) <= Statics::get().campRange(c.groupId) + 1) threats.push_back(c.pos);
     for (const auto& e : w.enemies)
         if (dist(e.pos, w.pos) <= e.range + 3) threats.push_back(e.pos);
     return threats;
@@ -583,12 +593,17 @@ void heal(World& w) {
     bool champHitting = false;
     for (const auto& e : w.enemies) champHitting = champHitting || (e.hp > 0 && dist(e.pos, w.pos) <= e.range + 1);
     if (enemyClose && w.incoming > 0 && !champHitting && nav().escapeTurns(w) > 0) {
-        if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), tune::monster_range);
+        if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), nearbyCampRange(w));
         combat::act(w, combat::Focus{.noCamps = true}, false);
         trace().note("monsters hitting: out of their reach first");
         return;
     }
-    if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit)) {
+    // yBot: recall with enemies about too (replays: recalls started with an enemy champion within 6
+    // reached home 74% of the time for us, 65% for Fish, who recall hurt mid-fight at ~29% health
+    // while ours walked and died: 41% of our hurt champions died within 8 rounds vs Fish's 26%).
+    // Mode 2: not while an enemy champion can hit us next turn.
+    const bool recallAnyway = tune::recall_near_enemy == 1 || (tune::recall_near_enemy == 2 && !champHitting);
+    if (enemyClose && !recallAnyway && !(w.stuckTurns > 0 && !w.beingHit)) {
         // Toward an ally first when one is near and away from the threat: the chaser meets two of us.
         if (const auto ally = retreatTarget(w); ally.x >= 0 && nav().stepToward(w, ally, 1, true, &avoid)) {
             trace().note("enemy close: retreating to an ally");
@@ -603,7 +618,7 @@ void heal(World& w) {
     // Monsters do not chase: get out of their reach first, then recall (damage would cancel it).
     const int leftGroup = w.engagedGroup;
     if (w.incoming > 0 && nav().escapeTurns(w) > 0) {
-        if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), tune::monster_range);
+        if (!nav().stepEscape(w)) nav().stepAway(w, nearbyThreats(w), nearbyCampRange(w));
         if (nav().escapeTurns(w) > 0) return;
         // An ally still beside the camp takes over the hits once we are out of reach: look again
         // next turn (rejoining may beat the trip home) instead of committing to a 5-turn recall.
@@ -651,7 +666,7 @@ void flee(World& w) {
 bool meleeType(bc::champion_type t) {
     static std::array<std::int8_t, 16> cache{};
     const auto i = static_cast<std::size_t>(t);
-    if (i >= cache.size()) return false;
+    if (i >= cache.size() || i >= bc::champion_designs.size()) return false;
     if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
     return cache[i] == 1;
 }
@@ -1172,6 +1187,7 @@ bool outmatchedAhead(World& w) {
 }
 
 void execute(World& w, const Option& o) {
+    const auto startPos = bc::self().position();
     // combatBotv2: outnumbered where we stand, a dasher keeps its dash for escaping (eight: Issac
     // dashed in, then had none left to get out while four of them beat him down).
     w.reserveDash = tune::dash_reserve && w.kit.dashRange > 0 && o.kind != OptionKind::flee && o.kind != OptionKind::heal &&
@@ -1179,6 +1195,14 @@ void execute(World& w, const Option& o) {
     if (w.reserveDash) trace().note("outnumbered: keeping the dash");
     // Whatever we are doing, cancelling an enemy tribute or recall is worth a stun.
     combat::interruptChannels(w);
+    // yBot: an enemy champion in basic-attack range gets hit before we move, whatever the plan
+    // (ladder vs xBot: with an enemy in reach our Issac hit it 28% of rounds vs Fish's 75%,
+    // hitting a camp or walking off instead). Not when about to channel a recall or tribute.
+    // Mode 1: any enemy in reach (A1: deaths 4.9 -> 7.0 vs xBot: hitting them while farming starts
+    // fights). Mode 2: in a fight we chose, or only enemies that can hit us now anyway.
+    if (tune::attack_first > 0 && o.kind != OptionKind::heal && o.kind != OptionKind::bank)
+        if (combat::attackChampionFirst(w, combat::Focus{.enemy = o.enemy}, tune::attack_first == 2 && o.kind != OptionKind::fight))
+            trace().note("attack first");
     combat::useAltarLock(w);
     const auto& statics = Statics::get();
     const bool farming = o.kind == OptionKind::farm || o.kind == OptionKind::capture;
@@ -1283,6 +1307,14 @@ void execute(World& w, const Option& o) {
         break;
     }
     combat::support(w);
+    // yBot free cast: we did not move this turn (capturing, at an altar, holding) and are not
+    // channelling: a ready spell that forfeits movement costs nothing now, so cast it at an enemy
+    // champion in reach (such spells were held while standing on capture tiles or at altars).
+    if (tune::free_cast) {
+        auto& me = bc::self();
+        if (me.position() == startPos && !me.is_recalling() && !me.is_submitting_gems() && combat::exclusiveSpellReady(w))
+            combat::act(w, combat::Focus{.anyEnemy = true, .noCamps = true}, true);
+    }
 
     // Chaining: the camp we worked last turn is dead now (killed or captured): start the chain from it.
     if ((w.lastOption == static_cast<int>(OptionKind::farm) || w.lastOption == static_cast<int>(OptionKind::capture)) &&

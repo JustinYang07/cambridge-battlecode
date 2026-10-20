@@ -43,6 +43,9 @@ void act(World& w, const Focus& focus, bool beforeMove);
 // yBot: a ready damage or stun spell that forfeits movement can hit an enemy champion from here
 // (such spells are only cast before moving; fights that stepped first never cast them).
 bool exclusiveSpellReady(World& w);
+// yBot: hit an enemy champion in basic-attack range now, before moving (false: none, or no attack).
+// onlyThreats: only one that can hit us next turn (its range + 1), picked by the usual target rules.
+bool attackChampionFirst(World& w, const Focus& focus, bool onlyThreats);
 // Cast support abilities (heals, shields) that do not depend on a target.
 void support(World& w);
 // A damage spell reaches 4 tiles, beyond basic-attack range (and monster range 3): cast it

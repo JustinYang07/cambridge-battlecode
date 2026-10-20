@@ -103,7 +103,7 @@ float captureShareUncached(const World& w, int groupId);
 bool meleeChampion(bc::champion_type t) {
     static std::array<std::int8_t, 16> cache{};
     const auto i = static_cast<std::size_t>(t);
-    if (i >= cache.size()) return false;
+    if (i >= cache.size() || i >= bc::champion_designs.size()) return false;
     if (cache[i] == 0) cache[i] = bc::champion_designs[i].base_stats().base_attack_range <= 1 ? 1 : 2;
     return cache[i] == 1;
 }
@@ -191,11 +191,14 @@ float captureShareUncached(const World& w, int groupId) {
         bool mobile = false;  // a dash: walks the reward to an altar sooner
         float missing = 0;    // health lost: a recall home after the capture heals all of it
         bool tankType = false; // combatBotv2: a tank at any health (tune::keeper_tank_first)
+        bool carry = false;    // yBot: Stellar (tune::keeper_stellar_first)
     };
     // Only what every teammate can read about every other: health. (A bag test made it one-sided:
     // a teammate's bag may not be readable, so both champions on the tiles decided they kept it.)
     auto homeward = [&](float hp) { return hp < tune::capture_home_hp; };
     auto keeps = [](const Key& a, const Key& b) {  // a keeps the capture rather than b
+        // yBot: the gold goes to the carry (Fish's Stellar holds ~4x our Stellar's shards by r400).
+        if (tune::keeper_stellar_first && a.carry != b.carry) return a.carry;
         if (a.homeward != b.homeward) return a.homeward;
         // The tank walks on with the party (rows: Varg kept the first wolves' capture, the second
         // wolves were too strong without it, and three of us stood on the tiles splitting it).
@@ -223,7 +226,7 @@ float captureShareUncached(const World& w, int groupId) {
     // after the wolves died, and Ren held the capture and recalled too, leaving two to farm on).
     auto walksOn = [&](bc::champion_type t, float hp) { return isTank(t) && hp >= tune::keeper_tank_fit; };
     const Key me{homeward(w.hpFrac()), w.hpFrac(), profile(w.type).farmPower, w.slot, walksOn(w.type, w.hpFrac()), hasDash(w.type), w.maxHp - w.hp,
-                 isTank(w.type)};
+                 isTank(w.type), w.type == bc::champion_type::stellar};
     const int myDist = nearestTile(w.pos);
     bool allyOnTiles = false, allyKeeps = false, allyNearer = false;
     // combatBotv2: the keeper is chosen among everyone at the camp, not only those already on its
@@ -234,6 +237,7 @@ float captureShareUncached(const World& w, int groupId) {
     // (Earlier this counted it only once on the tiles; one tile off, the capture went to Ren.)
     bool designated = tune::keeper_most_damaged;  // we are the one to hold it
     bool designatedOther = false;                                 // a teammate here is
+    bool carryComing = false;                                     // ...and it is Stellar (yBot)
     for (int sl = 0; sl < comms::alert_byte && sl < w.allyCount; ++sl) {
         if (sl == w.slot) continue;
         const auto p = w.allyPosCached(sl);
@@ -241,10 +245,12 @@ float captureShareUncached(const World& w, int groupId) {
         const auto type = w.allyTypes[static_cast<std::size_t>(sl)];
         const float allyHp = w.allyHpFrac(sl);
         const Key them{allyHp >= 0 && homeward(allyHp), allyHp >= 0 ? allyHp : 1.0f, profile(type).farmPower, sl, walksOn(type, allyHp >= 0 ? allyHp : 1.0f), hasDash(type),
-                       w.allyMissingHp(sl), isTank(type)};
-        if (tune::keeper_most_damaged && dist(p, g.center) <= tune::keeper_near_radius && keeps(them, me)) {
+                       w.allyMissingHp(sl), isTank(type), type == bc::champion_type::stellar};
+        const int nearR = tune::keeper_stellar_first && them.carry ? tune::stellar_keeper_radius : tune::keeper_near_radius;
+        if (tune::keeper_most_damaged && dist(p, g.center) <= nearR && keeps(them, me)) {
             designated = false;
             designatedOther = true;
+            carryComing = carryComing || (tune::keeper_stellar_first && them.carry);
         }
         if (Statics::get().onGroup(g, p)) {
             allyOnTiles = true;
@@ -257,10 +263,14 @@ float captureShareUncached(const World& w, int groupId) {
     // Only from near the camp, and once a teammate is already capturing, only from beside its tiles:
     // arriving late adds nothing and splits the reward (rows: Issac walked back 7 tiles to a capture
     // Ren had started and stepped on as it completed: 33 gems each).
-    if (designated && (dist(w.pos, g.center) > tune::keeper_near_radius || (allyOnTiles && !meOn && myDist > 1))) designated = false;
+    // yBot: Stellar takes it from further out, even from a teammate already on the tiles (who steps off).
+    const bool carryKeeps = tune::keeper_stellar_first && me.carry;
+    if (designated && (dist(w.pos, g.center) > (carryKeeps ? tune::stellar_keeper_radius : tune::keeper_near_radius) ||
+                       (allyOnTiles && !meOn && myDist > 1 && !carryKeeps)))
+        designated = false;
     designatedKeeper(w, groupId) = designated;
     if (designated) return 1.0f;                                      // ours to take, whoever is on it now
-    if (meOn) return allyKeeps ? tune::capture_taken_factor : 1.0f;  // two of us on it: the keeper stays (we hold it until it is on)
+    if (meOn) return allyKeeps || carryComing ? tune::capture_taken_factor : 1.0f;  // yBot: Stellar on its way: leave it  // two of us on it: the keeper stays (we hold it until it is on)
     if (allyOnTiles) return tune::capture_taken_factor;               // a teammate is already capturing
     if (designatedOther) return tune::handoff_factor;                 // the keeper is coming
     if (allyNearer) return tune::handoff_factor;                      // a teammate will get there first
@@ -738,7 +748,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         const bool farCamp = static_cast<float>(dist(g.center, stc.spawnCenter)) >=
                              tune::spell_clear_far_frac * static_cast<float>(std::max(stc.width, stc.height));
         if (spellCandidate && tune::spell_clear_option && w.type == bc::champion_type::stellar && farCamp && !g.harmless && claims == 0 &&
-            combat::damageSpellRange(w) > tune::monster_range && w.kit.spellDps > 0) {
+            combat::damageSpellRange(w) > stc.campRange(g.id) && w.kit.spellDps > 0) {
             float attackersHp = 0, othersHp = 0;
             if (mem.visibleNow) {
                 for (const auto& cs : w.camps)

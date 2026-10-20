@@ -214,7 +214,7 @@ bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
                 if (focus.noCamps || !(w.beingHit && w.incoming > 0 && w.hpFrac() < tune::defensive_stun_hp)) continue;
                 CampSeen* worst = nullptr;
                 for (auto& c : w.camps)
-                    if (c.handle && c.hp > 0 && c.strength > 0 && dist(c.pos, w.pos) <= std::min(range, tune::monster_range) &&
+                    if (c.handle && c.hp > 0 && c.strength > 0 && dist(c.pos, w.pos) <= std::min(range, Statics::get().campRange(c.groupId)) &&
                         (!worst || c.strength > worst->strength))
                         worst = &c;
                 if (worst && a.use(*worst->handle)) {
@@ -349,6 +349,17 @@ void act(World& w, const Focus& focus, bool beforeMove) {
         castOnTargets(w, focus, false);
     }
     if (attacked) resetAndAttack(w, focus);
+}
+
+bool attackChampionFirst(World& w, const Focus& focus, bool onlyThreats) {
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= w.range && (!onlyThreats || dist(e.pos, w.pos) <= e.range + 1)) {
+            Focus f = focus;
+            f.anyEnemy = !onlyThreats;
+            f.noCamps = true;
+            return basicAttack(w, f);
+        }
+    return false;
 }
 
 bool exclusiveSpellReady(World& w) {

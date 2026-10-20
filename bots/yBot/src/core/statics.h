@@ -26,6 +26,7 @@ struct GroupInfo {
     float totalStrength = 0;          // sum of members' base strength (damage per round when awake)
     bool harmless = false;            // only gem/gold clusters
     bool hasMonolith = false;
+    int maxRange = 0;                 // yBot: longest attack range among its damaging members (0: none)
     bool reachable = true;            // some tile is connected to our spawn on foot (false: sealed off, e.g. behind holes)
     // Sealed groups a dash can get into: the pocket around them (walkable inside), and one legal dash
     // from dashFrom (reachable on foot) to dashTo (inside the pocket). The way out is the reverse.
@@ -70,6 +71,12 @@ struct Statics {
     const TileCamp* campAt(cambc::vec2 tile) const;
     // A camp spawn tile of group g: a byte read (bitboard reads cost ~30-300 fuel each), or the
     // group's mask on maps with more camps than the byte index holds.
+    // yBot: how far a group's monsters hit (balance patch: elk 4, golem 4, monolith 5; was 3 for all).
+    int campRange(int groupId) const {
+        if (groupId < 0 || groupId >= static_cast<int>(groups.size())) return 3;
+        const int r = groups[static_cast<std::size_t>(groupId)].maxRange;
+        return r > 0 ? r : 3;
+    }
     bool onGroup(const GroupInfo& g, cambc::vec2 tile) const {
         if (campsCapped_) return g.tileMask.is_set(tile);
         const auto* c = campAt(tile);
