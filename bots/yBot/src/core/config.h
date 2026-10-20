@@ -7,9 +7,9 @@ namespace tune {
 // ---- patch economy (wolf 22 -> 4 gems / 90 -> 40 gold, elk 36 -> 15 / 160 -> 90, gem cluster 24 -> 7,
 // gold cluster 35 -> 20, kills 50 -> 100 gold). Scores stay in old-patch gem units: a gem now scores
 // 1/gem_scale of them and gold 1/gold_scale, and bag-size thresholds (in raw gems) shrink by gem_scale.
-// Both 1: the old patch's behaviour. Blind estimates (no local engine on the new patch yet): A/B them.
+// Both 1: the old patch's behaviour. gem_scale is a blind estimate; gold_scale was checked on cambc 3.0.1.
 inline constexpr float gem_scale = 0.4f;
-inline constexpr float gold_scale = 0.55f;
+inline constexpr float gold_scale = 0.55f;  // cambc 3.0.1, 42 games each at travel_weight 2: 0.55 38 wins; 0.35 39 wins, +66 gems, +20 deaths; 0.8 34 wins, -1,300 gems
 
 // ---- economy: what a unit of reward is worth, in gem-equivalents
 inline constexpr float gold_value_early = 0.20f;   // gems per gold before late game
@@ -81,7 +81,7 @@ inline constexpr float contested_camp_factor = 0.35f;  // an enemy champion was 
 inline constexpr int race_end_gems = 850;          // enemy banked this many: bank what we carry now
 inline constexpr float race_end_bank_boost = 6.0f;
 inline constexpr int enemy_spawn_radius = 7;       // fights this close to the enemy spawn are not worth taking
-inline constexpr float travel_weight = 3.0f;       // walking turns count this much in farm scores
+inline constexpr float travel_weight = 2.0f;       // walking turns count this much in farm scores (patch, cambc 3.0.1, 42 games: 3.0 35 wins, 2.0 38 and +770 gems, 1.5 38 but -580 gems and +25 deaths)
 inline constexpr int max_scored_groups = 6;        // fully score at most this many camp groups per turn
 inline constexpr int max_team_per_camp = 4;
 inline constexpr bool team_rush = true;
