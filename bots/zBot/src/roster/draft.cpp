@@ -191,12 +191,13 @@ void play_draft() {
         const float separatedShare = mapplan::analysed() ? mapplan::features().separatedShare : 0.0f;
         const bool separatedMap = tune::separated_heart && separatedShare >= tune::separated_draft_share;
         planText += "separated camps " + std::to_string(static_cast<int>(separatedShare * 100.0f)) + "%; ";
+        const bool heart = tune::heart_for_varg || separatedMap;
         std::vector<D> heartOrder = baseOrder;
-        if (separatedMap) {
+        if (heart) {
             std::replace(heartOrder.begin(), heartOrder.end(), D::varg, kHeartOfRuinDraft);
             planText += "Heart of Ruin for Varg; ";
         }
-        const auto& fixedOrder = separatedMap ? heartOrder : baseOrder;
+        const auto& fixedOrder = heart ? heartOrder : baseOrder;
         if (tune::fixed_draft) {
             for (auto d : fixedOrder)
                 if (!taken(d)) { fallback = d; break; }
