@@ -281,7 +281,10 @@ inline constexpr bool lock_own_altars = true;  // also lock unlocked altars on o
 inline constexpr bool break_altar_locks = true;   // bank at enemy-locked altars too: tributing attacks the lock (altar_lock_hits from the engine remove it: 5 this patch)
 inline constexpr int lock_break_turns = 5;          // turns a lone champion needs to break one (lock health 3 -> 5 this patch)
 inline constexpr bool buy_altar_locks = true;   // keep an altar lock: cancel enemy tributes, lock enemy-side altars
-inline constexpr bool buy_tp_crystals = false;
+inline constexpr bool buy_tp_crystals = false;      // always keep crystals (otherwise only once a crystal shortcut is found)
+inline constexpr bool tp_flash = true;              // navigation: teleport-crystal shortcuts over walls and holes
+inline constexpr int tp_range = 3;                  // ...crystal landing range (rules)
+inline constexpr int tp_min_gain = 6;               // ...taken when it saves this many steps net of the channel
 
 // ---- staying alive around enemy champions
 inline constexpr int enemy_memory_rounds = 10;      // remember enemy sightings this long

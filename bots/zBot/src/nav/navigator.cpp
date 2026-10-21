@@ -1,4 +1,5 @@
 #include "navigator.h"
+#include "../shop/shop.h"
 #include "fields.h"
 #include <algorithm>
 #include <array>
@@ -383,6 +384,35 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
         }
         return false;  // keep the earlier one in compass order
     };
+    // Crystal flash: a teleport crystal lands up to tp_range tiles away, over walls and holes, after a
+    // tp_crystal_time channel (shortcut: the spawn box's south side is a row of holes, and walking out
+    // the north gap and round cost ~25 steps; the top team buys ~40 crystals a game there). Taken when
+    // it saves tp_min_gain steps net of the channel, with nobody about to interrupt it. The first time
+    // one would have paid off, the shop starts keeping crystals.
+    if (tune::tp_flash && w.enemies.empty() && !w.beingHit && w.incoming <= 0 && here > tune::tp_min_gain) {
+        bc::vec2 best{-1, -1};
+        int bestD = unreachable;
+        for (int dy = -tune::tp_range; dy <= tune::tp_range; ++dy)
+            for (int dx = -tune::tp_range; dx <= tune::tp_range; ++dx) {
+                const bc::vec2 t{w.pos.x + dx, w.pos.y + dy};
+                if (std::max(std::abs(dx), std::abs(dy)) < 2) continue;
+                const int d = value(t);
+                if (d < bestD) { bestD = d; best = t; }
+            }
+        if (best.x >= 0 && here - bestD - static_cast<int>(bc::constants::tp_crystal_time) >= tune::tp_min_gain) {
+            shop::wantCrystals();
+            try {
+                const auto& crystal = bc::self().consumables()[bc::consumable_type::tp_crystal];
+                if (crystal.count() > 0 && crystal.use(best)) {
+                    FixedStr<24> msg;
+                    trace().action((msg << "tp" << best.x << ',' << best.y).view());
+                    trace().note("crystal shortcut");
+                    return true;
+                }
+            } catch (const bc::error&) {
+            }
+        }
+    }
     // Hole hop: a dash crosses holes the field has to walk round, so 2 tiles of dash can save many
     // steps. Take one that gains 3+ steps (4+ with enemies about: the dash may be needed to escape),
     // or a plain 2-step gain when no enemy is in sight.

@@ -314,12 +314,19 @@ int shardsOwned() {
     return total;
 }
 
+namespace {
+bool crystals = false;
+}
+void wantCrystals() { crystals = true; }
+bool crystalsWanted() { return crystals; }
+
 void buyConsumables(World& w) {
-    if (!tune::buy_altar_locks && !tune::buy_tp_crystals) return;
+    const bool buyCrystals = tune::buy_tp_crystals || crystals;
+    if (!tune::buy_altar_locks && !buyCrystals) return;
     auto& me = bc::self();
     if (w.alive && !w.atSpawn) return;
     for (auto type : {bc::consumable_type::altar_lock, bc::consumable_type::tp_crystal}) {
-        if (type == bc::consumable_type::altar_lock ? !tune::buy_altar_locks : !tune::buy_tp_crystals) continue;
+        if (type == bc::consumable_type::altar_lock ? !tune::buy_altar_locks : !buyCrystals) continue;
         try {
             if (me.can_buy(type)) {
                 me.buy(type);

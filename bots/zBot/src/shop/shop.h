@@ -35,4 +35,7 @@ Affordable affordable(const World& w);
 // Total shards bought so far (emblems count as their shards): a rough "how built are we".
 int shardsOwned();
 
+// Navigation found a crystal shortcut worth taking: keep teleport crystals from now on.
+void wantCrystals();
+bool crystalsWanted();
 } // namespace shop
