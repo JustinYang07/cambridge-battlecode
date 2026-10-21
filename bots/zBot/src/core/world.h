@@ -160,6 +160,7 @@ public:
     int lastTarget = -1;           // group/altar id of last turn's choice
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
+    int rushGiveUpUntil = -1;      // no team rush (rush camp, team opening) before this round: its party never formed
     // Stuck watchdog: turns standing on one tile while idle or holding for a party; when it trips,
     // the camp we held is dropped until stuckUntil and we hunt enemies until huntUntil.
     cambc::vec2 stillPos{-1, -1};

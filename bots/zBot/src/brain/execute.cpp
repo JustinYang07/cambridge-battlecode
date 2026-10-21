@@ -133,6 +133,12 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
         return false;
     }
     ++w.waitingTurns;
+    if (tune::rush_form_turns > 0 && w.waitingTurns > tune::rush_form_turns && scorers::teamRushOn(w, g.id) && !g.blocksAltars) {
+        w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
+        w.waitingTurns = 0;
+        w.forceReplan = true;
+        trace().note("rush: party never formed, farming elsewhere");
+    }
     if (farmWhileWaiting(w, g)) return true;
     bc::bitboard ring, inner;
     ring.clear();

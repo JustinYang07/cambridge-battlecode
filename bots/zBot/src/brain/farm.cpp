@@ -430,6 +430,9 @@ bool teamRush(const World& w, const GroupInfo& g) {
     if (g.blocksAltars && blockerRush(w)) return true;
     if (rushContested(w, g)) return false;
     if (g.id == teamCamp(w)) return true;
+    // A rush whose party never formed: farm the rest of the map for a while (stampede vs Nameless: all
+    // five held the elk camp's ring "need 3 more" from round 56 to 2000 and scored 0).
+    if (w.round < w.rushGiveUpUntil) return false;
     // combatBotv3: the team opening's camp: the whole team gathers and takes it together.
     if (mapplan::read().teamOpening && g.id == mapplan::read().openingCamp && mapplan::openingActive(w)) return true;
     if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
