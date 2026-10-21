@@ -8,7 +8,6 @@
 #include "../core/comms.h"
 #include "../core/config.h"
 #include "../core/trace.h"
-#include "../shop/shop.h"
 #include "../nav/navigator.h"
 #include "../strategy/cohesion.h"
 #include "../strategy/regroup.h"
@@ -19,18 +18,6 @@ namespace bc = cambc;
 namespace scorers {
 
 namespace {
-// Effective health against Durability's 10% damage cut (tune::durability_ehp): ours from our own items,
-// anyone else's from the expected share owning the emblem by this round.
-float othersEhp(float hp, int round) {
-    if (!tune::durability_ehp) return hp;
-    const float share = std::clamp(static_cast<float>(round - tune::durability_ramp_start) / tune::durability_ramp_rounds, 0.0f, 1.0f) *
-                        tune::durability_ramp_cap;
-    return hp / (1.0f - 0.1f * share);
-}
-float ownEhp(float hp) {
-    return tune::durability_ehp && shop::hasPassive(bc::item_passive::durability) ? hp / 0.9f : hp;
-}
-
 // Replay fight model (tune::rfm_*): the logit that a contact at `m` goes our way, from what we see.
 // Same features as lab/nn/fight_engage_dataset.py, from our side: champions within 8 and 14 of m,
 // health and max health within 8 (/1000), health fraction within 8, bags within 8 (/50), bodies
@@ -108,8 +95,8 @@ void fight(World& w, std::vector<Option>& out) {
         int theirCount = 0, theirBags = 0, theirStuns = 0;
         for (const auto& o : w.enemies)
             if (o.hp > 0 && dist(o.pos, e.pos) <= tune::fight_join_radius) {
-                theirHp += othersEhp(o.hp, w.round);
-                theirMaxHp += othersEhp(o.maxHp, w.round);
+                theirHp += combat::othersEhp(o.hp, w.round);
+                theirMaxHp += combat::othersEhp(o.maxHp, w.round);
                 theirBags += o.gems;
                 theirStuns += o.stun ? 1 : 0;
                 theirDps += std::max(o.strength + o.focus * 1.5f / tune::spell_cooldown, 1.0f);
@@ -140,9 +127,9 @@ void fight(World& w, std::vector<Option>& out) {
         // Measured on traced fights: the target loses ~0.2x the damage per round our side's
         // stats promise (allies not all on it, targets stepping out of range, lost turns).
         ours.dps *= tune::fight_our_dps_scale;
-        const float myEhp = ownEhp(w.hp);
-        ours.hp = myEhp + othersEhp(ours.hp - w.hp, w.round);
-        const float targetEhp = othersEhp(e.hp, w.round);
+        const float myEhp = combat::ownEhp(w.hp);
+        ours.hp = myEhp + combat::othersEhp(ours.hp - w.hp, w.round);
+        const float targetEhp = combat::othersEhp(e.hp, w.round);
         const float turnsToKill = targetEhp / ours.dps;
         const float edge = (ours.hp / theirDps) / std::max(theirHp / ours.dps, 0.1f);
         // We are the one they can reach first: alone in front, we may die before the target does.

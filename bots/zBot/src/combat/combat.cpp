@@ -12,6 +12,17 @@ namespace bc = cambc;
 
 namespace combat {
 
+float othersEhp(float hp, int round) {
+    if (!tune::durability_ehp) return hp;
+    const float share = std::clamp(static_cast<float>(round - tune::durability_ramp_start) / tune::durability_ramp_rounds, 0.0f, 1.0f) *
+                        tune::durability_ramp_cap;
+    return hp / (1.0f - 0.1f * share);
+}
+
+float ownEhp(float hp) {
+    return tune::durability_ehp && shop::hasPassive(bc::item_passive::durability) ? hp / 0.9f : hp;
+}
+
 namespace {
 
 struct SpellShape {
@@ -62,7 +73,18 @@ CampSeen* campInRange(World& w, int groupId, int range, bool awakeOnly = false) 
 // to open it; opening a camp next to a fight is decided in farmGroup instead.
 bool awakeOnly(const Focus& f) { return f.awakeCampsOnly || f.enemy.has_value(); }
 
-EnemySeen* enemyInRange(World& w, int range, const Focus& focus) {
+// A free hit pays when the target is weak, or the trade is fair and we are not outnumbered: in 15 games
+// against Nameless, Shawn and Quantom, hits on a target with over 1.5x our health saw the attacker die
+// within 10 rounds 35% of the time and the target 25%; on targets at half our health or below, 1% and 79%.
+bool freeHitPays(const World& w, const EnemySeen& e) {
+    if (e.hp <= tune::free_hit_low_frac * std::max(e.maxHp, 1.0f) || e.hp <= tune::finish_hits * std::max(w.strength, 1.0f)) return true;
+    if (othersEhp(e.hp, w.round) > tune::free_hit_hp_ratio * ownEhp(w.hp)) return false;
+    int foes = 0;
+    for (const auto& o : w.enemies) foes += o.hp > 0 && dist(o.pos, w.pos) <= tune::free_hit_radius;
+    return foes <= w.alliesWithin(w.pos, tune::free_hit_radius) + 1;
+}
+
+EnemySeen* enemyInRange(World& w, int range, const Focus& focus, bool basic = false) {
     // Our chosen target first, then the one allies are attacking (focus fire finishes kills),
     // then the weakest enemy that can hit us or is channelling.
     EnemySeen* best = nullptr;
@@ -78,7 +100,8 @@ EnemySeen* enemyInRange(World& w, int range, const Focus& focus) {
         // Free hits: an enemy champion in reach is worth the attack whatever we are doing (with an enemy
         // within 4, Fish and Nyx hit a champion on 26% of turns, we on 14%; we mostly walked past).
         // Melee walks and attacks in one turn; ranged share the allowance, so not while retreating.
-        const bool freeHit = tune::free_hits && (!w.ranged || !focus.noCamps);
+        // Basic attacks only: spells stay with the fight and farm logic.
+        const bool freeHit = tune::free_hits && (!w.ranged || !focus.noCamps) && (!tune::free_hit_gate || (basic && freeHitPays(w, e)));
         const bool wanted = chosen || allyFocus || focus.anyEnemy || finish || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling || freeHit;
         if (!wanted) continue;
         const int rank = tune::target_mode == 2 && fighting ? 0 : finish ? 3 : chosen ? 2 : allyFocus ? 1 : 0;
@@ -99,7 +122,7 @@ bool basicAttack(World& w, const Focus& focus) {
     if (!me.can_attack()) return false;
     FixedStr<40> msg;
     try {
-        if (auto* e = enemyInRange(w, w.range, focus)) {
+        if (auto* e = enemyInRange(w, w.range, focus, true)) {
             me.attack(e->handle);
             refresh(*e);
             trace().action((msg << "ae" << e->pos.x << ',' << e->pos.y).view());
@@ -247,7 +270,7 @@ bool castOnTargets(World& w, const Focus& focus, bool beforeMove) {
 bool resetAndAttack(World& w, const Focus& focus) {
     auto& me = bc::self();
     if (!w.kit.hasReset || me.can_attack() || !me.can_cast()) return false;
-    const bool targetLeft = enemyInRange(w, w.range, focus) || (!focus.noCamps && campInRange(w, focus.groupId, w.range, awakeOnly(focus)));
+    const bool targetLeft = enemyInRange(w, w.range, focus, true) || (!focus.noCamps && campInRange(w, focus.groupId, w.range, awakeOnly(focus)));
     if (!targetLeft) return false;
     for (int slot = 0; slot < 2; ++slot) {
         const auto& a = w.abilities()[static_cast<std::size_t>(slot)];

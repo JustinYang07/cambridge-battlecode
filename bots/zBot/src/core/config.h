@@ -321,6 +321,13 @@ inline constexpr int fight_commit_rounds = 0;       // 0: off
 inline constexpr float commit_break_hp = 0.25f;
 inline constexpr bool flee_no_attack = false;
 inline constexpr bool free_hits = true;
+// Free hits gated (basic attacks only): a target below free_hit_low_frac health or within finishing
+// hits, else its effective health at most free_hit_hp_ratio x ours and no more enemies than us + 1
+// within free_hit_radius.
+inline constexpr bool free_hit_gate = true;
+inline constexpr float free_hit_low_frac = 0.4f;
+inline constexpr float free_hit_hp_ratio = 1.5f;
+inline constexpr int free_hit_radius = 4;
 // Durability emblems take 10% off damage: fight estimates count health as effective health, health / 0.9
 // for us when we own one, and for allies and enemies (items unreadable) the expected share owning one,
 // from the top teams' replays: none before round 150, rising to 75% by round 750.

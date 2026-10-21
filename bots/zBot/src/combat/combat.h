@@ -24,7 +24,11 @@ struct FightEstimate {
 // `mates`: allies (by slot bit) known to fight it with us; their own damage counts (combatBotv2),
 // and any party places beyond them count as copies of us.
 FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share = -1.0f, unsigned mates = 0);
-float championDamagePerTurn(const World& w);                     // our damage per turn against a champion
+float championDamagePerTurn(const World& w);
+// Effective health against Durability's 10% damage cut (tune::durability_ehp): ours from our own items,
+// anyone else's from the expected share owning the emblem by this round.
+float othersEhp(float hp, int round);
+float ownEhp(float hp);                     // our damage per turn against a champion
 float threatPerTurn(const World& w, cambc::vec2 at);             // enemy champion damage that can reach `at`
 
 // What the brain wants the executor to hit this turn.
