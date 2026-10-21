@@ -404,10 +404,32 @@ bool blockerRush(const World& w) {
            altarsBlocked(w);
 }
 
+// Their team holds this camp: two or more enemies seen within rush_backoff_radius of its tiles in the
+// last rush_backoff_rounds, and we are not ahead on bodies. Rushing it then feeds them (Fish on
+// starvation, stampede, elk-arena: 32-46 of our deaths a game there while we dealt a tenth of their
+// monster damage). Cached per turn.
+bool rushContested(const World& w, const GroupInfo& g) {
+    if (tune::rush_backoff_rounds <= 0 || w.alliesAlive > w.enemiesAlive) return false;
+    static int round = -1, slot = -1, group = -1;
+    static bool cached = false;
+    if (round == w.round && slot == w.slot && group == g.id) return cached;
+    round = w.round; slot = w.slot; group = g.id;
+    int seen = 0;
+    for (const auto& gh : w.ghosts) {
+        if (w.round - gh.round > tune::rush_backoff_rounds) continue;
+        bool near = dist(gh.pos, g.center) <= tune::rush_backoff_radius;
+        for (auto t : g.tiles) near = near || dist(gh.pos, t) <= tune::rush_backoff_radius;
+        seen += near;
+    }
+    cached = seen >= 2;
+    return cached;
+}
+
 // Rush now: it is the rush camp, the opening is over, and enough of us are alive to take it.
 bool teamRush(const World& w, const GroupInfo& g) {
-    if (g.id == teamCamp(w)) return true;
     if (g.blocksAltars && blockerRush(w)) return true;
+    if (rushContested(w, g)) return false;
+    if (g.id == teamCamp(w)) return true;
     // combatBotv3: the team opening's camp: the whole team gathers and takes it together.
     if (mapplan::read().teamOpening && g.id == mapplan::read().openingCamp && mapplan::openingActive(w)) return true;
     if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
