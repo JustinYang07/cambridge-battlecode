@@ -321,6 +321,13 @@ inline constexpr int fight_commit_rounds = 0;       // 0: off
 inline constexpr float commit_break_hp = 0.25f;
 inline constexpr bool flee_no_attack = false;
 inline constexpr bool free_hits = true;
+// Durability emblems take 10% off damage: fight estimates count health as effective health, health / 0.9
+// for us when we own one, and for allies and enemies (items unreadable) the expected share owning one,
+// from the top teams' replays: none before round 150, rising to 75% by round 750.
+inline constexpr bool durability_ehp = true;
+inline constexpr int durability_ramp_start = 150;
+inline constexpr int durability_ramp_rounds = 600;
+inline constexpr float durability_ramp_cap = 0.75f;
 inline constexpr bool bank_after_camp = true;       // bank scores x bank_after_camp_factor while we are in a partly killed camp's fight (no enemies)
 inline constexpr float bank_after_camp_factor = 0.2f;             // hit any enemy champion in reach (ranged: not while retreating)
 // 2. team call: allies within team_call_radius claiming a fight or a retreat vote; we follow the majority.
