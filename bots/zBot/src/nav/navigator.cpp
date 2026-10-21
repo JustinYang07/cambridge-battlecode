@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <vector>
 #include "../core/config.h"
 #include "../core/fixed_str.h"
@@ -306,33 +307,88 @@ ExMap& exposureMap(const World& w) {
     return x;
 }
 
-// Crossing routes: per goal field, the hole crossings that save the most steps toward it (built once).
-struct Portal { bc::vec2 from, to; int toDist, gain; };
-const std::vector<Portal>* portalsFor(const FarField& far) {
-    struct Entry { const void* read; int id; std::vector<Portal> portals; };
-    static std::vector<Entry> cache;
-    for (const auto& e : cache)
-        if (e.read == reinterpret_cast<const void*>(far.read) && e.id == far.id) return &e.portals;
+// Crossing routes: per goal field, the hole crossings that save the most steps toward it. Decisions
+// only read finished lists and queue missing ones; buildCrossings works through the queue from
+// spare fuel at the end of the turn (built inline, farm scoring drained the turn: fracture lost
+// 1,400 turns a game).
+struct Portal { bc::vec2 from, to; int toDist, gain, pid = -1; };  // pid: fields point id of `from`
+struct PortalEntry {
+    FarField far;
+    std::size_t next = 0;
+    bool done = false;
+    std::vector<Portal> all, portals;
+};
+std::deque<PortalEntry>& portalCache() {
+    static std::deque<PortalEntry> cache;  // stable addresses: callers keep a returned list while scoring
+    return cache;
+}
+
+// Camp fields by id (scoring asks for every camp each turn); the few others by a scan.
+std::vector<PortalEntry*>& portalsByGroup() {
+    static std::vector<PortalEntry*> byGroup;
+    return byGroup;
+}
+
+PortalEntry* findPortalEntry(const FarField& far) {
+    if (far.read == &fields::toGroup && far.id >= 0) {
+        const auto& byGroup = portalsByGroup();
+        return static_cast<std::size_t>(far.id) < byGroup.size() ? byGroup[static_cast<std::size_t>(far.id)] : nullptr;
+    }
+    for (auto& e : portalCache())
+        if (e.far.read == far.read && e.far.id == far.id) return &e;
+    return nullptr;
+}
+
+// The entry for a goal, queued for buildCrossings if new.
+PortalEntry& portalEntry(const FarField& far) {
+    if (auto* e = findPortalEntry(far)) return *e;
+    auto& cache = portalCache();
+    cache.push_back({far});
+    if (far.read == &fields::toGroup && far.id >= 0) {
+        auto& byGroup = portalsByGroup();
+        if (static_cast<std::size_t>(far.id) >= byGroup.size()) byGroup.resize(static_cast<std::size_t>(far.id) + 1, nullptr);
+        byGroup[static_cast<std::size_t>(far.id)] = &cache.back();
+    }
+    return cache.back();
+}
+
+// Read only (queue false) never adds an entry: the build queue holds goals we actually weigh.
+const std::vector<Portal>* portalsFor(const FarField& far, bool queue = true) {
+    auto* e = queue ? &portalEntry(far) : findPortalEntry(far);
+    return e && e->done ? &e->portals : nullptr;
+}
+
+// Work on one entry: 1 finished, 0 out of fuel, -1 its goal's field is not built yet (skip it).
+int buildPortals(PortalEntry& e, unsigned long long reserve) {
+    if (e.done) return 1;
     // The goal's field must exist (unbuilt fields read -1 everywhere: an empty list would stick).
-    if (far.read(far.id, Statics::get().spawnCenter) < 0) return nullptr;
+    if (e.far.read(e.far.id, Statics::get().spawnCenter) < 0) return -1;
     const std::vector<Statics::Crossing>* cs = nullptr;
-    if (!Statics::get().crossings(cs) || bc::fuel_remaining() < tune::crossing_build_fuel) return nullptr;
-    std::vector<Portal> all;
-    for (const auto& c : *cs) {
-        const int ga = far.read(far.id, c.from), gb = far.read(far.id, c.to);
+    if (!Statics::get().crossings(cs, reserve)) return 0;
+    for (; e.next < cs->size(); ++e.next) {
+        if ((e.next & 7) == 0 && bc::fuel_remaining() < reserve) return 0;
+        const auto& c = (*cs)[e.next];
+        const int ga = e.far.read(e.far.id, c.from), gb = e.far.read(e.far.id, c.to);
         if (ga < 0 || gb < 0 || ga >= Navigator::unreachable || gb >= Navigator::unreachable) continue;
-        if (ga - gb >= tune::crossing_min_gain) all.push_back({c.from, c.to, gb, ga - gb});
+        if (ga - gb < tune::crossing_min_gain) continue;
+        // A short best-first list as we go (sorting thousands at the end overran the turn).
+        const Portal p{c.from, c.to, gb, ga - gb};
+        if (e.all.size() < 48) e.all.push_back(p);
+        else if (p.gain > e.all.back().gain) e.all.back() = p;
+        else continue;
+        for (std::size_t k = e.all.size() - 1; k > 0 && e.all[k].gain > e.all[k - 1].gain; --k) std::swap(e.all[k], e.all[k - 1]);
     }
-    std::sort(all.begin(), all.end(), [](const Portal& a, const Portal& b) { return a.gain > b.gain; });
-    std::vector<Portal> keep;
-    for (const auto& p : all) {
-        if (static_cast<int>(keep.size()) >= tune::crossing_keep) break;
+    for (const auto& p : e.all) {
+        if (static_cast<int>(e.portals.size()) >= tune::crossing_keep) break;
         bool near = false;
-        for (const auto& k : keep) near = near || dist(k.from, p.from) <= 2;
-        if (!near) keep.push_back(p);
+        for (const auto& k : e.portals) near = near || dist(k.from, p.from) <= 2;
+        if (!near) e.portals.push_back(p);
     }
-    cache.push_back({reinterpret_cast<const void*>(far.read), far.id, std::move(keep)});
-    return &cache.back().portals;
+    for (auto& p : e.portals) p.pid = fields::registerPoint(p.from);  // walking distance to it: a local read
+    e.all.clear();
+    e.all.shrink_to_fit();
+    e.done = true;
+    return 1;
 }
 
 bool dashTo(World& w, int slot, bc::vec2 to) {
@@ -358,16 +414,22 @@ int Navigator::crossingTravel(World& w, const FarField& far, int walk, bool* has
     for (int slot = 0; slot < 2; ++slot)
         if (w.abilities()[static_cast<std::size_t>(slot)].is_dash()) dslot = slot;
     if (dslot < 0) return walk;
-    const auto* ps = portalsFor(far);
+    const auto* ps = portalsFor(far, evaluate);
     if (!ps || ps->empty()) return walk;
     if (hasCrossings) *hasCrossings = true;
-    if (!evaluate) return walk;
+    if (!evaluate) {
+        // An optimistic bound with no host reads: straight-line distance to a crossing never beats
+        // walking there (a looser bound let far camps past the pruning: more scoring, more fuel).
+        int bound = walk;
+        for (const auto& p : *ps) bound = std::min(bound, dist(p.from, w.pos) + p.toDist);
+        return bound;
+    }
     const int cd = std::max(0, static_cast<int>(w.abilities()[static_cast<std::size_t>(dslot)].cooldown()));
     int best = walk;
     for (const auto& p : *ps) {
-        if (p.toDist >= walk || dist(p.from, w.pos) > tune::bfs_radius) continue;
-        const int wa = p.from == w.pos ? 0 : distTo(w, p.from);
-        if (wa >= unreachable) continue;
+        if (p.toDist >= walk || dist(p.from, w.pos) + p.toDist + tune::crossing_margin >= best) continue;
+        const int wa = fields::toPoint(p.pid, w.pos);
+        if (wa < 0 || wa >= unreachable) continue;
         best = std::min(best, wa + std::max(0, cd - wa) + p.toDist + tune::crossing_margin);
     }
     return best;
@@ -451,7 +513,8 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
     };
     // Crossing routes (dashers, no enemy in sight): walk to a hole crossing and dash over it when that
     // beats walking round, waiting there for the dash if it is cooling down (counted in the cost).
-    if (tune::crossing_routes && here > tune::crossing_min_gain && w.enemies.empty() && !w.reserveDash) {
+    if (tune::crossing_routes && far.read != &fields::toPoint && here > tune::crossing_min_gain && w.enemies.empty() && !w.reserveDash &&
+        bc::fuel_remaining() > tune::crossing_fuel_floor) {
         int dslot = -1;
         for (int slot = 0; slot < 2; ++slot)
             if (w.abilities()[static_cast<std::size_t>(slot)].is_dash()) dslot = slot;
@@ -461,9 +524,14 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
             const Portal* best = nullptr;
             int bestCost = here - tune::crossing_margin;
             for (const auto& p : *ps) {
-                if (p.toDist >= here || dist(p.from, w.pos) > tune::bfs_radius) continue;
-                const int wa = p.from == w.pos ? 0 : distTo(w, p.from);
-                if (wa >= unreachable) continue;
+                // Straight-line distance never beats the walk there: skip without the search (each
+                // walking distance from us costs a 48-tile search whenever we have moved).
+                if (p.toDist >= here || dist(p.from, w.pos) + p.toDist >= bestCost) continue;
+                const int wa = fields::toPoint(p.pid, w.pos);
+                if (wa < 0 || wa >= unreachable) continue;  // its field is not built yet, or no way there
+                // Waiting at the crossing re-plans every turn (fuel): only go for one we reach with the
+                // dash (nearly) ready.
+                if (cd - wa > tune::crossing_max_wait) continue;
                 const int cost = wa + std::max(0, cd - wa) + p.toDist;
                 if (cost < bestCost) { bestCost = cost; best = &p; }
             }
@@ -479,7 +547,7 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
                     return true;
                 }
                 noDash_ = true;  // keep the dash for the crossing
-                const bool moved = stepToward(w, best->from, 0, false, avoid);
+                const bool moved = stepByField(w, FarField{&fields::toPoint, &fields::ensurePoint, best->pid}, blockedNow, avoid, false, best->from);
                 noDash_ = false;
                 if (moved) {
                     trace().note("to a crossing");
@@ -520,7 +588,7 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
     // Hole hop: a dash crosses holes the field has to walk round, so 2 tiles of dash can save many
     // steps. Take one that gains 3+ steps (4+ with enemies about: the dash may be needed to escape),
     // or a plain 2-step gain when no enemy is in sight.
-    if (const int slot = readyDash(w); slot >= 0) {
+    if (const int slot = noDash_ ? -1 : readyDash(w); slot >= 0) {
         bc::vec2 best{-1, -1};
         int bestD = unreachable;
         for (int dy = -2; dy <= 2; ++dy)
@@ -880,4 +948,10 @@ bool Navigator::stepEscape(World& w) {
         if (d < bestD || (d == bestD && best != w.pos && h < bestHome)) { bestD = d; best = t; bestHome = h; }
     }
     return (best != w.pos && tryMove(w, best)) || moved;
+}
+
+void buildCrossings(unsigned long long reserve) {
+    if (!tune::crossing_routes) return;
+    for (auto& e : portalCache())
+        if (buildPortals(e, reserve) == 0) return;  // out of fuel: next turn
 }

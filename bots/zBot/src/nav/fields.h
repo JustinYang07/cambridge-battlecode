@@ -22,4 +22,10 @@ void ensureGroup(int groupId);
 void ensureAltar(int altarIndex);
 void ensureSpawn(int /*unused*/ = 0);
 
+// Fields rooted at single tiles (hole-crossing launch tiles): registerPoint returns an id for the
+// tile (the same id for the same tile), built from spare fuel in step() like the others.
+int registerPoint(cambc::vec2 tile);
+int toPoint(int id, cambc::vec2 from);
+void ensurePoint(int id);
+
 } // namespace fields

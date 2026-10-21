@@ -42,6 +42,9 @@ std::vector<bc::vec2> spawnRing_;  // walkable tiles just outside our spawn
 std::vector<std::uint8_t> inSpawn_; // our spawn: index into spawnTiles_ + 1 per tile, 0 outside (bitboard reads cost ~30-300 fuel)
 std::vector<bc::vec2> spawnTiles_;
 std::size_t next_ = 0;  // groups first, then altars
+std::vector<Field> points_;
+std::vector<bc::vec2> pointTiles_;
+std::size_t nextPoint_ = 0;
 
 // Local arithmetic: the SDK's reflect_* / rotate_180 are host calls, and farm scoring reads
 // thousands of mirrored tiles a turn (with them, overruns rose from 89 to 156 a game).
@@ -171,6 +174,14 @@ void step(unsigned long long reserve) {
         ++next_;
         maxCost = std::max(maxCost, before - bc::fuel_remaining());
     }
+    while (nextPoint_ < points_.size() && bc::fuel_remaining() > reserve + maxCost) {
+        if (!points_[nextPoint_].ready) {
+            const auto before = bc::fuel_remaining();
+            ensurePoint(static_cast<int>(nextPoint_));
+            maxCost = std::max(maxCost, before - bc::fuel_remaining());
+        }
+        ++nextPoint_;
+    }
 }
 
 void ensureGroup(int groupId) {
@@ -201,6 +212,27 @@ int toGroup(int groupId, bc::vec2 from) {
 int toAltar(int altarIndex, bc::vec2 from) {
     if (altarIndex < 0 || altarIndex >= static_cast<int>(altars_.size())) return -1;
     return readSlot(altars_, altarSlot_[static_cast<std::size_t>(altarIndex)], from);
+}
+
+int registerPoint(bc::vec2 tile) {
+    for (std::size_t i = 0; i < pointTiles_.size(); ++i)
+        if (pointTiles_[i] == tile) return static_cast<int>(i);
+    pointTiles_.push_back(tile);
+    points_.emplace_back();
+    return static_cast<int>(points_.size() - 1);
+}
+
+int toPoint(int id, bc::vec2 from) {
+    if (id < 0 || id >= static_cast<int>(points_.size())) return -1;
+    return read(points_[static_cast<std::size_t>(id)], from);
+}
+
+void ensurePoint(int id) {
+    if (id < 0 || id >= static_cast<int>(points_.size()) || points_[static_cast<std::size_t>(id)].ready) return;
+    bc::bitboard root;
+    root.clear();
+    root.set(pointTiles_[static_cast<std::size_t>(id)]);
+    compute(points_[static_cast<std::size_t>(id)], root);
 }
 
 } // namespace fields

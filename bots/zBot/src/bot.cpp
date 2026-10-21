@@ -414,6 +414,8 @@ void Bot::play_turn() {
     // Spare fuel at the end of the turn builds the static distance fields scoring reads.
     if (!fuel::split()) fields::step(tune::fuel_reserve_fields);
     fuel::mark("fields");
+    if (!fuel::split()) buildCrossings(tune::fuel_reserve_fields + tune::crossing_build_fuel);
+    fuel::mark("crossings");
     // Kept after everything, so a turn that overran shows its whole split next turn.
     fuel::keep();
     {

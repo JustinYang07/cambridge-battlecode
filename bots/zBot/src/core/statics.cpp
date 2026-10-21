@@ -508,23 +508,28 @@ int Statics::dashLine(bc::vec2 a, bc::vec2 b, bc::vec2* hopFrom, bc::vec2* hopTo
     return result;
 }
 
-bool Statics::crossings(const std::vector<Crossing>*& out) const {
+bool Statics::crossings(const std::vector<Crossing>*& out, unsigned long long reserve) const {
     out = &crossings_;
     if (crossingsReady_) return true;
-    if (bc::fuel_remaining() < tune::crossing_build_fuel) return false;
+    if (bc::fuel_remaining() < reserve) return false;
     if (wallBits_.empty()) {
         wallBits_ = dashBlock.export_linear_buffer();
         holeBits_ = (terrain & ~dashBlock).export_linear_buffer();
     }
-    const auto walkBits = reach.export_linear_buffer();
+    if (walkBits_.empty()) walkBits_ = reach.export_linear_buffer();
+    const auto& walkBits = walkBits_;
     auto bitAt = [&](const std::vector<std::uint8_t>& bits, int x, int y) {
         const auto i = static_cast<std::size_t>(y * width + x);
         return ((bits[i >> 3] >> (i & 7)) & 1) != 0;
     };
     auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < width && y < height; };
     auto walk = [&](int x, int y) { return inside(x, y) && bitAt(walkBits, x, y); };
-    for (int y = 0; y < height; ++y)
-        for (int x = 0; x < width; ++x) {
+    // A row at a time while fuel lasts: the whole scan overran a turn on big maps (fracture: 1,097
+    // lost turns a game when every turn restarted it).
+    for (int& i = crossingRow_; i < width * height; ++i) {
+        if (bc::fuel_remaining() < reserve) return false;  // a tile by holes costs up to ~5k: check each one
+        {
+            const int x = i % width, y = i / width;
             if (!walk(x, y)) continue;
             bool holeNear = false;
             for (int dy = -1; dy <= 1 && !holeNear; ++dy)
@@ -545,10 +550,27 @@ bool Statics::crossings(const std::vector<Crossing>*& out) const {
                             walkable = walkable || walk(mx, my);
                             open = open || !bitAt(wallBits_, mx, my);
                         }
-                    if (!walkable && open) crossings_.push_back({{x, y}, {bx, by}});
+                    if (!walkable && open) {
+                        // One per direction in each neighbourhood: along a hole's edge every tile gave
+                        // the same crossing (thousands on fracture; scoring reads each per camp).
+                        if (crossingDirs_.empty()) crossingDirs_.assign(static_cast<std::size_t>(width * height), 0);
+                        const int dir = (dy + 2) * 5 + (dx + 2);  // 0..24, the ring of 16 used
+                        const auto bit = static_cast<std::uint16_t>(1u << (dir % 16));
+                        bool near = false;
+                        for (int ny = y - 1; ny <= y + 1 && !near; ++ny)
+                            for (int nx = x - 1; nx <= x + 1; ++nx)
+                                if (inside(nx, ny) && (crossingDirs_[static_cast<std::size_t>(ny * width + nx)] & bit)) { near = true; break; }
+                        if (!near) {
+                            crossingDirs_[static_cast<std::size_t>(y * width + x)] |= bit;
+                            crossings_.push_back({{x, y}, {bx, by}});
+                        }
+                    }
                 }
         }
+    }
     crossingsReady_ = true;
+    crossingDirs_.clear();
+    crossingDirs_.shrink_to_fit();
     return true;
 }
 

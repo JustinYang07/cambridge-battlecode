@@ -1141,16 +1141,10 @@ void farm(World& w, std::vector<Option>& out) {
         // otherwise Chebyshev distance, which walking never beats.
         bc::vec2 unused;
         int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
-        // A dasher with a hole crossing toward it may get there sooner than the walk: the bound
-        // falls back to the straight-line distance, which no route beats by much.
+        // A dasher with a hole crossing toward it may get there sooner than the walk: an optimistic
+        // crossing route bounds it.
         if (!dash && cheb > 0 && cheb < Navigator::unreachable) {
-            bool crossings = false;
-            nav().crossingTravel(w, FarField{&fields::toGroup, &fields::ensureGroup, g.id}, cheb, &crossings, false);
-            if (crossings) {
-                int straight = 1 << 20;
-                for (auto t : g.tiles) straight = std::min(straight, dist(w.pos, t));
-                cheb = std::min(cheb, straight);
-            }
+            cheb = nav().crossingTravel(w, FarField{&fields::toGroup, &fields::ensureGroup, g.id}, cheb, nullptr, false);
         }
         // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
         // captured on foot, so it is not a farming option (it used to be scored by straight-line

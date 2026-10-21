@@ -16,6 +16,10 @@ struct FarField {
     int id = 0;
 };
 
+// Crossing routes: build the hole-crossing lists decisions asked for, while more than `reserve` fuel
+// is left. Call at the end of a turn.
+void buildCrossings(unsigned long long reserve);
+
 class Navigator {
 public:
     static constexpr int unreachable = 1 << 14;

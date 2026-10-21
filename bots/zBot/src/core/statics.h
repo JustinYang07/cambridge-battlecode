@@ -65,9 +65,9 @@ struct Statics {
     // *hopFrom to *hopTo. Reads byte tables built once (bitboard reads cost ~30-300 fuel each).
     int dashLine(cambc::vec2 a, cambc::vec2 b, cambc::vec2* hopFrom = nullptr, cambc::vec2* hopTo = nullptr) const;
     // Hole crossings: dash-legal pairs two tiles apart with no walkable tile between them (a hole or
-    // holes in the way), both directions. Built on first use; false while not affordable this turn.
+    // holes in the way), both directions. Built a few rows a turn from spare fuel; false until done.
     struct Crossing { cambc::vec2 from, to; };
-    bool crossings(const std::vector<Crossing>*& out) const;
+    bool crossings(const std::vector<Crossing>*& out, unsigned long long reserve) const;
     // The dash-in group whose pocket holds this tile, if any.
     const GroupInfo* pocketAt(cambc::vec2 tile) const;
     cambc::bitboard dashBlock;        // tiles a dash cannot pass over: terrain except holes
@@ -103,6 +103,9 @@ private:
     bool campsCapped_ = false;
     mutable std::vector<Crossing> crossings_;
     mutable bool crossingsReady_ = false;
+    mutable int crossingRow_ = 0;                   // next tile (row-major) of the incremental crossing scan
+    mutable std::vector<std::uint8_t> walkBits_;
+    mutable std::vector<std::uint16_t> crossingDirs_;  // per tile: directions of crossings kept from it
     mutable std::vector<std::uint8_t> wallBits_, holeBits_;  // dashLine tables (packed bits)                   // more than 255 camps: some are missing from tileCampIndex_
 };
 
