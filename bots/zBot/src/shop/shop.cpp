@@ -112,6 +112,8 @@ std::vector<Step> plan(bc::champion_type type) {
         // yBot: Fish's orders (their ladder replays, first three emblems per champion), Power after,
         // and no farming-map Jungle/Monster swaps (Fish never buys Jungle).
         if (tune::fish_builds) {
+            // A Treasure emblem first (+20% gold), then the champion's order: Gemini's suggestion, A/B switch.
+            if (tune::treasure_first && type != T::tavi) add(F::treasure, type == T::stellar || type == T::cassi || type == T::prism ? Stat::focus : Stat::health);
             switch (type) {
             case T::stellar: add(F::power, Stat::focus); add(F::home, Stat::health); add(F::durability, Stat::health); last = Stat::focus; break;
             case T::ren:     add(F::bruiser, Stat::health); add(F::durability, Stat::health); add(F::power, Stat::focus); last = Stat::focus; break;

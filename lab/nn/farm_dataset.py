@@ -21,7 +21,7 @@ def _newest_wasm():
             if m: found.append((tuple(int(x) for x in m.groups()), f))
     return os.environ.get('CAMBC_ENGINE_WASM') or (max(found)[1] if found else '')
 WASM = _newest_wasm()
-NF = 19
+NF = 20
 STEP, HORIZON = 5, 40
 
 def mapfor(name, d, o):
@@ -35,7 +35,28 @@ def mapfor(name, d, o):
 
 def cheb(a, b): return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
 
-def features(me, g, gi, st, r, champs, T, sp_us, sp_them, last_target, heading=0):
+def walk_fields(M):
+    """Per group: 8-way walking distance from its camp tiles over walls and holes (the bot's
+    fields::toGroup). dist[gi][y][x], 999 where unreachable."""
+    W, H = M['w'], M['h']
+    free = [[M['walls'][y][x] == '0' and M['holes'][y][x] == '0' for x in range(W)] for y in range(H)]
+    out = []
+    for g in M['groups']:
+        D = [[999] * W for _ in range(H)]; q = []
+        for c in g['camps']:
+            D[c['y']][c['x']] = 0; q.append((c['x'], c['y']))
+        i = 0
+        while i < len(q):
+            x, y = q[i]; i += 1; nd = D[y][x] + 1
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    X, Y = x + dx, y + dy
+                    if 0 <= X < W and 0 <= Y < H and free[Y][X] and D[Y][X] > nd:
+                        D[Y][X] = nd; q.append((X, Y))
+        out.append(D)
+    return out
+
+def features(me, g, gi, st, r, champs, T, sp_us, sp_them, last_target, heading=0, walk=None):
     # me: champ row; g: group json; st: (status, back_round)
     tiles = [(c['x'], c['y']) for c in g['camps']]
     cx = sum(t[0] for t in tiles) / len(tiles); cy = sum(t[1] for t in tiles) / len(tiles); cen = (round(cx), round(cy))
@@ -52,7 +73,8 @@ def features(me, g, gi, st, r, champs, T, sp_us, sp_them, last_target, heading=0
     return [d / 30.0, strength / 60.0, health / 3000.0, g['gems'] / 60.0, g['gold'] / 150.0,
             me[5] / max(me[6], 1), me[9] / 60.0, allies_camp / 3.0, enemies_camp / 3.0, our_half,
             cheb(cen, sp_us) / 40.0, r / 1000.0, 1.0 if status == 'reward' else 0.0, wait,
-            allies_me / 3.0, 1.0 if last_target == gi else 0.0, me[6] / 1500.0, enemies_me / 3.0, heading / 3.0]
+            allies_me / 3.0, 1.0 if last_target == gi else 0.0, me[6] / 1500.0, enemies_me / 3.0, heading / 3.0,
+            min((walk[gi][pos[1]][pos[0]] if walk else d) / 30.0, 2.0)]
 
 def process(meta, path, team=None):
     team = team or TEAM
@@ -66,6 +88,7 @@ def process(meta, path, team=None):
     M = mapfor(meta['map'], d, o)
     if not M: return []
     G = M['groups']; T = 0 if side == 'A' else 1
+    WF = walk_fields(M)
     sp_us = tuple(M['spawnA' if T == 0 else 'spawnB'][0]); sp_them = tuple(M['spawnB' if T == 0 else 'spawnA'][0])
     tile2g = {(c['x'], c['y']): i for i, g in enumerate(G) for c in g['camps']}
     rs = sorted(o)
@@ -107,7 +130,7 @@ def process(meta, path, team=None):
                 if mate[1] != T or not mate[7] or mate[0] == me[0]: continue
                 nm = next((g for (rr, g) in hits.get(mate[0], []) if r <= rr <= r + HORIZON), None)
                 if nm is not None: heads[nm] = heads.get(nm, 0) + 1
-            F = [features(me, G[gi], gi, (st[gi], bk[gi]), r, x['champs'], T, sp_us, sp_them, last, heads.get(gi, 0)) for gi in cands]
+            F = [features(me, G[gi], gi, (st[gi], bk[gi]), r, x['champs'], T, sp_us, sp_them, last, heads.get(gi, 0), WF) for gi in cands]
             rows.append((np.array(F, np.float32), cands.index(nxt), meta['matchId'], meta['map']))
     return rows
 

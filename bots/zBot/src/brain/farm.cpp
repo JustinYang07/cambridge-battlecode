@@ -430,6 +430,7 @@ float nnScore(const World& w, const GroupInfo& g) {
     const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
     int d = 1 << 20;
     for (auto t : g.tiles) d = std::min(d, dist(w.pos, t));
+    const int walk = fields::toGroup(g.id, w.pos);
     int alliesCamp = 0, alliesMe = 0, enemiesCamp = 0, enemiesMe = 0;
     for (const auto& a : w.allies) {
         alliesCamp += dist(a.pos, g.center) <= 5;
@@ -448,7 +449,9 @@ float nnScore(const World& w, const GroupInfo& g) {
         static_cast<float>(enemiesCamp) / 3.0f, dist(g.center, st.spawnCenter) < dist(g.center, st.enemySpawnCenter) ? 1.0f : 0.0f,
         static_cast<float>(dist(g.center, st.spawnCenter)) / 40.0f, static_cast<float>(w.round) / 1000.0f,
         mem.status == GroupStatus::reward ? 1.0f : 0.0f, wait, static_cast<float>(alliesMe) / 3.0f, recent ? 1.0f : 0.0f,
-        w.maxHp / 1500.0f, static_cast<float>(enemiesMe) / 3.0f, static_cast<float>(comms::claimsOn(g.id, w.slot)) / 3.0f};
+        w.maxHp / 1500.0f, static_cast<float>(enemiesMe) / 3.0f, static_cast<float>(comms::claimsOn(g.id, w.slot)) / 3.0f,
+        // Walking distance (the field when built; straight line plus walls' ~25% otherwise), capped at 60 tiles.
+        std::min(static_cast<float>(walk >= 0 && walk < Navigator::unreachable ? walk : d * 5 / 4) / 30.0f, 2.0f)};
     return nnfarm::score(x);
 }
 
