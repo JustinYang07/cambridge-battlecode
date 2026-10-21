@@ -11,7 +11,16 @@ import glob, json, os, subprocess, sys
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-WASM = sorted(glob.glob(os.path.expanduser('~/Library/Caches/cambc/assets/*/visualiser/assets/v0_0_3-*.wasm')))[0]
+def _newest_wasm():
+    # The newest engine in the cambc asset cache (macOS or Linux); SDK 3 replays need v1_0_0.
+    import re
+    found = []
+    for base in ('~/Library/Caches/cambc/assets', '~/.cache/cambc/assets', os.path.join(os.environ.get('LOCALAPPDATA', ''), 'cambc/assets')):
+        for f in glob.glob(os.path.expanduser(base) + '/*/visualiser/assets/v*_*_*-*.wasm'):
+            m = re.search(r'/v(\d+)_(\d+)_(\d+)-', f)
+            if m: found.append((tuple(int(x) for x in m.groups()), f))
+    return os.environ.get('CAMBC_ENGINE_WASM') or (max(found)[1] if found else '')
+WASM = _newest_wasm()
 NF = 19
 STEP, HORIZON = 5, 40
 

@@ -15,7 +15,7 @@ import fingerprint as F
 from farm_dataset import cheb
 
 ENG, NEAR, FAR, HORIZON = 5, 8, 14, 15
-TYPES = ['Ryth', 'Vesper Vale', 'Vendetta', 'Cassi', 'Issac', 'Stellar', 'Prism', 'Marcella', 'Willow', 'Ren', 'Varg', 'Tavi']
+TYPES = ['Ryth', 'Vesper Vale', 'Vendetta', 'Cassi', 'Issac', 'Stellar', 'Prism', 'Marcella', 'Willow', 'Ren', 'Varg', 'Tavi', 'Heart of Ruin']
 ROOT = F.ROOT
 
 

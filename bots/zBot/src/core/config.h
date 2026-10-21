@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 // Tuning knobs in one place. Each constant is referenced by name in decision
 // traces, so the lab's decision explorer shows which knob produced a score.
 
@@ -329,9 +330,14 @@ inline constexpr float fight_win_fit_a = -0.144f;
 inline constexpr float fight_win_fit_b = 0.510f;
 // Fight win model: 0 the curve above; 1 the edge curve refit on 1,800 self-play games (resolved
 // fights we took, win = first death near the fight is theirs); 2 eight features on the same fights.
-inline constexpr int fight_win_model = 2;
+inline constexpr int fight_win_model = 2;  // 3 (replay model, rfm_*): -36 +/- 106 a game vs model 2 on 35 maps
 inline constexpr float fight_win_refit_a = -1.1700f;
 inline constexpr float fight_win_refit_b = 0.4630f;
+// Model 3: replay fight model (lab/nn/train_fish_fight.py, fight_good): top-team fights scraped from
+// the ladder, 5,540 contacts in 134 games, any team; good = more of them die within 15 rounds, or as many
+// and they lose more health. Held-out AUC 0.717. Features around the contact's midpoint, see fight.cpp.
+inline constexpr float rfm_bias = -0.26824f;
+inline constexpr std::array<float, 17> rfm_w{-0.47079f, 0.43561f, -0.11840f, 0.19819f, 0.27090f, -0.29863f, 0.08452f, -0.11346f, 0.30781f, -0.24862f, 0.68588f, -0.63504f, 0.02156f, -0.02344f, 0.06360f, -0.05558f, -0.06917f};
 inline constexpr float fwm_bias = -0.9515f;
 inline constexpr float fwm_ln_edge = 1.0331f;
 inline constexpr float fwm_ln_hp = 0.3904f;       // ln(our side's health / theirs)
@@ -439,7 +445,7 @@ inline constexpr float farm_switch_margin = 1.7f;   // on the way to a camp, ano
 // yBot farming lanes (strategy/lanes): on farming maps each champion owns a few camps on our half.
 inline constexpr float nn_recall_gamma = 0.5f;       // yBot: weight of the top-team recall classifier on the heal option (0: off)
 inline constexpr float nn_recall_min = 0.3f, nn_recall_max = 3.0f;
-inline constexpr float nn_farm_beta = 0.0f;          // yBot: weight of the top-team camp-choice network (lab/nn; 0: off; 0.3 tested: +58 +- 169 vs L3 on 5 maps)
+inline constexpr float nn_farm_beta = 0.3f;          // yBot: weight of the top-team camp-choice network (lab/nn; 0: off; 0.3 tested: +58 +- 169 vs L3 on 5 maps)
 inline constexpr bool lanes = true;
 inline constexpr float lane_max_strength = 80.0f;     // camps in lanes: monster strength up to this (a wolf, a wolf pair, a single elk)
 inline constexpr float lane_solo_strength = 40.0f;    // ...above this a camp goes to two of us (a single elk)

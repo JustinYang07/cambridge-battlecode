@@ -12,7 +12,53 @@
 #include "../strategy/regroup.h"
 #include "scorers.h"
 
+namespace bc = cambc;
+
 namespace scorers {
+
+namespace {
+// Replay fight model (tune::rfm_*): the logit that a contact at `m` goes our way, from what we see.
+// Same features as lab/nn/fight_engage_dataset.py, from our side: champions within 8 and 14 of m,
+// health and max health within 8 (/1000), health fraction within 8, bags within 8 (/50), bodies
+// alive, distances from m to each spawn (/ spawn-to-spawn distance), round (/1000).
+float replayFightLogit(const World& w, bc::vec2 m) {
+    std::array<float, 17> f{};
+    float fracUs = 0, fracThem = 0;
+    auto add = [&](bc::vec2 p, float hp, float maxHp, int gems, bool us) {
+        const int d = dist(p, m);
+        if (d > 14) return;
+        f[us ? 2 : 3] += 1;
+        if (d > 8) return;
+        f[us ? 0 : 1] += 1;
+        f[us ? 6 : 7] += hp / 1000.0f;
+        f[us ? 8 : 9] += maxHp / 1000.0f;
+        (us ? fracUs : fracThem) += hp / std::max(maxHp, 1.0f);
+        f[us ? 12 : 13] += static_cast<float>(std::max(gems, 0)) / 50.0f;
+    };
+    add(w.pos, w.hp, w.maxHp, w.gems, true);
+    for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+        if (sl == w.slot) continue;
+        const auto p = w.allyPosCached(sl);
+        const float hp = w.allyHp(sl), frac = w.allyHpFrac(sl);
+        if (p.x < 0 || hp <= 0 || frac <= 0) continue;
+        add(p, hp, hp / frac, w.allyGems(sl), true);
+    }
+    for (const auto& e : w.enemies)
+        if (e.hp > 0) add(e.pos, e.hp, e.maxHp, e.gems, false);
+    f[10] = f[0] > 0 ? fracUs / f[0] : 0;
+    f[11] = f[1] > 0 ? fracThem / f[1] : 0;
+    f[4] = static_cast<float>(w.alliesAlive);
+    f[5] = static_cast<float>(w.enemiesAlive);
+    const auto& st = Statics::get();
+    const float span = static_cast<float>(std::max(dist(st.spawnCenter, st.enemySpawnCenter), 1));
+    f[14] = static_cast<float>(dist(m, st.spawnCenter)) / span;
+    f[15] = static_cast<float>(dist(m, st.enemySpawnCenter)) / span;
+    f[16] = static_cast<float>(w.round) / 1000.0f;
+    float z = tune::rfm_bias;
+    for (std::size_t i = 0; i < f.size(); ++i) z += tune::rfm_w[i] * f[i];
+    return z;
+}
+} // namespace
 
 void fight(World& w, std::vector<Option>& out) {
     const float myDps = std::max(combat::championDamagePerTurn(w), 1.0f);
@@ -128,7 +174,9 @@ void fight(World& w, std::vector<Option>& out) {
         // AUC 0.705 vs 0.662 for edge alone).
         const float lnEdge = std::log(std::max(edge, 0.05f));
         float z;
-        if (tune::fight_win_model == 2) {
+        if (tune::fight_win_model == 3) {
+            z = replayFightLogit(w, {(w.pos.x + e.pos.x) / 2, (w.pos.y + e.pos.y) / 2});
+        } else if (tune::fight_win_model == 2) {
             z = tune::fwm_bias + tune::fwm_ln_edge * lnEdge +
                 tune::fwm_ln_hp * std::log(std::max(ours.hp, 1.0f) / std::max(theirHp, 1.0f)) +
                 tune::fwm_ln_dps * std::log(std::max(ours.dps, 1.0f) / std::max(theirDps, 1.0f)) +
