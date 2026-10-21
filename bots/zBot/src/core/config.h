@@ -588,7 +588,7 @@ inline constexpr int far_spawn_farmer_dist = 50;
 inline constexpr bool separated_heart = true;
 inline constexpr bool lone_gem_fight_comp = true;     // gold map, one camp with team_rush_share of the gems: standard comp instead of the gold comp
 inline constexpr bool marcella_for_pair = true;      // Marcella in Cassi & Issac's place in every comp (user)
-inline constexpr bool heart_for_varg = true;           // Heart of Ruin in Varg's place on every map. Off: 84-game A/B vs zBotBase -40 +/- 130 a game (corners, elkring up; eight, expanse, lanes down), and the final patch nerfs its strength
+inline constexpr bool heart_for_varg = false;          // Heart of Ruin in Varg's place on every map. Off: 84-game A/B vs zBotBase -40 +/- 130 a game (corners, elkring up; eight, expanse, lanes down), and the final patch nerfs its strength
 inline constexpr float separated_draft_share = 0.4f;  // ...at least this share of our-side camps separated (mapplan Features)
 inline constexpr float separated_detour = 1.6f;       // ...a walk this x the straight-line distance counts as walled off
 // combatBotv3: with this much fuel left at farm scoring, score at least min_scored_rich camps in full

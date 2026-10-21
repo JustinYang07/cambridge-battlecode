@@ -348,8 +348,9 @@ void World::refresh(bool firstTurn) {
         if (c.groupId != lastGroup && d <= 14) danger |= statics.groups[static_cast<std::size_t>(c.groupId)].reach;
         lastGroup = c.groupId;
     }
-    // Stun-aware positioning: alone (no ally within stun_danger_ally_radius), or outnumbered by the
-    // enemies within 6, the tiles a recently seen enemy reaches next round are danger too: its stun
+    // Stun-aware positioning: alone (no ally within stun_danger_ally_radius) against two or more, or
+    // outnumbered by two by the enemies within 6 (alone against one it cost tempo: collision and
+    // pilgrimage -400/-540 a game vs the live bot, +455/+380 without it), the tiles a recently seen enemy reaches next round are danger too: its stun
     // range plus a step if it has one, else its attack range plus a step. Against Fish and Nyx 27%
     // of our deaths to champions came with no ally within 4, mostly from near-full health in ~3
     // rounds (stun chains). Every walk that avoids danger now walks round them.
@@ -357,7 +358,7 @@ void World::refresh(bool firstTurn) {
         const int allies = alliesWithin(pos, tune::stun_danger_ally_radius);
         int foes = 0;
         for (const auto& e : enemies) foes += e.hp > 0 && dist(e.pos, pos) <= 6;
-        if (foes > 0 && (allies == 0 || foes > allies + 1)) {
+        if ((allies == 0 && foes >= 2) || foes > allies + 1) {
             for (const auto& g : ghosts) {
                 if (round - g.round > 1) continue;
                 const int reach = (g.stun ? tune::stun_range : g.range) + 1;
