@@ -573,6 +573,7 @@ inline constexpr int ranged_front_slack = 1;      // ...and we may stand this ma
 inline constexpr int far_spawn_farmer_dist = 50;
 // Maps cut up by ditches and walls: Heart of Ruin (2-tile dash) is drafted in Varg's place.
 inline constexpr bool separated_heart = true;
+inline constexpr bool lone_gem_fight_comp = true;     // gold map, one camp with team_rush_share of the gems: standard comp instead of the gold comp
 inline constexpr bool heart_for_varg = false;          // Heart of Ruin in Varg's place on every map. Off: 84-game A/B vs zBotBase -40 +/- 130 a game (corners, elkring up; eight, expanse, lanes down), and the final patch nerfs its strength
 inline constexpr float separated_draft_share = 0.4f;  // ...at least this share of our-side camps separated (mapplan Features)
 inline constexpr float separated_detour = 1.6f;       // ...a walk this x the straight-line distance counts as walled off

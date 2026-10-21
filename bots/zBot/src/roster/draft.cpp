@@ -179,7 +179,17 @@ void play_draft() {
             if (g.gems == 0) ++goldOnly;
         }
         const float goldOnlyShare = farmable > 0 ? static_cast<float>(goldOnly) / static_cast<float>(farmable) : 0.0f;
-        const bool goldMap = goldOnlyShare >= tune::gold_draft_share;
+        // A gold map whose gems all sit in one camp (elk-arena: two elks and six clusters in a walled
+        // centre): the game is the fight for that camp, so draft the fighting comp, not the casters.
+        int gemTotal = 0, gemBest = 0;
+        for (const auto& g : Statics::get().groups) {
+            if (g.hasMonolith) continue;
+            gemTotal += g.gems;
+            gemBest = std::max(gemBest, g.gems);
+        }
+        const bool loneGemCamp = tune::lone_gem_fight_comp && gemTotal > 0 && static_cast<float>(gemBest) >= tune::team_rush_share * static_cast<float>(gemTotal);
+        const bool goldMap = goldOnlyShare >= tune::gold_draft_share && !loneGemCamp;
+        if (loneGemCamp && goldOnlyShare >= tune::gold_draft_share) planText += "one gem camp: fighting comp; ";
         planText += "gold-only camps " + std::to_string(static_cast<int>(goldOnlyShare * 100.0f)) + "%; ";
         static const std::vector<D> farOrder{D::varg, D::stellar, D::cassi_and_issac, D::ryth, D::ren};
         const auto& st = Statics::get();
