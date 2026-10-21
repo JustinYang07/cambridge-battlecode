@@ -170,6 +170,15 @@ void bank(World& w, std::vector<Option>& out) {
         o.mul("enemies near", tune::danger_bank_boost * std::clamp(ratio, 0.5f, 3.0f));
     }
     if (w.lastOption == static_cast<int>(OptionKind::bank)) o.mul("committed", 1.2f);
+    // Finish the camp first: we are working a camp that is partly down and nobody is threatening us.
+    // Leaving it costs a walk back (it keeps its damage but not its time): on lanes 22 of 107 switches
+    // away from a camp being hit were to bank, and we cleared half as many camps as Nyx for as many hits.
+    if (tune::bank_after_camp && w.lastOption == static_cast<int>(OptionKind::farm) && w.lastTarget >= 0 &&
+        w.lastTarget < static_cast<int>(w.groups.size()) && pressure <= 0 && w.teamGems + w.gems < 1000) {
+        const auto& mem = w.groups[static_cast<std::size_t>(w.lastTarget)];
+        if (mem.status == GroupStatus::alive && mem.healthLeft < 0.98f && w.engagedGroup == w.lastTarget)
+            o.mul("finish the camp first", tune::bank_after_camp_factor);
+    }
     // Passing an altar on the path anyway: top up, the detour costs nearly nothing (hybridBot2: +161).
     if (bestTravel <= tune::passing_altar_tiles && gems >= tune::passing_altar_min_gems) o.mul("passing the altar", tune::passing_altar_bonus);
     if (mapplan::routeWantsBank(w)) o.mul("route altar visit", tune::route_bonus);
