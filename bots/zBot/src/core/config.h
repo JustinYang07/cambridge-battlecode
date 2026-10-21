@@ -443,6 +443,16 @@ inline constexpr bool set_paths = true;             // far walks follow precompu
 inline constexpr int field_walk_tiles = 4;          // ...beyond this many tiles from the goal; the search does the rest
 inline constexpr unsigned long long field_build_fuel = 35000;  // build a missing field on demand above this
 inline constexpr int hop_min_gain = 3;
+inline constexpr bool dash_then_walk = true;    // far-field walks step on after a dash in the same turn
+// Crossing routes (dashers): a far walk may go by a hole crossing, a dash over holes the field walks
+// round (lab/tools/dash_routes.py: spawn to every camp on the 35 pool maps takes 19,313 turns with the
+// greedy hop, 16,276 with planned crossings; shortcut 1,018 vs 354, concentrated wealth 796 vs 321).
+inline constexpr bool crossing_routes = true;
+inline constexpr bool crossing_scoring = true;   // ...and camp choice counts a dasher's crossing route as its travel
+inline constexpr int crossing_min_gain = 6;        // a crossing counts for a goal when it saves this many steps
+inline constexpr int crossing_keep = 12;           // ...the best this many per goal field
+inline constexpr int crossing_margin = 3;          // take the crossing route when it beats walking by this much
+inline constexpr unsigned long long crossing_build_fuel = 45000;  // build the crossing list / a goal's crossings only with this much fuel left
 inline constexpr int tank_priority = 10;            // tanks act first each round (0: draft order)
 inline constexpr bool opening_routes = true;       // follow the draft's per-champion opening routes
 inline constexpr bool opening_camp = true;         // the crew without routes opens on the draft's party camp

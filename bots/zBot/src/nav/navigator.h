@@ -45,6 +45,10 @@ public:
     bool leavePocket(World& w, const GroupInfo& g);
     // xBot: step onto an adjacent tile chosen elsewhere (micro). False if a hidden unit blocks it.
     bool moveTo(World& w, cambc::vec2 dest) { return cambc::self().can_move() && tryMove(w, dest); }
+    // Crossing routes: turns to the far field's goal for a dasher by its best hole crossing (walk there,
+    // wait out the cooldown, dash, walk on), or `walk` when that is no better or we cannot dash.
+    // `hasCrossings`: the goal has crossings for us; `evaluate` false only reports that (no host reads).
+    int crossingTravel(World& w, const FarField& far, int walk, bool* hasCrossings = nullptr, bool evaluate = true);
     // A dash ability ready now: its slot, else -1.
     int readyDash(World& w) const;
     // Step to the neighbouring tile that maximises distance from the given threats.

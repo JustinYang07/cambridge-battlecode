@@ -306,6 +306,35 @@ ExMap& exposureMap(const World& w) {
     return x;
 }
 
+// Crossing routes: per goal field, the hole crossings that save the most steps toward it (built once).
+struct Portal { bc::vec2 from, to; int toDist, gain; };
+const std::vector<Portal>* portalsFor(const FarField& far) {
+    struct Entry { const void* read; int id; std::vector<Portal> portals; };
+    static std::vector<Entry> cache;
+    for (const auto& e : cache)
+        if (e.read == reinterpret_cast<const void*>(far.read) && e.id == far.id) return &e.portals;
+    // The goal's field must exist (unbuilt fields read -1 everywhere: an empty list would stick).
+    if (far.read(far.id, Statics::get().spawnCenter) < 0) return nullptr;
+    const std::vector<Statics::Crossing>* cs = nullptr;
+    if (!Statics::get().crossings(cs) || bc::fuel_remaining() < tune::crossing_build_fuel) return nullptr;
+    std::vector<Portal> all;
+    for (const auto& c : *cs) {
+        const int ga = far.read(far.id, c.from), gb = far.read(far.id, c.to);
+        if (ga < 0 || gb < 0 || ga >= Navigator::unreachable || gb >= Navigator::unreachable) continue;
+        if (ga - gb >= tune::crossing_min_gain) all.push_back({c.from, c.to, gb, ga - gb});
+    }
+    std::sort(all.begin(), all.end(), [](const Portal& a, const Portal& b) { return a.gain > b.gain; });
+    std::vector<Portal> keep;
+    for (const auto& p : all) {
+        if (static_cast<int>(keep.size()) >= tune::crossing_keep) break;
+        bool near = false;
+        for (const auto& k : keep) near = near || dist(k.from, p.from) <= 2;
+        if (!near) keep.push_back(p);
+    }
+    cache.push_back({reinterpret_cast<const void*>(far.read), far.id, std::move(keep)});
+    return &cache.back().portals;
+}
+
 bool dashTo(World& w, int slot, bc::vec2 to) {
     try {
         if (w.abilities()[static_cast<std::size_t>(slot)].use(to)) {
@@ -321,6 +350,28 @@ bool dashTo(World& w, int slot, bc::vec2 to) {
     return false;
 }
 }  // namespace
+
+int Navigator::crossingTravel(World& w, const FarField& far, int walk, bool* hasCrossings, bool evaluate) {
+    if (hasCrossings) *hasCrossings = false;
+    if (!tune::crossing_routes || !tune::crossing_scoring || walk <= tune::crossing_min_gain || w.reserveDash) return walk;
+    int dslot = -1;
+    for (int slot = 0; slot < 2; ++slot)
+        if (w.abilities()[static_cast<std::size_t>(slot)].is_dash()) dslot = slot;
+    if (dslot < 0) return walk;
+    const auto* ps = portalsFor(far);
+    if (!ps || ps->empty()) return walk;
+    if (hasCrossings) *hasCrossings = true;
+    if (!evaluate) return walk;
+    const int cd = std::max(0, static_cast<int>(w.abilities()[static_cast<std::size_t>(dslot)].cooldown()));
+    int best = walk;
+    for (const auto& p : *ps) {
+        if (p.toDist >= walk || dist(p.from, w.pos) > tune::bfs_radius) continue;
+        const int wa = p.from == w.pos ? 0 : distTo(w, p.from);
+        if (wa >= unreachable) continue;
+        best = std::min(best, wa + std::max(0, cd - wa) + p.toDist + tune::crossing_margin);
+    }
+    return best;
+}
 
 bool Navigator::enterPocket(World& w, const GroupInfo& g) {
     if (w.pos == g.dashFrom) {
@@ -366,7 +417,7 @@ bool Navigator::leavePocket(World& w, const GroupInfo& g) {
 bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& blockedNow, const bc::bitboard* avoid,
                             bool allowDash, bc::vec2 aim) {
     const auto& st = Statics::get();
-    const int here = far.read(far.id, w.pos);
+    int here = far.read(far.id, w.pos);
     if (here < 0 || here >= unreachable || here == 0) return false;
     const bool useAvoid = avoid && w.stuckTurns == 0 && !avoid->is_set(w.pos);
     auto value = [&](bc::vec2 t) {
@@ -384,6 +435,59 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
         }
         return false;  // keep the earlier one in compass order
     };
+    // A walk step on down the field after a dash (the dash is a cast: the walk is still ours).
+    auto walkOn = [&]() {
+        if (!tune::dash_then_walk || !bc::self().can_move()) return;
+        static constexpr std::array<bc::vec2, 8> kSteps{{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}};
+        const int now = value(w.pos);
+        bc::vec2 step{-1, -1};
+        int stepD = now;
+        for (const auto dir : kSteps) {
+            const bc::vec2 t = w.pos + dir;
+            const int d = value(t);
+            if (d < stepD && !w.occupied.is_set(t)) { stepD = d; step = t; }
+        }
+        if (step.x >= 0) tryMove(w, step);
+    };
+    // Crossing routes (dashers, no enemy in sight): walk to a hole crossing and dash over it when that
+    // beats walking round, waiting there for the dash if it is cooling down (counted in the cost).
+    if (tune::crossing_routes && here > tune::crossing_min_gain && w.enemies.empty() && !w.reserveDash) {
+        int dslot = -1;
+        for (int slot = 0; slot < 2; ++slot)
+            if (w.abilities()[static_cast<std::size_t>(slot)].is_dash()) dslot = slot;
+        const std::vector<Portal>* ps = dslot >= 0 ? portalsFor(far) : nullptr;
+        if (ps && !ps->empty()) {
+            const int cd = std::max(0, static_cast<int>(w.abilities()[static_cast<std::size_t>(dslot)].cooldown()));
+            const Portal* best = nullptr;
+            int bestCost = here - tune::crossing_margin;
+            for (const auto& p : *ps) {
+                if (p.toDist >= here || dist(p.from, w.pos) > tune::bfs_radius) continue;
+                const int wa = p.from == w.pos ? 0 : distTo(w, p.from);
+                if (wa >= unreachable) continue;
+                const int cost = wa + std::max(0, cd - wa) + p.toDist;
+                if (cost < bestCost) { bestCost = cost; best = &p; }
+            }
+            if (best) {
+                if (w.pos == best->from) {
+                    if (readyDash(w) >= 0 && !w.occupied.is_set(best->to) && dashTo(w, dslot, best->to)) {
+                        trace().note("crossing");
+                        walkOn();
+                        return true;
+                    }
+                    trace().action("hold");
+                    trace().note("crossing: waiting for the dash");
+                    return true;
+                }
+                noDash_ = true;  // keep the dash for the crossing
+                const bool moved = stepToward(w, best->from, 0, false, avoid);
+                noDash_ = false;
+                if (moved) {
+                    trace().note("to a crossing");
+                    return true;
+                }
+            }
+        }
+    }
     // Crystal flash: a teleport crystal lands up to tp_range tiles away, over walls and holes, after a
     // tp_crystal_time channel (shortcut: the spawn box's south side is a row of holes, and walking out
     // the north gap and round cost ~25 steps; the top team buys ~40 crystals a game there). Taken when
@@ -433,7 +537,11 @@ bool Navigator::stepByField(World& w, const FarField& far, const bc::bitboard& b
                                                     : tune::hop_min_gain + 1;
         if (gain >= need) {
             if (gain > 2) trace().note("hole hop");
-            if (dashTo(w, slot, best)) return true;
+            if (dashTo(w, slot, best)) {
+                // The dash is a cast: the walk is still ours this turn.
+                walkOn();
+                return true;
+            }
         }
     }
     if (!bc::self().can_move()) return false;

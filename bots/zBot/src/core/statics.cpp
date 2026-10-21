@@ -1,6 +1,7 @@
 #include "statics.h"
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include "config.h"
 #include "json.h"
 #include "trace.h"
@@ -505,6 +506,50 @@ int Statics::dashLine(bc::vec2 a, bc::vec2 b, bc::vec2* hopFrom, bc::vec2* hopTo
         }
     }
     return result;
+}
+
+bool Statics::crossings(const std::vector<Crossing>*& out) const {
+    out = &crossings_;
+    if (crossingsReady_) return true;
+    if (bc::fuel_remaining() < tune::crossing_build_fuel) return false;
+    if (wallBits_.empty()) {
+        wallBits_ = dashBlock.export_linear_buffer();
+        holeBits_ = (terrain & ~dashBlock).export_linear_buffer();
+    }
+    const auto walkBits = reach.export_linear_buffer();
+    auto bitAt = [&](const std::vector<std::uint8_t>& bits, int x, int y) {
+        const auto i = static_cast<std::size_t>(y * width + x);
+        return ((bits[i >> 3] >> (i & 7)) & 1) != 0;
+    };
+    auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < width && y < height; };
+    auto walk = [&](int x, int y) { return inside(x, y) && bitAt(walkBits, x, y); };
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+            if (!walk(x, y)) continue;
+            bool holeNear = false;
+            for (int dy = -1; dy <= 1 && !holeNear; ++dy)
+                for (int dx = -1; dx <= 1; ++dx)
+                    if (inside(x + dx, y + dy) && bitAt(holeBits_, x + dx, y + dy)) { holeNear = true; break; }
+            if (!holeNear) continue;
+            for (int dy = -2; dy <= 2; ++dy)
+                for (int dx = -2; dx <= 2; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dy)) != 2) continue;
+                    const int bx = x + dx, by = y + dy;
+                    if (!walk(bx, by)) continue;
+                    // Between them: no walkable tile (else two steps do it), and one that is not a wall.
+                    bool walkable = false, open = false;
+                    for (int my = std::min(y, by) - 1; my <= std::max(y, by) + 1; ++my)
+                        for (int mx = std::min(x, bx) - 1; mx <= std::max(x, bx) + 1; ++mx) {
+                            if (std::max(std::abs(mx - x), std::abs(my - y)) > 1 || std::max(std::abs(mx - bx), std::abs(my - by)) > 1) continue;
+                            if (!inside(mx, my)) continue;
+                            walkable = walkable || walk(mx, my);
+                            open = open || !bitAt(wallBits_, mx, my);
+                        }
+                    if (!walkable && open) crossings_.push_back({{x, y}, {bx, by}});
+                }
+        }
+    crossingsReady_ = true;
+    return true;
 }
 
 bool Statics::dashLegal(bc::vec2 from, bc::vec2 to) const {

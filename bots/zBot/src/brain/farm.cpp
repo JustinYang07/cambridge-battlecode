@@ -1141,6 +1141,17 @@ void farm(World& w, std::vector<Option>& out) {
         // otherwise Chebyshev distance, which walking never beats.
         bc::vec2 unused;
         int cheb = dash ? dashTravel(w, g, unused) : fields::toGroup(g.id, w.pos);
+        // A dasher with a hole crossing toward it may get there sooner than the walk: the bound
+        // falls back to the straight-line distance, which no route beats by much.
+        if (!dash && cheb > 0 && cheb < Navigator::unreachable) {
+            bool crossings = false;
+            nav().crossingTravel(w, FarField{&fields::toGroup, &fields::ensureGroup, g.id}, cheb, &crossings, false);
+            if (crossings) {
+                int straight = 1 << 20;
+                for (auto t : g.tiles) straight = std::min(straight, dist(w.pos, t));
+                cheb = std::min(cheb, straight);
+            }
+        }
         // Its field says no walking path reaches it (an island behind holes: ambush). It cannot be
         // captured on foot, so it is not a farming option (it used to be scored by straight-line
         // distance, and champions stood still for 1,500 rounds trying to path to it).
@@ -1200,7 +1211,7 @@ void farm(World& w, std::vector<Option>& out) {
         } else if (const int d = fields::toGroup(g.id, w.pos); d >= 0) {
             if (tune::skip_field_unreachable && d >= Navigator::unreachable) return;  // no walking path (see above)
             // Precomputed field: one local read. Aim at the straight-line nearest tile.
-            if (d < Navigator::unreachable) travel = std::max(0, d - reach);
+            if (d < Navigator::unreachable) travel = std::max(0, nav().crossingTravel(w, FarField{&fields::toGroup, &fields::ensureGroup, g.id}, d) - reach);
             int nearestD = 1 << 20;
             for (auto t : g.tiles)
                 if (dist(w.pos, t) < nearestD) { nearestD = dist(w.pos, t); c.nearest = t; }
