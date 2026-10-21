@@ -100,6 +100,15 @@ inline constexpr int team_rush_round = 50;         // ...from this round
 inline constexpr int team_rush_min_alive = 4;      // ...with at least this many of us alive
 inline constexpr int team_rush_party = 5;          // ...gather this many (or all alive) before the pull
 inline constexpr float team_rush_melee_join = 0.25f; // ...melee step in once the camp is below this health
+// Camps blocking every altar (Statics::altarBlockers): killing them is the team's job, worth every
+// bag we carry, from blocker_rush_round with team_rush_min_alive of us alive. Banking waits for it.
+inline constexpr bool blocker_rush = false;          // off: boss-battle vs zBotBase 0-609 and 0-177 with 67-76 deaths (the enemy banks on the altar we open)
+inline constexpr bool blocked_gold_game = true;       // every altar blocked: gems are worth blocked_gem_value (ties go to gold earned)
+inline constexpr float blocked_gem_value = 0.02f;
+inline constexpr int blocker_rush_round = 150;
+inline constexpr int blocker_party = 3;               // ...starting once this many of us are there (the rest join a fight under way)
+inline constexpr int team_rush_stall_rounds = 12;
+inline constexpr float rush_leave_hits = 2.5f;       // ...a champion the camp is hitting leaves with fewer than this many rounds of its hits left     // ...and the pull is dropped (everyone fights it) when the camp has taken no damage for this long (elk-arena: the whole team held 5 tiles off the elks all game)
 inline constexpr float team_rush_other_factor = 0.1f;  // ...other camps meanwhile
 inline constexpr float team_rush_bonus = 3.0f;     // ...and it is never "too strong" or "underpowered", x this
 inline constexpr int max_party_wait_claimed = 10;  // ...also when allies have claimed it (was 30: 100-turn holds)
@@ -564,7 +573,7 @@ inline constexpr int ranged_front_slack = 1;      // ...and we may stand this ma
 inline constexpr int far_spawn_farmer_dist = 50;
 // Maps cut up by ditches and walls: Heart of Ruin (2-tile dash) is drafted in Varg's place.
 inline constexpr bool separated_heart = true;
-inline constexpr bool heart_for_varg = true;           // Heart of Ruin in Varg's place on every map (user: the stronger champion)
+inline constexpr bool heart_for_varg = false;          // Heart of Ruin in Varg's place on every map. Off: 84-game A/B vs zBotBase -40 +/- 130 a game (corners, elkring up; eight, expanse, lanes down), and the final patch nerfs its strength
 inline constexpr float separated_draft_share = 0.4f;  // ...at least this share of our-side camps separated (mapplan Features)
 inline constexpr float separated_detour = 1.6f;       // ...a walk this x the straight-line distance counts as walled off
 // combatBotv3: with this much fuel left at farm scoring, score at least min_scored_rich camps in full

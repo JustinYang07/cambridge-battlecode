@@ -22,6 +22,8 @@ float captureShareOf(const World& w, int groupId);
 bool allyHoldingOf(const World& w, int groupId);
 // Value of one gem: above 1 while the enemy has tributed more than us.
 float gemValue(const World& w);
+// farm.cpp: every altar is blocked by a live camp group (Statics::altarBlockers): no tribute possible.
+bool altarsBlocked(const World& w);
 // farm.cpp: a team rush is on for this group (the map's main gem camp, enough of us alive).
 bool teamRushOn(const World& w, int groupId);
 // combatBotv3: capturing now (on a reward's spawn tiles) with no enemy champion within capture_hold_radius.

@@ -27,6 +27,7 @@ struct GroupInfo {
     float totalStrength = 0;          // sum of members' base strength (damage per round when awake)
     bool harmless = false;            // only gem/gold clusters
     bool hasMonolith = false;
+    bool blocksAltars = false;        // stands on the last free tiles beside the altars (see Statics::altarBlockers)
     bool reachable = true;            // some tile is connected to our spawn on foot (false: sealed off, e.g. behind holes)
     // Sealed groups a dash can get into: the pocket around them (walkable inside), and one legal dash
     // from dashFrom (reachable on foot) to dashTo (inside the pocket). The way out is the reverse.
@@ -47,6 +48,10 @@ struct Statics {
     cambc::vec2 spawnCenter;
     cambc::vec2 enemySpawnCenter;
     std::vector<cambc::vec2> altars;
+    // Camp groups standing on every free tile within tribute range of every usable altar (boss-battle:
+    // the only altar is walled in on seven sides and a Monolith stands on the eighth). Until one of
+    // them dies nobody can bank. Empty when some altar has a free tile.
+    std::vector<int> altarBlockers;
     std::vector<GroupInfo> groups;
     int teamSize = 0;
 

@@ -144,8 +144,11 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     auto goals = ring & ~inner & ~w.danger;  // never wait inside another monster's reach
     FixedStr<24> msg;
     trace().note((msg << "need " << (need - 1 - alliesNear(w, g)) << " more").view());
-    if (!goals.is_set(w.pos)) nav().stepToward(w, goals, false, &w.danger, g.center, groupPath(g.id));
-    else trace().action("hold");
+    if (goals.is_set(w.pos)) trace().action("hold");
+    // No way round the danger (boss-battle: an elk camp's reach covers one approach to the Monoliths
+    // and Varg stood 7 tiles off for 150 rounds, uncounted, while the party never formed): go anyway.
+    else if (!nav().stepToward(w, goals, false, &w.danger, g.center, groupPath(g.id)))
+        nav().stepToward(w, ring & ~inner, false, nullptr, g.center, groupPath(g.id));
     return true;
 }
 
@@ -156,18 +159,34 @@ bool rushPull(World& w, const GroupInfo& g, int need) {
     if (waitForParty(w, g, need)) return true;
     const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
     if (!w.ranged && mem.healthLeft < tune::team_rush_melee_join) return false;  // finish it together
+    // A pull that deals no damage is a stall, not a pull: everyone fights the camp the usual way.
+    static int stallGroup = -1, stallSince = 0;
+    static float stallHealth = 2.0f;
+    if (stallGroup != g.id || mem.healthLeft < stallHealth - 0.005f) {
+        stallGroup = g.id;
+        stallSince = w.round;
+        stallHealth = mem.healthLeft;
+    }
+    if (w.round - stallSince > tune::team_rush_stall_rounds) {
+        trace().note("rush: no damage, fighting it");
+        return false;
+    }
+    // Only members that attack have a reach (clusters do not hit back): a ring drawn around the
+    // clusters as well stood the ranged a tile beyond spell range of the elks.
     bc::bitboard inner, reach;
     inner.clear();
     reach.clear();
     bool live = false;
     for (const auto& c : w.camps)
         if (c.groupId == g.id && c.hp > 0) {
+            live = true;
+            if (c.strength <= 0) continue;
             inner.draw_chebyshev(c.pos, static_cast<float>(c.range));
             reach.draw_chebyshev(c.pos, static_cast<float>(c.range + 1));
-            live = true;
         }
     if (!live)
         for (auto t : g.tiles) {
+            if (const auto* tc = Statics::get().campAt(t); tc && tc->strength <= 0) continue;
             inner.draw_chebyshev(t, static_cast<float>(g.maxRange));
             reach.draw_chebyshev(t, static_cast<float>(g.maxRange + 1));
         }

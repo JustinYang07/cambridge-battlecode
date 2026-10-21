@@ -428,6 +428,33 @@ void Statics::init() {
     } catch (const bc::error&) {
         for (auto& g : groups) g.dashIn = false;
     }
+    // Altars that only camps give access to: every non-terrain tile in tribute range of every altar
+    // is a camp's spawn tile. An altar with no free tile at all can never be used and is skipped.
+    {
+        const int r = static_cast<int>(bc::constants::submit_gems_range);
+        std::vector<int> blockers;
+        bool allBlocked = false;
+        for (const auto a : altars) {
+            bool open = false, camps = false;
+            for (int dy = -r; dy <= r && !open; ++dy)
+                for (int dx = -r; dx <= r && !open; ++dx) {
+                    const bc::vec2 t{a.x + dx, a.y + dy};
+                    if ((dx == 0 && dy == 0) || t.x < 0 || t.y < 0 || t.x >= width || t.y >= height || terrain.is_set(t)) continue;
+                    if (const auto* g = groupAt(t)) {
+                        camps = true;
+                        if (std::find(blockers.begin(), blockers.end(), g->id) == blockers.end()) blockers.push_back(g->id);
+                    } else {
+                        open = true;
+                    }
+                }
+            if (open) { allBlocked = false; blockers.clear(); break; }
+            if (camps) allBlocked = true;
+        }
+        if (allBlocked) {
+            altarBlockers = blockers;
+            for (const int id : blockers) groups[static_cast<std::size_t>(id)].blocksAltars = true;
+        }
+    }
     if (draft && !packed_.empty()) {
         std::vector<std::uint8_t> dash;
         for (const auto& g : groups)

@@ -62,6 +62,8 @@ bool enemyLock(const World& w, int i) {
 
 void bank(World& w, std::vector<Option>& out) {
     if (w.gems < tune::bank_min_gems) return;
+    // Every altar is blocked by live camps: walking up to one only stands us still beside it.
+    if (altarsBlocked(w)) return;
     const auto& altars = Statics::get().altars;
     // Walking distance per altar: a local read once the altar's field exists, otherwise a ring of
     // host reads (~1-2k), so then only the 3 closest by straight line are measured.

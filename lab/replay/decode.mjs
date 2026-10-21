@@ -16,15 +16,26 @@ if (!replayPath || !outPath) {
   process.exit(2);
 }
 
+// The newest engine in the cambc asset cache (%LOCALAPPDATA% on Windows, ~/.cache elsewhere):
+// replays from SDK 3.x need v1_0_0, older ones decode on it too. CAMBC_ENGINE_WASM overrides.
 function findWasm() {
-  const root = path.join(process.env.LOCALAPPDATA || "", "cambc", "assets");
-  for (const dir of fs.readdirSync(root)) {
+  if (process.env.CAMBC_ENGINE_WASM) return process.env.CAMBC_ENGINE_WASM;
+  const base = process.env.LOCALAPPDATA || path.join(process.env.XDG_CACHE_HOME || path.join(process.env.HOME || "", ".cache"));
+  const root = path.join(base, "cambc", "assets");
+  const version = (n) => n.match(/^v(\d+)_(\d+)_(\d+)-/).slice(1).map(Number);
+  let best = null, bestV = null;
+  for (const dir of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     const assets = path.join(root, dir, "visualiser", "assets");
     if (!fs.existsSync(assets)) continue;
-    const f = fs.readdirSync(assets).find((n) => /^v0_0_1-.*\.wasm$/.test(n));
-    if (f) return path.join(assets, f);
+    for (const n of fs.readdirSync(assets)) {
+      if (!/^v\d+_\d+_\d+-.*\.wasm$/.test(n)) continue;
+      const v = version(n);
+      const newer = !bestV || v[0] - bestV[0] || v[1] - bestV[1] || v[2] - bestV[2];
+      if (!bestV || newer > 0) { best = path.join(assets, n); bestV = v; }
+    }
   }
-  throw new Error("engine wasm not found under %LOCALAPPDATA%/cambc/assets (run `cambc view` once)");
+  if (best) return best;
+  throw new Error("engine wasm not found under the cambc asset cache (run `cambc view` once)");
 }
 
 // Minimal WASI shim (as the visualiser's): stdout/stderr only, no files.

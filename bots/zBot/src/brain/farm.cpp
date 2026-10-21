@@ -39,6 +39,9 @@ float goldValue(const World& w) {
 
 // Behind on tributed gems: every gem is worth more, the further behind the more (capped).
 float gemValue(const World& w) {
+    // No altar can be reached (boss-battle): gems never score, and a 0-0 game goes to the team that
+    // earned more gold. Farm gold.
+    if (tune::blocked_gold_game && altarsBlocked(w)) return tune::blocked_gem_value;
     const float deficit = static_cast<float>(w.enemyGems - w.teamGems);
     if (deficit <= 0) return 1.0f / tune::gem_scale;
     return (1.0f + tune::catchup_max_boost * std::min(deficit / tune::catchup_full_deficit, 1.0f)) / tune::gem_scale;
@@ -393,9 +396,18 @@ int teamCamp(const World& w) {
     return cached;
 }
 
+// The altar blockers' job is on: every altar is blocked, the opening is over and enough of us are
+// alive. Nobody banks until they die, so the whole team takes them, slow or not (boss-battle: both
+// teams carried 19-190 gems for 2,000 rounds and finished 0-0).
+bool blockerRush(const World& w) {
+    return tune::blocker_rush && w.round >= tune::blocker_rush_round && w.alliesAlive >= tune::team_rush_min_alive &&
+           altarsBlocked(w);
+}
+
 // Rush now: it is the rush camp, the opening is over, and enough of us are alive to take it.
 bool teamRush(const World& w, const GroupInfo& g) {
     if (g.id == teamCamp(w)) return true;
+    if (g.blocksAltars && blockerRush(w)) return true;
     // combatBotv3: the team opening's camp: the whole team gathers and takes it together.
     if (mapplan::read().teamOpening && g.id == mapplan::read().openingCamp && mapplan::openingActive(w)) return true;
     if (g.id != rushGroup() || w.round < tune::team_rush_round) return false;
@@ -662,10 +674,25 @@ Option scoreGroup(World& w, const Candidate& c) {
             // waiting for a fifth who is elsewhere stalled the team at the ring (eight: captures fell
             // from ~126 to 72 by round 500 over 6 games).
             const bool camp = g.id == teamCamp(w) && g.id != rushGroup();
-            need = std::max(need, std::min(w.alliesAlive, camp ? tune::team_camp_min : tune::team_rush_party));
+            const int party = g.blocksAltars ? tune::blocker_party : camp ? tune::team_camp_min : tune::team_rush_party;
+            need = g.blocksAltars ? std::min(w.alliesAlive, party) : std::max(need, std::min(w.alliesAlive, party));
             o.need = need;
             o.mul("team rush", tune::team_rush_bonus);
             o.c.note << "team rush; ";
+            // Opening the altar banks every bag we carry (visible allies' too) and all that follows.
+            if (g.blocksAltars) {
+                int bags = w.gems;
+                for (int sl = 0; sl < w.allyCount && sl < 8; ++sl)
+                    if (sl != w.slot) bags += std::max(0, w.allyGems(sl));
+                o.add("opens the altar: our bags", static_cast<float>(bags) * gemValue(w));
+                o.c.note << "altar blocker; ";
+            }
+        }
+        // A rush is never "too strong", but whoever the camp is hitting still leaves before the next
+        // hits kill it (boss-battle: 76 deaths a game in the Monoliths' reach, most at 200-600 health).
+        if (rush && engaged && w.incoming * tune::rush_leave_hits >= w.hp) {
+            o.nnOk = false;
+            o.mul("would not survive", 0.02f);
         }
         if (tooStrong) {
             o.nnOk = false; o.mul("too strong", 0.05f);
@@ -858,6 +885,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         w.groups[static_cast<std::size_t>(rg)].status != GroupStatus::respawning)
         o.mul("team rushing", tune::team_rush_other_factor);
     else if (const int tc = teamCamp(w); tc >= 0 && g.id != tc) o.mul("team camp elsewhere", tune::team_rush_other_factor);
+    else if (!g.blocksAltars && blockerRush(w)) o.mul("team opening the altar", tune::team_rush_other_factor);
     if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4 && mapplan::skipGoldOnly())
@@ -1004,6 +1032,14 @@ bool captureHold(const World& w) {
         if (e.hp > 0 && dist(e.pos, w.pos) <= tune::capture_hold_radius) return false;
     answer = true;
     return true;
+}
+
+bool altarsBlocked(const World& w) {
+    for (const int id : Statics::get().altarBlockers) {
+        const auto st = w.groups[static_cast<std::size_t>(id)].status;
+        if (st == GroupStatus::alive || st == GroupStatus::unknown) return true;
+    }
+    return false;
 }
 
 bool teamRushOn(const World& w, int groupId) {
@@ -1178,7 +1214,9 @@ void farm(World& w, std::vector<Option>& out) {
                 pre[static_cast<std::size_t>(i)].group = nullptr;
                 scoreOne(c);
             }
-    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup, stealGroup})
+    // The altar blocker during its job: its bound (a Monolith's kill time) never wins the selection.
+    const int blockerGroup = blockerRush(w) && !statics.altarBlockers.empty() ? statics.altarBlockers.front() : -1;
+    for (const int forced : {mapplan::routeGroup(), loop::target(), nearestUp, rallyGroup, stealGroup, blockerGroup})
         if (forced >= 0)
             for (int i = 0; i < n; ++i)
                 if (pre[static_cast<std::size_t>(i)].group && pre[static_cast<std::size_t>(i)].group->id == forced) {
