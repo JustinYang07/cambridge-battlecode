@@ -61,6 +61,15 @@ struct Statics {
     int dashLine(cambc::vec2 a, cambc::vec2 b, cambc::vec2* hopFrom = nullptr, cambc::vec2* hopTo = nullptr) const;
     // The dash-in group whose pocket holds this tile, if any.
     const GroupInfo* pocketAt(cambc::vec2 tile) const;
+    // Dash pathing (user): every legal 2-tile dash over a hole between two walkable tiles that
+    // walking needs more than 2 steps for. Built in the background from spare fuel (buildHops,
+    // end of turn); hopsReady() once the whole map is scanned.
+    struct Hop {
+        cambc::vec2 from, to;
+    };
+    mutable std::vector<Hop> hops;
+    bool hopsReady() const { return hopsDone_; }
+    void buildHops(unsigned long long reserve) const;
     cambc::bitboard dashBlock;        // tiles a dash cannot pass over: terrain except holes
     // Per camp spawn tile: owning group and base stats (camps never leave their spawn).
     struct TileCamp {
@@ -92,6 +101,9 @@ private:
                                                  // (a dense TileCamp table cost ~60k fuel to fill on the first turn)
     bool ready_ = false;
     bool campsCapped_ = false;
+    mutable bool hopsDone_ = false;
+    mutable int hopScan_ = 0;           // next tile index buildHops looks at
+    void dashTables() const;            // fill wallBits_ / holeBits_ once
     mutable std::vector<std::uint8_t> wallBits_, holeBits_;  // dashLine tables (packed bits)                   // more than 255 camps: some are missing from tileCampIndex_
 };
 

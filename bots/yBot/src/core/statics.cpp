@@ -444,11 +444,48 @@ void Statics::init() {
     }
 }
 
-int Statics::dashLine(bc::vec2 a, bc::vec2 b, bc::vec2* hopFrom, bc::vec2* hopTo) const {
-    if (wallBits_.empty()) {
-        wallBits_ = dashBlock.export_linear_buffer();
-        holeBits_ = (terrain & ~dashBlock).export_linear_buffer();
+void Statics::dashTables() const {
+    if (!wallBits_.empty()) return;
+    wallBits_ = dashBlock.export_linear_buffer();
+    holeBits_ = (terrain & ~dashBlock).export_linear_buffer();
+}
+
+void Statics::buildHops(unsigned long long reserve) const {
+    if (hopsDone_ || width <= 0) return;
+    dashTables();
+    auto bit = [&](const std::vector<std::uint8_t>& bits, int x, int y) {
+        if (x < 0 || y < 0 || x >= width || y >= height) return true;  // off the map: like a wall
+        const auto i = static_cast<std::size_t>(y * width + x);
+        return ((bits[i >> 3] >> (i & 7)) & 1) != 0;
+    };
+    auto hole = [&](int x, int y) { return x >= 0 && y >= 0 && x < width && y < height && bit(holeBits_, x, y); };
+    auto walkable = [&](int x, int y) { return !bit(wallBits_, x, y) && !hole(x, y); };
+    const int total = width * height;
+    while (hopScan_ < total) {
+        if ((hopScan_ & 63) == 0 && bc::fuel_remaining() < reserve) return;  // resume next turn
+        const int ax = hopScan_ % width, ay = hopScan_ / width;
+        ++hopScan_;
+        if (!walkable(ax, ay)) continue;
+        for (int ty = ay - 2; ty <= ay + 2; ++ty)
+            for (int tx = ax - 2; tx <= ax + 2; ++tx) {
+                if (std::max(std::abs(tx - ax), std::abs(ty - ay)) != 2 || !walkable(tx, ty)) continue;
+                // Tiles beside both ends: a hop only when none is walkable (else it is a 2-step walk)
+                // and one is a hole the dash passes over (walls block a dash).
+                bool walkMid = false, holeMid = false;
+                for (int my = ay - 1; my <= ay + 1; ++my)
+                    for (int mx = ax - 1; mx <= ax + 1; ++mx) {
+                        if (std::max(std::abs(mx - tx), std::abs(my - ty)) > 1) continue;
+                        if (walkable(mx, my)) walkMid = true;
+                        else if (hole(mx, my)) holeMid = true;
+                    }
+                if (!walkMid && holeMid && hops.size() < 4096) hops.push_back({{ax, ay}, {tx, ty}});
+            }
     }
+    hopsDone_ = true;
+}
+
+int Statics::dashLine(bc::vec2 a, bc::vec2 b, bc::vec2* hopFrom, bc::vec2* hopTo) const {
+    dashTables();
     auto bitAt = [&](const std::vector<std::uint8_t>& bits, bc::vec2 t) {
         if (t.x < 0 || t.y < 0 || t.x >= width || t.y >= height) return true;
         const auto i = static_cast<std::size_t>(t.y * width + t.x);

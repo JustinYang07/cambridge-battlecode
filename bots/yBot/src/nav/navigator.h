@@ -47,6 +47,11 @@ public:
     bool moveTo(World& w, cambc::vec2 dest) { return cambc::self().can_move() && tryMove(w, dest); }
     // A dash ability ready now: its slot, else -1.
     int readyDash(World& w) const;
+    // Dash pathing (user): the shortest walk + one dash + walk to the goal of `read`/`id` through a
+    // hop (Statics::hops) within tune::dash_hop_radius, with a clear straight walk to its take-off
+    // tile. `reach` is taken off the field distance at the far end. unreachable when there is none.
+    static int hopTravel(const World& w, int (*read)(int, cambc::vec2), int id, int reach, cambc::vec2* from = nullptr,
+                         cambc::vec2* to = nullptr);
     // Step to the neighbouring tile that maximises distance from the given threats.
     bool stepAway(World& w, const std::vector<cambc::vec2>& threats, int keepRange);
     // combatBotv3: step to an adjacent tile in keepIn that is clearly less exposed (exposure map); false if none.

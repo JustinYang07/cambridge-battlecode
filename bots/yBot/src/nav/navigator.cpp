@@ -112,6 +112,26 @@ bool Navigator::tryDash(World& w, const bc::distance_field& field, const bc::bit
     return false;
 }
 
+int Navigator::hopTravel(const World& w, int (*read)(int, bc::vec2), int id, int reach, bc::vec2* from, bc::vec2* to) {
+    const auto& st = Statics::get();
+    if (!read || !st.hopsReady()) return unreachable;
+    int best = unreachable;
+    for (const auto& h : st.hops) {
+        const int walkTo = dist(w.pos, h.from);
+        if (walkTo > tune::dash_hop_radius || walkTo + 1 >= best) continue;
+        const int rest = read(id, h.to);
+        if (rest < 0 || rest >= unreachable) continue;
+        const int cost = walkTo + 1 + std::max(0, rest - reach);
+        if (cost >= best) continue;
+        // The walk to the take-off tile must be a plain straight walk (no wall or hole on the way).
+        if (walkTo > 0 && st.dashLine(w.pos, h.from) != 0) continue;
+        best = cost;
+        if (from) *from = h.from;
+        if (to) *to = h.to;
+    }
+    return best;
+}
+
 int Navigator::readyDash(World& w) const {
     if (!bc::self().can_cast()) return -1;
     for (int slot = 0; slot < 2; ++slot)
@@ -468,6 +488,34 @@ bool Navigator::stepToward(World& w, const bc::bitboard& goalsIn, bool allowDash
     bc::bitboard bushes;
     const bool haveBushes = tune::centre_bush_ring >= 0 && w.stuckTurns == 0 && bc::fuel_remaining() >= tune::nav_safe_floor &&
                             centreBushZone(w, bushes);
+    // Dash pathing (user): when walking to the goal, a hop over a ditch nearby (walk to its take-off
+    // tile, one dash, then the goal's field) beats the field's walk round by dash_shortcut_gain+:
+    // take it. Only with the dash back by the time we reach the take-off tile, no enemy champion near.
+    if (tune::dash_shortcuts && allowDash && w.kit.dashRange >= 2.0f && far.read && aim.x >= 0) {
+        const auto& st = Statics::get();
+        const int walk = far.read(far.id, w.pos);
+        bc::vec2 from{-1, -1}, to{-1, -1};
+        if (walk > 0 && walk < unreachable && hopTravel(w, far.read, far.id, 0, &from, &to) + tune::dash_shortcut_gain <= walk) {
+            int cooldown = 1 << 20;
+            for (int slot = 0; slot < 2; ++slot)
+                if (w.abilities()[static_cast<std::size_t>(slot)].is_dash())
+                    cooldown = std::min(cooldown, static_cast<int>(w.abilities()[static_cast<std::size_t>(slot)].cooldown()));
+            if (dist(w.pos, to) <= 2 && st.dashLegal(w.pos, to)) {
+                if (const int slot = readyDash(w); slot >= 0 && dashTo(w, slot, to)) {
+                    trace().note("ditch shortcut");
+                    return true;
+                }
+            } else if (cooldown <= dist(w.pos, from)) {
+                bc::bitboard hop;
+                hop.clear();
+                hop.set(from);
+                if (!blockedNow.is_set(from) && stepToward(w, hop, false, avoid, from, FarField{})) {
+                    trace().note("to the ditch shortcut");
+                    return true;
+                }
+            }
+        }
+    }
     // Set paths: far from the goal, walk the precomputed field (built now if it is missing). Its
     // step never enters a bush zone; with no step around one, the search below decides.
     if (tune::set_paths && far.read && aim.x >= 0 && dist(w.pos, aim) > tune::field_walk_tiles) {

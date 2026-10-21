@@ -44,6 +44,39 @@ float gemValue(const World& w) {
     return (1.0f + tune::catchup_max_boost * std::min(deficit / tune::catchup_full_deficit, 1.0f)) / tune::gem_scale;
 }
 
+// ---- camp density (user): a camp with rich camps close around it is worth more than its own
+// reward, since the next camp is a short walk away. Per group, once a game: the value of the other
+// farmable groups within camp_density_radius of its centre, against the mean group's value.
+float densityFactor(int groupId) {
+    static std::vector<float> table;
+    if (tune::camp_density_weight <= 0) return 1.0f;
+    const auto& st = Statics::get();
+    if (table.empty()) {
+        const auto n = st.groups.size();
+        table.assign(n, 1.0f);
+        std::vector<float> value(n, 0.0f);
+        float total = 0;
+        int farmable = 0;
+        for (const auto& g : st.groups) {
+            if (g.hasMonolith || (g.gems == 0 && g.gold == 0)) continue;
+            value[static_cast<std::size_t>(g.id)] = static_cast<float>(g.gems) / tune::gem_scale +
+                                                    tune::route_lambda / tune::gold_scale * static_cast<float>(g.gold);
+            total += value[static_cast<std::size_t>(g.id)];
+            ++farmable;
+        }
+        const float mean = farmable > 0 ? total / static_cast<float>(farmable) : 1.0f;
+        for (const auto& g : st.groups) {
+            if (value[static_cast<std::size_t>(g.id)] <= 0) continue;
+            float near = 0;
+            for (const auto& h : st.groups)
+                if (h.id != g.id && value[static_cast<std::size_t>(h.id)] > 0 && dist(g.center, h.center) <= tune::camp_density_radius)
+                    near += value[static_cast<std::size_t>(h.id)];
+            table[static_cast<std::size_t>(g.id)] = 1.0f + tune::camp_density_weight * std::min(near / std::max(mean, 1.0f), tune::camp_density_cap);
+        }
+    }
+    return groupId >= 0 && groupId < static_cast<int>(table.size()) ? table[static_cast<std::size_t>(groupId)] : 1.0f;
+}
+
 // ---- the middle of the map
 // On maps with a busy centre (see centreIsBusy), camps toward the geometric centre are worth more than their own reward: the middle is where
 // rotations are short and the map is contested. The bonus scales with the camp's radius from the
@@ -909,6 +942,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     if (w.chainFrom >= 0 && w.chainFrom != g.id && w.round - w.chainRound <= tune::chain_rounds &&
         mapplan::isNeighbour(w.chainFrom, g.id))
         o.mul("next to the last camp", tune::chain_bonus);
+    if (const float dens = densityFactor(g.id); dens != 1.0f) o.mul("camps nearby", dens);
     // combatBotv3: the team opening is on: everyone goes there first.
     if (mapplan::read().teamOpening && !opening && mapplan::read().openingCamp >= 0 && mapplan::openingActive(w))
         o.mul("team opening elsewhere", tune::team_opening_other_factor);
@@ -1024,7 +1058,7 @@ void farm(World& w, std::vector<Option>& out) {
     int n = 0;
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
-                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::lane_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) * std::max(1.0f, tune::spell_clear_quiet_bonus) *
+                                tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::lane_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (1.0f + std::max(0.0f, tune::camp_density_weight) * tune::camp_density_cap) * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) * std::max(1.0f, tune::spell_clear_quiet_bonus) *
                                 (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);
@@ -1110,6 +1144,12 @@ void farm(World& w, std::vector<Option>& out) {
                     c.nearest = t;
                 }
             }
+        }
+        // Dash pathing (user): a dasher can take a hop over a ditch (walk + one dash + the camp's
+        // field), however far round the walk goes; the navigator takes the same hop (stepToward).
+        if (tune::dash_shortcuts && w.kit.dashRange >= 2.0f && !c.dash) {
+            const int viaHop = Navigator::hopTravel(w, &fields::toGroup, g.id, reach);
+            if (viaHop + tune::dash_shortcut_gain <= travel) travel = viaHop;
         }
         // Beyond the BFS radius: estimate from straight-line distance (walls add ~25%).
         if (travel >= Navigator::unreachable) travel = static_cast<int>(static_cast<float>(c.travel) * 1.25f) + 4;

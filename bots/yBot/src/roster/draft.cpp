@@ -185,7 +185,10 @@ void play_draft() {
         const auto& st = Statics::get();
         const bool farSpawns = tune::far_spawn_farmer_dist > 0 && teamSize <= 3 && dist(st.spawnCenter, st.enemySpawnCenter) >= tune::far_spawn_farmer_dist;
         if (farSpawns) planText += "far spawns, 3 picks: farmer comp; ";
-        const auto& baseOrder = goldMap ? goldOrder : farSpawns ? farOrder : standardOrder;
+        // The top ten's comp after the week-2 patch (50 challenge games: Heart of Ruin in 48, Ren and
+        // Stellar 44, Ryth 37, Marcella 16; Cassi & Issac 8) replaces the standard and far comps.
+        static const std::vector<D> topOrder{kHeartOfRuinDraft, D::ren, D::stellar, D::ryth, D::marcella};
+        const auto& baseOrder = goldMap ? goldOrder : tune::top_team_comp ? topOrder : farSpawns ? farOrder : standardOrder;
         // Ditches and walls between camps: Heart of Ruin's 2-tile dash crosses them, so it takes
         // Varg's place in whichever comp this is (user, new map rotation).
         const float separatedShare = mapplan::analysed() ? mapplan::features().separatedShare : 0.0f;

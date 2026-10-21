@@ -411,6 +411,8 @@ void Bot::play_turn() {
     fuel::mark("flush");
     // Spare fuel at the end of the turn builds the static distance fields scoring reads.
     if (!fuel::split()) fields::step(tune::fuel_reserve_fields);
+    // Dash pathing: the hop list, a slice of the map per turn from what fuel is left.
+    if (tune::dash_shortcuts && w.kit.dashRange >= 2.0f && !fuel::split()) Statics::get().buildHops(tune::fuel_reserve_fields);
     fuel::mark("fields");
     // Kept after everything, so a turn that overran shows its whole split next turn.
     fuel::keep();

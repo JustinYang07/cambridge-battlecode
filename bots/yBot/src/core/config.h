@@ -174,7 +174,7 @@ inline constexpr int shop_trip_wait = 80;            // ...or to complete an emb
 inline constexpr int altar_lock_every = 4;            // yBot: bank scoring re-reads an altar's lock this often
 inline constexpr bool cast_first = true;
 inline constexpr bool free_cast = false;             // yBot: cast movement-forfeiting spells at enemies on turns we did not move             // yBot: fights cast a ready movement-forfeiting spell that can hit before stepping
-inline constexpr float bank_target_scale = 1.5f;     // yBot: x every role's bank target (Fish tributes bigger bags)
+inline constexpr float bank_target_scale = 3.0f;     // yBot: x every role's bank target (top ten tribute ~53-gem bags, we did ~24; cambc 3.0.4 h2h with density 0.15: 43/70, +53 gems/game; alone 38/70)
 inline constexpr float heal_first_min_missing = 0.6f; // yBot: 0.9 -> 0.6 // yBot: "heal first" only below this health
 inline constexpr float heal_first_factor = 0.5f;    // a camp that needs a trip home first
 inline constexpr bool shop_trips = true;            // trips home to spend gold once we can afford shards (A/B switch)
@@ -201,7 +201,10 @@ inline constexpr int shop_enemy_radius = 10;         // ...an enemy this close
 inline constexpr int shop_alert_radius = 12;         // ...or an ally's enemy alert this close
 inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose distance field does not reach us
 // Gems-only mode (behind on banked gems in the mid game): gold-only camps score gems_only_factor.
-inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (dash over a hole in, and out)
+inline constexpr bool dash_shortcuts = false;  // h2h: straight-line version 32/70 -26; hop list version 19/70 -201 (off)  // dashers walk to a ditch and dash across when the walk round is dash_shortcut_gain+ longer (scoring and movement)
+inline constexpr int dash_shortcut_gain = 4;
+inline constexpr int dash_hop_radius = 10;          // ...hops whose take-off tile is this close (Statics::hops)
+inline constexpr bool dash_pockets = true;   // dashers farm sealed groups (dash over a hole in, and out)
 inline constexpr bool dash_always = true;          // xBot: walks dash whenever a dash gets us 2+ tiles nearer (not saved for escape or a pocket)
 inline constexpr int dash_exit_turns = 2;     // dash out of a pocket, beyond the walk back to the landing tile
 inline constexpr int still_hold_turns = 80;   // ...holding for a party (a gem rally may be on its way)
@@ -562,6 +565,7 @@ inline constexpr int ranged_front_slack = 1;      // ...and we may stand this ma
 // least this far apart, draft Varg (farmer) in Ren's place (expanse live: 0-28; the teams that
 // beat us without a single death drafted Cassi & Issac, Stellar, Varg). 0: off.
 inline constexpr int far_spawn_farmer_dist = 50;
+inline constexpr bool top_team_comp = false;  // h2h vs our comp: 24/70, -157 gems/game, but deaths 7.5 vs 10.6 (off until builds/tuning fit it)  // draft Heart of Ruin, Ren, Stellar, Ryth, Marcella (the top ten's comp) on all but gold maps
 // Maps cut up by ditches and walls: Heart of Ruin (2-tile dash) is drafted in Varg's place.
 inline constexpr bool separated_heart = true;
 inline constexpr float separated_draft_share = 0.4f;  // ...at least this share of our-side camps separated (mapplan Features)
@@ -632,6 +636,11 @@ inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywh
 // Chaining camps: after a camp we worked dies, its nearest camps (mapplan::kNeighbours, by walking
 // distance from the draft) are worth more for a while.
 inline constexpr float chain_bonus = 1.5f;
+// Camp density (user): farm score x (1 + weight x min(value of other camps within the radius /
+// the mean camp's value, cap)). Computed once a game (brain/farm.cpp densityFactor). 0: off.
+inline constexpr float camp_density_weight = 0.15f;  // h2h alone: 38/70 +7; 0.3: 34/70 -45
+inline constexpr int camp_density_radius = 8;
+inline constexpr float camp_density_cap = 3.0f;
 inline constexpr int chain_rounds = 30;              // how long the bonus lasts
 inline constexpr bool capture_handoff = true;        // one party member captures, the rest move on
 inline constexpr float handoff_factor = 0.1f;        // capture score when a teammate claiming it is nearer its tiles
