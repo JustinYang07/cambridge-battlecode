@@ -69,7 +69,11 @@ void World::refresh(bool firstTurn) {
     alive = me.is_alive();
     gold = static_cast<int>(me.gold_count());
     teamGems = static_cast<int>(bc::global_submitted_gems(bc::team::ally));
-    enemyGems = static_cast<int>(bc::global_submitted_gems(bc::team::enemy));
+    {
+        const int before = enemyGems;
+        enemyGems = static_cast<int>(bc::global_submitted_gems(bc::team::enemy));
+        if (enemyGems > before) enemyBankRound = round;
+    }
     enemies.clear();
     allies.clear();
     camps.clear();

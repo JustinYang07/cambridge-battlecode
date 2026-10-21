@@ -104,6 +104,7 @@ public:
     int gems = 0, gold = 0, range = 1;
     bool alive = false, atSpawn = false;
     int teamGems = 0, enemyGems = 0;
+    int enemyBankRound = -1000;  // last round the enemy's submitted gems went up (an altar is open)
     // Enemy deaths are visible out of vision (champion::is_alive). Bodies: Cassi & Issac are two.
     int enemyBodies = 0, enemiesAlive = 0;
     int alliesAlive = 0;           // our bodies alive (us included), checked on the same cadence
@@ -171,6 +172,7 @@ public:
     bool hasTributed = false;      // we have banked at least once this game (opening shop rule)
     int prevGems = 0;
     cambc::vec2 lastAttacked{-1, -1};  // camp we hit last turn: keep hitting it until it dies
+    int hitRound = -1;                 // last round a basic attack or spell of ours landed (stuck watchdog)
     // Recent decisions (kind, target; newest first) for hysteresis and flip detection.
     std::array<std::pair<int, std::string>, 4> history{};
     std::pair<int, std::string> lock{-1, ""};
@@ -238,7 +240,7 @@ public:
     cambc::vec2 allyPosCached(int slot) const;
     // An ally's carried gems by draft slot (-1 when unknown or dead).
     int allyGems(int slot) const;
-    void spentAbility(int slot) { ready_[slot] = 0; }
+    void spentAbility(int slot) { ready_[slot] = 0; hitRound = round; }
     // Lab fight data (traced builds only): features of this turn's best-scored fight option, and
     // the exploration state (a share of contacts do the opposite of the scorer for a while).
     struct FightFeat {

@@ -179,7 +179,9 @@ void Bot::play_turn() {
         // Not stuck while there is something to hit, or while banking or healing.
         bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal) ||
                     w.spellClearRound >= w.round - 1;  // casting at a camp from range, waiting on the cooldown
-        for (const auto& c : w.camps) busy = busy || (c.hp > 0 && dist(c.pos, w.pos) <= w.range);
+        // A camp in reach counts only while we are hitting it (yellow brick road vs Fish: all five stood
+        // beside a respawned camp by our spawn from round 300 to 1100 without a hit, never "stuck").
+        for (const auto& c : w.camps) busy = busy || (c.hp > 0 && dist(c.pos, w.pos) <= w.range && (!tune::stuck_needs_hits || w.hitRound >= w.round - 2));
         for (const auto& e : w.enemies) busy = busy || (e.hp > 0 && dist(e.pos, w.pos) <= w.range + 1);
         if (!busy && w.pos.x == w.stillPos.x && w.pos.y == w.stillPos.y) {
             if (++w.stillTurns >= (w.waitingTurns > 0 ? tune::still_hold_turns : tune::still_turns)) {

@@ -1098,8 +1098,12 @@ bool captureHold(const World& w) {
 
 bool altarsBlocked(const World& w) {
     for (const int id : Statics::get().altarBlockers) {
-        const auto st = w.groups[static_cast<std::size_t>(id)].status;
-        if (st == GroupStatus::alive || st == GroupStatus::unknown) return true;
+        const auto& mem = w.groups[static_cast<std::size_t>(id)];
+        if (mem.status != GroupStatus::alive && mem.status != GroupStatus::unknown) continue;
+        // Out of sight, the enemy banking says it is down (boss-battle vs Fish: they opened the altar
+        // at ~r1200 and banked 1,189 while we carried 3,146 gems and submitted none).
+        if (!mem.visibleNow && w.round - w.enemyBankRound <= tune::enemy_bank_opens_rounds) continue;
+        return true;
     }
     return false;
 }
