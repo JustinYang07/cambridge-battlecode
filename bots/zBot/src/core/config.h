@@ -320,6 +320,7 @@ inline constexpr bool fight_explore_even = false;   // lab data mode: always fig
 inline constexpr int fight_commit_rounds = 0;       // 0: off
 inline constexpr float commit_break_hp = 0.25f;
 inline constexpr bool flee_no_attack = false;
+inline constexpr bool free_hits = true;             // hit any enemy champion in reach (ranged: not while retreating)
 // 2. team call: allies within team_call_radius claiming a fight or a retreat vote; we follow the majority.
 inline constexpr bool team_fight_call = false;
 inline constexpr int team_call_radius = 6;

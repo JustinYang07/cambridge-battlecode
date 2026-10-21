@@ -75,7 +75,11 @@ EnemySeen* enemyInRange(World& w, int range, const Focus& focus) {
         const bool fighting = focus.enemy || focus.anyEnemy || allyFocus;
         // combatBotv3: one we can finish now (target_mode 1), or the weakest (2), comes first.
         const bool finish = tune::target_mode == 1 && fighting && e.hp <= tune::finish_hits * std::max(w.strength, 1.0f);
-        const bool wanted = chosen || allyFocus || focus.anyEnemy || finish || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling;
+        // Free hits: an enemy champion in reach is worth the attack whatever we are doing (with an enemy
+        // within 4, Fish and Nyx hit a champion on 26% of turns, we on 14%; we mostly walked past).
+        // Melee walks and attacks in one turn; ranged share the allowance, so not while retreating.
+        const bool freeHit = tune::free_hits && (!w.ranged || !focus.noCamps);
+        const bool wanted = chosen || allyFocus || focus.anyEnemy || finish || (focus.defend && dist(e.pos, w.pos) <= e.range) || e.channeling || freeHit;
         if (!wanted) continue;
         const int rank = tune::target_mode == 2 && fighting ? 0 : finish ? 3 : chosen ? 2 : allyFocus ? 1 : 0;
         if (rank > bestRank || (rank == bestRank && e.hp < best->hp)) {
