@@ -1212,7 +1212,15 @@ void execute(World& w, const Option& o) {
     const bool farming = o.kind == OptionKind::farm || o.kind == OptionKind::capture;
     if (o.kind == OptionKind::fight) comms::claimEnemy(w.slot, o.target);
     else if (o.kind == OptionKind::wait && o.target == 2) comms::claimRegroup(w.slot);
-    else if (farming) comms::claimGroup(w.slot, o.target, dist(w.pos, statics.groups[static_cast<std::size_t>(o.target)].center));
+    else if (farming) {
+        // Distance to the group's nearest tile, not its centre: on a big camp the party's waiting
+        // ring is 10+ tiles from the centre, so nobody there counted as near and the party never
+        // formed (stampede: the whole team stood on the ring from round 60 to 1,950).
+        const auto& g = statics.groups[static_cast<std::size_t>(o.target)];
+        int d = dist(w.pos, g.center);
+        for (const auto t : g.tiles) d = std::min(d, dist(w.pos, t));
+        comms::claimGroup(w.slot, o.target, d);
+    }
     else if (o.kind == OptionKind::flee && (tune::retreat_follow || tune::retreat_hold || tune::ranged_follow_front || tune::team_fight_call)) comms::claimRetreat(w.slot);
     else comms::clear(w.slot);
 
