@@ -207,7 +207,13 @@ void play_draft() {
             std::replace(heartOrder.begin(), heartOrder.end(), D::varg, kHeartOfRuinDraft);
             planText += "Heart of Ruin for Varg; ";
         }
-        const auto& fixedOrder = heart ? heartOrder : baseOrder;
+        // Marcella (stun-immune, 1,200 health) in Cassi & Issac's place (user): against Fish and Nyx
+        // 83 of our 307 deaths were the pair's partner dying with the one killed.
+        if (tune::marcella_for_pair) {
+            std::replace(heartOrder.begin(), heartOrder.end(), D::cassi_and_issac, D::marcella);
+            planText += "Marcella for Cassi & Issac; ";
+        }
+        const auto& fixedOrder = heart || tune::marcella_for_pair ? heartOrder : baseOrder;
         if (tune::fixed_draft) {
             for (auto d : fixedOrder)
                 if (!taken(d)) { fallback = d; break; }

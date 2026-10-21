@@ -123,8 +123,12 @@ std::vector<Step> plan(bc::champion_type type) {
             case T::varg:    add(F::power, Stat::strength); add(F::home, Stat::health); add(F::durability, Stat::health); last = Stat::strength; break;
             case T::tavi:    add(F::treasure, Stat::focus); add(F::durability, Stat::focus); add(F::power, Stat::focus); last = Stat::focus; break;
             case T::prism:   add(F::power, Stat::focus); last = Stat::focus; break;
+            // Marcella: the top teams' most common order (ladder replays, 26 games).
+            case T::marcella: add(F::jungle, Stat::strength); add(F::durability, Stat::health); add(F::monster, Stat::strength); last = Stat::strength; break;
             default: break;
             }
+            // Heart of Ruin: Fish's order in 126 of 135 games.
+            if (type == kHeartOfRuinType) { add(F::treasure, Stat::focus); add(F::power, Stat::focus); add(F::home, Stat::health); last = Stat::focus; }
             if (!s.empty()) {
                 for (int i = 0; i < 12; ++i) add(F::power, last);
                 return s;

@@ -2,6 +2,7 @@
 // are the reward, time-to-kill (plus the walk) is the cost.
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cmath>
 #include "../combat/combat.h"
 #include "../core/comms.h"
@@ -139,6 +140,20 @@ void fight(World& w, std::vector<Option>& out) {
         o.c.target << 'e' << static_cast<int>(static_cast<cambc::handle_champion_t>(e.handle));
         o.add("their bag", static_cast<float>(e.gems) / tune::gem_scale);
         o.add("kill gold", tune::kill_gold_value * goldValue(w));
+        // Cassi & Issac die together: either body is a double kill (a third of our own deaths
+        // against Fish and Nyx were the partner going down with the one killed).
+        if (tune::linked_pair_bonus > 0 && e.index >= 0 && e.index < 16) {
+            static std::array<std::int8_t, 16> type{};  // 0 unread, 1 linked pair, 2 other
+            auto& t = type[static_cast<std::size_t>(e.index)];
+            if (t == 0) {
+                try {
+                    const auto k = e.handle.champion_name();
+                    t = k == bc::champion_type::cassi || k == bc::champion_type::issac ? 1 : 2;
+                } catch (const bc::error&) {
+                }
+            }
+            if (t == 1) o.add("linked pair: two kills", tune::linked_pair_bonus * (tune::kill_gold_value * goldValue(w) + tune::kill_denial_value));
+        }
         // Standing on a cleared camp's spawn tiles, it blocks our capture: killing it frees the reward.
         for (int k = 0; k < nCleared; ++k) {
             const auto& g = *cleared[static_cast<std::size_t>(k)];
