@@ -736,6 +736,22 @@ Option scoreGroup(World& w, const Candidate& c) {
         const bool gemRally = tune::gem_rally_bonus != 1.0f && g.gems > 0 && claims > 0 && need > 1;
         bool tooStrong = fight.damage > budget;
         if (tooStrong && gemRally) tooStrong = combat::campFight(w, g, left, tune::max_team_per_camp, share, mates).damage > budget;
+        // Tank check (user): every camp that can hit the fight, against the party's tank. Not enough
+        // with the party we planned: one more body each time (up to the camp cap and who is alive);
+        // no party size works: too strong, whatever the per-champion budget said.
+        if (tune::tank_check && !g.harmless && !tooStrong && !engaged && !combat::tankSurvives(w, g, left, k, mates)) {
+            int kk = k;
+            const int most = std::min(tune::max_team_per_camp, std::max(w.alliesAlive, 1));
+            while (kk < most && !combat::tankSurvives(w, g, left, kk + 1, mates)) ++kk;
+            if (kk < most) {
+                need = std::max(need, kk + 1);
+                o.need = need;
+                o.c.note << "tank needs " << (kk + 1) << "; ";
+            } else {
+                tooStrong = true;
+                o.c.note << "tank would die; ";
+            }
+        }
         if (gemRally && !tooStrong) o.mul("rally: ally holds gems", tune::gem_rally_bonus);
         // combatBotv2: partial tank. Leading the pull we need not survive the whole fight: we take
         // the hits until our retreat point and leave, and the allies with us finish it (Fish on rows:
@@ -803,7 +819,13 @@ Option scoreGroup(World& w, const Candidate& c) {
             o.nnOk = false;
             o.mul("would not survive", 0.02f);
         }
-        if (tooStrong) {
+        if (tooStrong && g.hasMonolith && tune::monolith_needs_win) {
+            // A Monolith group we cannot take is not an option at all: its 256 gems kept it on top even
+            // at x0.05, and parties held its edge for 80 rounds waiting for bodies that could never be
+            // enough (monolith vs patisserie: all five at one Monolith r1000-1113, Vesper and Varg at
+            // the other r1155-1231 beside two sleeping wolves).
+            o.nnOk = false; o.mul("monolith out of reach", 0.0f);
+        } else if (tooStrong) {
             o.nnOk = false; o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
         } else if (!partialTank && !rush && fight.damage + reserve + escapeCost > w.hp) {

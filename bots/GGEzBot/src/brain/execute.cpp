@@ -136,7 +136,39 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
         w.waitingTurns = 0;
         return false;
     }
+    // Travel together (user): a teammate claiming this camp is still on its way: walk with them so
+    // we arrive as a party, instead of going ahead to stand at the camp's edge. Only while they are
+    // clearly behind us and near enough to meet; this is travel, not waiting.
+    if (tune::party_travel && !syncing) {
+        bc::vec2 mate{-1, -1};
+        int mateGap = 1 << 20;
+        const int ours = dist(w.pos, g.center);
+        for (int s = 0; s < comms::alert_byte && s < w.allyCount; ++s) {
+            if (s == w.slot || comms::claimOf(s) != g.id) continue;
+            const auto p = w.allyPosCached(s);
+            if (p.x < 0) continue;
+            const int behind = dist(p, g.center) - ours;
+            const int gap = dist(p, w.pos);
+            if (behind >= tune::party_travel_gap && gap <= tune::party_travel_radius && gap < mateGap) { mateGap = gap; mate = p; }
+        }
+        if (mate.x >= 0 && nav().stepToward(w, mate, 2, true, &w.danger)) {
+            w.waitingTurns = 0;
+            trace().note("travelling with a teammate to the camp");
+            return true;
+        }
+    }
     ++w.waitingTurns;
+    // Waits are short (user: at most party_wait_cap rounds): nobody is coming, so drop this camp for a
+    // while and take something else rather than stand at it (monolith vs patisserie: all five held the
+    // Monolith's edge ~110 rounds; the 80-turn stuck valve was the only way out).
+    if (tune::party_wait_cap > 0 && w.waitingTurns > tune::party_wait_cap && !g.blocksAltars) {
+        w.stuckGroup = g.id;
+        w.stuckUntil = w.round + tune::party_drop_rounds;
+        if (scorers::teamRushOn(w, g.id)) w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
+        w.waitingTurns = 0;
+        w.forceReplan = true;
+        trace().note("party not forming: dropping the camp");
+    }
     if (tune::rush_form_turns > 0 && w.waitingTurns > tune::rush_form_turns && scorers::teamRushOn(w, g.id) && !g.blocksAltars) {
         w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
         w.waitingTurns = 0;

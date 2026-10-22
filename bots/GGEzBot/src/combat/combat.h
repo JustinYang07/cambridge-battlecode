@@ -24,6 +24,9 @@ struct FightEstimate {
 // `mates`: allies (by slot bit) known to fight it with us; their own damage counts (combatBotv2),
 // and any party places beyond them count as copies of us.
 FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, int party, float share = -1.0f, unsigned mates = 0);
+// The party's tank (earliest-drafted member) outlasts every monster that can hit a fight at g: this
+// group and other live camps reaching beside it, killed hardest first at the party's damage (user).
+bool tankSurvives(const World& w, const GroupInfo& g, float healthLeft, int party, unsigned mates);
 float championDamagePerTurn(const World& w);
 // Effective health against Durability's 10% damage cut (tune::durability_ehp): ours from our own items,
 // anyone else's from the expected share owning the emblem by this round.

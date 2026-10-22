@@ -128,16 +128,16 @@ inline constexpr int enemy_bank_opens_rounds = 60;  // an unseen blocker counts 
 inline constexpr int blocker_rush_round = 150;
 inline constexpr int blocker_party = 3;               // ...starting once this many of us are there (the rest join a fight under way)
 inline constexpr int team_rush_stall_rounds = 12;
-inline constexpr int rush_form_turns = 25;         // a team rush whose party has not formed after this many turns of waiting is dropped...
+inline constexpr int rush_form_turns = 5;          // a team rush whose party has not formed after this many turns of waiting is dropped...
 inline constexpr int rush_retry_rounds = 150;      // ...for this many rounds (0 turns: never)
 inline constexpr int rush_backoff_rounds = 30;        // no team rush on a camp 2+ enemies were seen near this recently, unless we are ahead on bodies (0: off)
 inline constexpr int rush_backoff_radius = 8;         // ...within this of its tiles
 inline constexpr float rush_leave_hits = 2.5f;       // ...a champion the camp is hitting leaves with fewer than this many rounds of its hits left     // ...and the pull is dropped (everyone fights it) when the camp has taken no damage for this long (elk-arena: the whole team held 5 tiles off the elks all game)
 inline constexpr float team_rush_other_factor = 0.1f;  // ...other camps meanwhile
 inline constexpr float team_rush_bonus = 3.0f;     // ...and it is never "too strong" or "underpowered", x this
-inline constexpr int max_party_wait_claimed = 10;  // ...also when allies have claimed it (was 30: 100-turn holds)
+inline constexpr int max_party_wait_claimed = 5;   // ...also when allies have claimed it (was 30: 100-turn holds)
 inline constexpr int wait_farm_radius = 6;         // while waiting, farm gem/gold clusters this close to the camp
-inline constexpr int max_party_wait = 10;          // turns to wait for allies before giving up on a group         // largest party we plan around for one camp group
+inline constexpr int max_party_wait = 5;           // turns to wait for allies before giving up on a group         // largest party we plan around for one camp group
 inline constexpr float party_focus_share = 0.7f;    // in a party, share of monster hits we expect to absorb
 inline constexpr float escape_margin_turns = 1.5f;  // extra turns of incoming damage kept in reserve to walk away
 inline constexpr float respawn_wait_weight = 2.0f;  // turns spent waiting for a respawn count double (was 1)
@@ -230,7 +230,7 @@ inline constexpr float abandon_factor = 0.7f;  // walking away from a fight we s
 inline constexpr float safe_camp_bonus = 1.4f;      // gem/gold clusters: quick, free, no risk
 inline constexpr int safe_camp_radius = 12;
 inline constexpr float idle_wait_factor = 0.4f;     // standing over a camp that is still respawning (was 0.6)
-inline constexpr int idle_wait_turns = 8;
+inline constexpr int idle_wait_turns = 5;
 inline constexpr float nearest_camp_bonus = 1.4f;    // the nearest camp that is up now (no respawn wait)
 inline constexpr float underpowered_factor = 0.65f; // camps needing a party before we have any items
 inline constexpr int underpowered_shards = 5;
@@ -247,7 +247,7 @@ inline constexpr bool skip_field_unreachable = true;  // farm: skip groups whose
 inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (dash over a hole in, and out)
 inline constexpr bool dash_always = true;          // xBot: walks dash whenever a dash gets us 2+ tiles nearer (not saved for escape or a pocket)
 inline constexpr int dash_exit_turns = 2;     // dash out of a pocket, beyond the walk back to the landing tile
-inline constexpr int still_hold_turns = 80;   // ...holding for a party (a gem rally may be on its way)
+inline constexpr int still_hold_turns = 10;   // ...holding for a party (a gem rally may be on its way)
 inline constexpr int still_turns = 25;        // still this long while idle/holding: drop that camp and hunt
 inline constexpr bool stuck_needs_hits = true; // a camp in reach keeps us "busy" only while our hits land
 inline constexpr int stuck_cooloff = 120;     // the camp we were stuck on is avoided this long
@@ -267,7 +267,21 @@ inline constexpr float opening_gold_bonus = 1.0f;   // gold-only clusters in the
 inline constexpr float switch_hysteresis = 1.2f;    // last turn's decision gets this edge
 inline constexpr int flip_lock_turns = 6;           // after A,B,A,B commit to the newest choice this long
 inline constexpr float lock_emergency_hp = 0.3f;    // below this health a lock no longer binds
-inline constexpr int party_commit_turns = 8;        // once a party is ready, engage for at least this long
+inline constexpr int party_commit_turns = 8;
+// Parties travel together rather than wait (user): a teammate claiming the same camp and clearly
+// behind us is walked to (party_travel), and a hold for a party lasts at most party_wait_cap
+// rounds before the camp is dropped for party_drop_rounds (brain/execute.cpp waitForParty).
+inline constexpr bool party_travel = true;
+inline constexpr int party_travel_gap = 3;       // ...the teammate this many tiles further from the camp than us
+inline constexpr int party_travel_radius = 15;   // ...and this close to us
+inline constexpr int party_wait_cap = 5;
+inline constexpr int party_drop_rounds = 30;
+// Tank check (user): a camp fight is only taken when the party kills every monster that can hit the
+// fight (this group and any other live camp whose reach covers its edge) before their hits kill the
+// tank - the party's earliest-drafted champion, who takes them all (combat::tankSurvives).
+inline constexpr bool tank_check = true;
+inline constexpr bool monolith_needs_win = true;  // a Monolith group judged too strong scores 0, not x0.05 (brain/farm.cpp)
+inline constexpr float tank_hp_use = 0.85f;     // ...of the tank's current health        // once a party is ready, engage for at least this long
 // The champion whose arrival completes a party holds this many turns before engaging: the others
 // read its claim a turn later (stampede: Stellar saw four claims and went in alone, the four waiting
 // saw three and held; she died in 3 rounds, respawned and did it again all game, 0 gems).
@@ -776,7 +790,7 @@ inline constexpr int centre_bush_detour_gems = 8;
 inline constexpr bool flee_homeward = true;         // fleeing: equally quick escapes go toward home; else walk home
 inline constexpr bool tank_opens = true;            // ranged hold fire on a sleeping camp until the tank is beside it...
 inline constexpr int tank_open_radius = 15;         // ...if a tank claiming it is this close to the camp...
-inline constexpr int tank_open_wait = 6;            // ...for at most this many turns
+inline constexpr int tank_open_wait = 5;            // ...for at most this many turns
 inline constexpr bool capture_by_health = true;
 inline constexpr float capture_home_hp = 0.5f;      // below this health a champion is heading home: it keeps the capture     // loopBot: the lowest-health member captures (then heals and shops)
 inline constexpr float regroup_squishy_factor = 2.0f;  // regroup pull for a squishy spotter

@@ -357,6 +357,77 @@ FightEstimate campFight(const World& w, const GroupInfo& g, float healthLeft, in
     return e;
 }
 
+// Tank check (user): we kept challenging elks we could not beat and bled health. Every monster that
+// can hit the fight counts - this group's live members and those of any other live camp whose reach
+// covers a tile beside it - and all their hits land on the tank, the party's earliest-drafted
+// champion (monsters hit the nearest, ties to the earliest draft slot). The party kills them hardest
+// hitter first at its real damage per turn; the fight is on only if the tank outlasts that.
+bool tankSurvives(const World& w, const GroupInfo& g, float healthLeft, int party, unsigned mates) {
+    const auto& st = Statics::get();
+    std::array<CampMember, 24> mon{};
+    int n = 0;
+    // This group, as campFight reads it (live when visible).
+    if (w.groups[static_cast<std::size_t>(g.id)].visibleNow) {
+        for (const auto& c : w.camps)
+            if (c.groupId == g.id && c.hp > 0 && c.strength > 0 && n < 24) mon[static_cast<std::size_t>(n++)] = {c.hp, c.strength};
+    } else {
+        float consumed = (1.0f - std::clamp(healthLeft, 0.0f, 1.0f)) * g.totalHealth;
+        for (const auto& m : g.killOrder) {
+            const float eaten = std::min(consumed, m.health);
+            consumed -= eaten;
+            if (m.strength > 0 && m.health - eaten > 0 && n < 24) mon[static_cast<std::size_t>(n++)] = {m.health - eaten, m.strength};
+        }
+    }
+    // Neighbouring camps whose monsters reach a tile beside this group.
+    for (const auto& h : st.groups) {
+        if (h.id == g.id || h.harmless || dist(h.center, g.center) > 14) continue;
+        const auto& mem = w.groups[static_cast<std::size_t>(h.id)];
+        if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) continue;
+        for (auto t : h.tiles) {
+            const auto* c = st.campAt(t);
+            if (!c || c->strength <= 0 || n >= 24) continue;
+            if (w.isVisible(t) && !w.campAt(t)) continue;  // seen dead
+            bool reaches = false;
+            for (auto u : g.tiles) reaches = reaches || dist(t, u) <= c->range + 1;
+            if (reaches) mon[static_cast<std::size_t>(n++)] = {c->health, c->strength};
+        }
+    }
+    if (n == 0) return true;
+    std::sort(mon.begin(), mon.begin() + n, [](const CampMember& a, const CampMember& b) {
+        return a.strength != b.strength ? a.strength > b.strength : a.health < b.health;
+    });
+    // The party's damage: ours, the claiming allies' own, copies of ours for the places beyond them.
+    const float mine = std::max(campDamagePerTurn(w, g), 1.0f);
+    float dps = mine;
+    int counted = 1;
+    int tankSlot = w.slot;
+    for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+        if (sl == w.slot || !((mates >> sl) & 1u)) continue;
+        if (counted < party)
+            if (const float d = w.allyCampDps(sl, g); d > 0) {
+                dps += d;
+                ++counted;
+            }
+        if (sl < tankSlot && w.allyHp(sl) > 0) tankSlot = sl;
+    }
+    dps += mine * static_cast<float>(std::max(party - counted, 0));
+    float tankHp = tankSlot == w.slot ? w.hp : w.allyHp(tankSlot);
+    if (tankHp <= 0) tankHp = w.hp;
+    float mitigation = 1.0f;
+    if (tankSlot == w.slot) {
+        if (shop::hasPassive(bc::item_passive::jungle)) mitigation *= 0.7f;
+        if (shop::hasPassive(bc::item_passive::durability)) mitigation *= 0.9f;
+    }
+    float strength = 0;
+    for (int i = 0; i < n; ++i) strength += mon[static_cast<std::size_t>(i)].strength;
+    float damage = 0;
+    for (int i = 0; i < n; ++i) {
+        damage += mon[static_cast<std::size_t>(i)].health / dps * strength * mitigation;
+        strength -= mon[static_cast<std::size_t>(i)].strength;
+    }
+    return damage < tune::tank_hp_use * tankHp;
+}
+
 float championDamagePerTurn(const World& w) {
     return w.strength * (1.0f + (w.kit.hasReset ? tune::reset_attack_bonus : 0.0f)) + w.kit.spellDps;
 }
