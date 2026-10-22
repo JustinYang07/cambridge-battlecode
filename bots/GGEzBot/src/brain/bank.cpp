@@ -102,6 +102,7 @@ void bank(World& w, std::vector<Option>& out) {
         const auto i = static_cast<std::size_t>(k);
         if (!w.mayInvade() && w.theirHalf(altars[i])) continue;  // no invading without a numbers lead
         if (w.invadeWithoutMelee(altars[i])) continue;           // nor, ranged, without our melee there
+        if (k < 16 && w.round < w.altarAvoidUntil[static_cast<std::size_t>(k)]) continue;  // fix 4: held there too long
         const bool locked = enemyLock(w, k);
         if (locked && !tune::break_altar_locks) continue;
         // GGEzBot: an awake camp covering the altar hits us through the whole tribute (corners: the

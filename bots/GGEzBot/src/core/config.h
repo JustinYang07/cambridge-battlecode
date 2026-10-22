@@ -248,7 +248,7 @@ inline constexpr bool dash_pockets = true;    // dashers farm sealed groups (das
 inline constexpr bool dash_always = true;          // xBot: walks dash whenever a dash gets us 2+ tiles nearer (not saved for escape or a pocket)
 inline constexpr int dash_exit_turns = 2;     // dash out of a pocket, beyond the walk back to the landing tile
 inline constexpr int still_hold_turns = 10;   // ...holding for a party (a gem rally may be on its way)
-inline constexpr int still_turns = 25;        // still this long while idle/holding: drop that camp and hunt
+inline constexpr int still_turns = 8;         // still this long while idle/holding: drop that camp and hunt
 inline constexpr bool stuck_needs_hits = true; // a camp in reach keeps us "busy" only while our hits land
 inline constexpr int stuck_cooloff = 120;     // the camp we were stuck on is avoided this long
 inline constexpr int hunt_turns = 60;         // then go after enemies (last seen, else their spawn) this long
@@ -276,6 +276,13 @@ inline constexpr int party_travel_gap = 3;       // ...the teammate this many ti
 inline constexpr int party_travel_radius = 15;   // ...and this close to us
 inline constexpr int party_wait_cap = 5;
 inline constexpr int party_drop_rounds = 30;
+// Stall fixes (user; traced reruns of the test games' 30+ round stalls):
+inline constexpr int capture_timeout = 4;          // 1: a capture still not done this many rounds past capture_turns: group not cleared, leave it...
+inline constexpr int capture_drop_rounds = 60;     // ...for this many rounds
+inline constexpr int respawn_wait_max = 10;        // 2: a respawning camp scores only when back within this many rounds of our arrival (was 60)
+inline constexpr int bank_hold_cap = 5;            // 4: rounds holding at an unsafe altar before trying another altar or a recall...
+inline constexpr int altar_avoid_rounds = 30;      // ...that altar avoided this long
+inline constexpr float party_hold_block_factor = 0.05f;  // 5: right after a dropped hold, a camp that would need another hold scores x this
 // Tank check (user): a camp fight is only taken when the party kills every monster that can hit the
 // fight (this group and any other live camp whose reach covers its edge) before their hits kill the
 // tank - the party's earliest-drafted champion, who takes them all (combat::tankSurvives).

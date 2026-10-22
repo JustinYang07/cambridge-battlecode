@@ -171,6 +171,12 @@ public:
     int stuckGroup = -1, stuckUntil = -1, huntUntil = -1;
     bool hunting() const { return round < huntUntil; }
     int captureTurns = 0;          // consecutive turns standing on the current capture
+    // Stall fixes (user): an altar we could not tribute at is avoided until altarAvoidUntil; bankHoldTurns
+    // counts consecutive "unsafe to tribute: holding" turns; after a party hold is dropped, camps that
+    // would need another hold are discounted until partyHoldBlockUntil.
+    std::array<int, 16> altarAvoidUntil{};
+    int bankHoldTurns = 0;
+    int partyHoldBlockUntil = -1;
     bool hasTributed = false;      // we have banked at least once this game (opening shop rule)
     int prevGems = 0;
     cambc::vec2 lastAttacked{-1, -1};  // camp we hit last turn: keep hitting it until it dies

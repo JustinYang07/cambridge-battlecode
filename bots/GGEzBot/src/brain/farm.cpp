@@ -868,6 +868,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         }
         // Once a fight has started, waiting for help is no longer an option: finish or leave.
         awaiting = need > 1 + claims && !engaged && !rotating;
+        // Fix 5 (stalls): a hold was just dropped (no party came): a camp that would need another hold
+        // waits its turn; farm what we can take, or join a party already there (boss-battle: Marcella
+        // and Vesper chained 5-round holds on one camp after another from the same tile, 48-54 rounds).
+        if (awaiting && w.round < w.partyHoldBlockUntil) o.mul("just held for a party", tune::party_hold_block_factor);
         if (awaiting) {
             // GGEzBot: hurt, a hold beside a party camp is worth less than the trip home that the
             // wait would leave time for anyway (concentrated wealth: Vesper held at 44% health for
@@ -1253,7 +1257,7 @@ void farm(World& w, std::vector<Option>& out) {
         }
         cheb = std::max(0, cheb - reach);
         const int wait = mem.status == GroupStatus::respawning ? std::max(0, mem.respawnAt - w.round - cheb) : 0;
-        if (wait > 60) continue;  // too far in the future to plan around
+        if (wait > tune::respawn_wait_max) continue;  // fix 2 (stalls): standing over a respawn is waiting (was 60)
         float reward = static_cast<float>(g.gems) * gemV + static_cast<float>(g.gold) * gv;
         // Keep the bound honest for the opening-gold bonus (applied per group, not to all).
         if (g.gems == 0 && g.gold > 0 && w.round < tune::opening_rounds) reward *= tune::opening_gold_bonus * 1.3f;

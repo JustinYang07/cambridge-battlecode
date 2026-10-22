@@ -164,6 +164,7 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     if (tune::party_wait_cap > 0 && w.waitingTurns > tune::party_wait_cap && !g.blocksAltars) {
         w.stuckGroup = g.id;
         w.stuckUntil = w.round + tune::party_drop_rounds;
+        w.partyHoldBlockUntil = w.round + tune::party_drop_rounds;  // fix 5: no chain of holds on other camps
         if (scorers::teamRushOn(w, g.id)) w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
         w.waitingTurns = 0;
         w.forceReplan = true;
@@ -481,6 +482,18 @@ void capture(World& w, const GroupInfo& g) {
         // a tribute timed to finish just as the capture does, and the reward is banked with it.
         if (w.lastTarget == g.id && w.lastOption == static_cast<int>(OptionKind::capture)) ++w.captureTurns;
         else w.captureTurns = 1;
+        // Fix 1 (stalls): a capture that never completes means the group is not really cleared (a
+        // 30-tile gold row on yellow brick road: members out of sight still alive, the whole team
+        // stood on its tiles 178 rounds). Back to alive, and leave it alone for a while.
+        if (tune::capture_timeout > 0 && w.captureTurns > static_cast<int>(tune::capture_turns) + tune::capture_timeout) {
+            auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+            mem.status = GroupStatus::alive;
+            w.stuckGroup = g.id;
+            w.stuckUntil = w.round + tune::capture_drop_rounds;
+            w.captureTurns = 0;
+            w.forceReplan = true;
+            trace().note("capture not completing: group not cleared, leaving it");
+        }
         // combatBotv2 (as Fish): the keeper recalls from the tile a round before the capture
         // completes. The reward lands during the 5-turn channel, so it is on its way home (spawn,
         // shop, the altar by spawn) instead of walking the bag over. Only when banking via spawn is
@@ -672,6 +685,15 @@ void bank(World& w, int altarIdx) {
         combat::act(w, combat::Focus{.awakeCampsOnly = true}, false);
         trace().note("altar under a camp: waiting outside its reach");
         return;
+    }
+    // Fix 4 (stalls): holding at an unsafe altar is short (the_farm: Vesper held 155 rounds with 22
+    // gems). After bank_hold_cap rounds the altar is avoided for a while: another altar, or recall.
+    w.bankHoldTurns = unsafe ? w.bankHoldTurns + 1 : 0;
+    if (unsafe && tune::bank_hold_cap > 0 && w.bankHoldTurns > tune::bank_hold_cap && altarIdx >= 0 && altarIdx < 16) {
+        w.altarAvoidUntil[static_cast<std::size_t>(altarIdx)] = w.round + tune::altar_avoid_rounds;
+        w.bankHoldTurns = 0;
+        w.forceReplan = true;
+        trace().note("unsafe altar too long: trying elsewhere");
     }
     if (unsafe) {
         // Keep our distance instead of walking up and backing off every other turn.
