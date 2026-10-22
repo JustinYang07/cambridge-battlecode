@@ -175,6 +175,7 @@ public:
     // counts consecutive "unsafe to tribute: holding" turns; after a party hold is dropped, camps that
     // would need another hold are discounted until partyHoldBlockUntil.
     std::array<int, 16> altarAvoidUntil{};
+    std::vector<int> groupAvoidUntil;  // per group: left alone until this round (a capture that never completed)
     int bankHoldTurns = 0;
     int partyHoldBlockUntil = -1;
     bool hasTributed = false;      // we have banked at least once this game (opening shop rule)

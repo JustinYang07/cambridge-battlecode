@@ -283,6 +283,9 @@ inline constexpr int respawn_wait_max = 10;        // 2: a respawning camp score
 inline constexpr int bank_hold_cap = 5;            // 4: rounds holding at an unsafe altar before trying another altar or a recall...
 inline constexpr int altar_avoid_rounds = 30;      // ...that altar avoided this long
 inline constexpr float party_hold_block_factor = 0.05f;  // 5: right after a dropped hold, a camp that would need another hold scores x this
+inline constexpr float party_converge_bonus = 3.0f;     // ...a party camp a teammate already claims scores x this instead
+inline constexpr bool stuck_bank_holds = true;          // standing still with the bank option counts as stuck (then no altar for altar_avoid_rounds)
+inline constexpr bool hunt_ends_on_arrival = true;      // a hunt with nowhere further to go ends (replan) instead of standing
 // Tank check (user): a camp fight is only taken when the party kills every monster that can hit the
 // fight (this group and any other live camp whose reach covers its edge) before their hits kill the
 // tank - the party's earliest-drafted champion, who takes them all (combat::tankSurvives).

@@ -178,7 +178,11 @@ void Bot::play_turn() {
     // for 1,700 rounds; stampede: one champion held an elk camp alone for 750).
     if (w.alive && !me.is_recalling() && !me.is_submitting_gems() && !me.is_teleporting()) {
         // Not stuck while there is something to hit, or while banking or healing.
-        bool busy = w.lastOption == static_cast<int>(OptionKind::bank) || w.lastOption == static_cast<int>(OptionKind::heal) ||
+        // Banking counts as busy only while it moves: standing still with the bank option is a hold
+        // (the_farm: Vesper held between two contested altars 115 rounds, never "stuck"). A tribute
+        // channel is already excluded above.
+        bool busy = (w.lastOption == static_cast<int>(OptionKind::bank) && !tune::stuck_bank_holds) ||
+                    w.lastOption == static_cast<int>(OptionKind::heal) ||
                     w.spellClearRound >= w.round - 1;  // casting at a camp from range, waiting on the cooldown
         // A camp in reach counts only while we are hitting it (yellow brick road vs Fish: all five stood
         // beside a respawned camp by our spawn from round 300 to 1100 without a hit, never "stuck").
@@ -188,6 +192,9 @@ void Bot::play_turn() {
             if (++w.stillTurns >= (w.waitingTurns > 0 ? tune::still_hold_turns : tune::still_turns)) {
                 if (w.lastOption == static_cast<int>(OptionKind::farm) || w.lastOption == static_cast<int>(OptionKind::capture))
                     w.stuckGroup = w.lastTarget;
+                // Stuck holding a bag: no altar for a while; farm on with it (or bank once one clears).
+                if (w.lastOption == static_cast<int>(OptionKind::bank))
+                    for (auto& a : w.altarAvoidUntil) a = w.round + tune::altar_avoid_rounds;
                 w.stuckUntil = w.round + tune::stuck_cooloff;
                 w.huntUntil = w.round + tune::hunt_turns;
                 w.stillTurns = 0;

@@ -486,10 +486,11 @@ void capture(World& w, const GroupInfo& g) {
         // 30-tile gold row on yellow brick road: members out of sight still alive, the whole team
         // stood on its tiles 178 rounds). Back to alive, and leave it alone for a while.
         if (tune::capture_timeout > 0 && w.captureTurns > static_cast<int>(tune::capture_turns) + tune::capture_timeout) {
-            auto& mem = w.groups[static_cast<std::size_t>(g.id)];
-            mem.status = GroupStatus::alive;
-            w.stuckGroup = g.id;
-            w.stuckUntil = w.round + tune::capture_drop_rounds;
+            // The engine says the reward is there (the row is cleared); what stops the capture is the
+            // region being contested - the enemy on the far end of a row that spans the map. Its own
+            // avoid entry, so the stuck valve (one stuckGroup slot) cannot overwrite it.
+            if (w.groupAvoidUntil.size() < w.groups.size()) w.groupAvoidUntil.resize(w.groups.size(), -1);
+            w.groupAvoidUntil[static_cast<std::size_t>(g.id)] = w.round + tune::capture_drop_rounds;
             w.captureTurns = 0;
             w.forceReplan = true;
             trace().note("capture not completing: group not cleared, leaving it");
@@ -1539,7 +1540,15 @@ void execute(World& w, const Option& o) {
     case OptionKind::fight: fight(w, o); break;
     case OptionKind::wait:
         if (o.target == 2) nav().stepToward(w, o.at, tune::regroup_arrive - 1, true, &w.danger);  // regroup
-        else if (o.target == 3) nav().stepToward(w, o.at, 5, true);                             // hunt (their spawn is not walkable)
+        else if (o.target == 3) {                                                                // hunt (their spawn is not walkable)
+            // Arrived where the enemy was last seen and nobody is here (or no path): the hunt is over,
+            // think again next turn instead of standing (boss-battle: "hunt" with no action 30-80 rounds).
+            if (!nav().stepToward(w, o.at, 5, true) && tune::hunt_ends_on_arrival) {
+                w.huntUntil = w.round;
+                w.forceReplan = true;
+                trace().note("hunt: nothing here, rethinking");
+            }
+        }
         else if (!w.atSpawn) nav().stepToward(w, statics.allySpawn, false, nullptr, statics.spawnCenter, spawnPath());
         combat::act(w, combat::Focus{.noCamps = true}, false);
         break;

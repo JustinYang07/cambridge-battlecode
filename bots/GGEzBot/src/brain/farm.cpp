@@ -871,7 +871,12 @@ Option scoreGroup(World& w, const Candidate& c) {
         // Fix 5 (stalls): a hold was just dropped (no party came): a camp that would need another hold
         // waits its turn; farm what we can take, or join a party already there (boss-battle: Marcella
         // and Vesper chained 5-round holds on one camp after another from the same tile, 48-54 rounds).
-        if (awaiting && w.round < w.partyHoldBlockUntil) o.mul("just held for a party", tune::party_hold_block_factor);
+        if (awaiting && w.round < w.partyHoldBlockUntil) {
+            // A party camp a teammate already claims is the one to converge on (boss-battle: every
+            // camp needed a party and each champion held a different one); the rest wait their turn.
+            if (claims > 0) o.mul("join the forming party", tune::party_converge_bonus);
+            else o.mul("just held for a party", tune::party_hold_block_factor);
+        }
         if (awaiting) {
             // GGEzBot: hurt, a hold beside a party camp is worth less than the trip home that the
             // wait would leave time for anyway (concentrated wealth: Vesper held at 44% health for
@@ -1027,6 +1032,8 @@ Option scoreGroup(World& w, const Candidate& c) {
     else if (const int tc = teamCamp(w); tc >= 0 && g.id != tc) o.mul("team camp elsewhere", tune::team_rush_other_factor);
     else if (!g.blocksAltars && blockerRush(w)) o.mul("team opening the altar", tune::team_rush_other_factor);
     if (g.id == w.stuckGroup && w.round < w.stuckUntil) o.mul("stuck here before", 0.05f);
+    if (g.id < static_cast<int>(w.groupAvoidUntil.size()) && w.round < w.groupAvoidUntil[static_cast<std::size_t>(g.id)])
+        o.mul("capture never completed here", 0.02f);
     // Opening gold: items bought early speed up everything after; Vesper earns 20% more of it.
     if (g.gems == 0 && g.gold > 0 && w.round < tune::early_gold_skip_round && c.travel > 4 && mapplan::skipGoldOnly())
         o.mul("early: gems first", 0.05f);
