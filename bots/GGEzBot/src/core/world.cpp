@@ -383,6 +383,28 @@ void World::refresh(bool firstTurn) {
         if (c.groupId != lastGroup && d <= 14) danger |= statics.groups[static_cast<std::size_t>(c.groupId)].reach;
         lastGroup = c.groupId;
     }
+    // GGEzBot: hit by a monster we cannot see (a camp member in a bush, out of vision): no visible
+    // camp accounts for the damage and no enemy champion is in reach of us. Infer it from the static
+    // layout: every live damaging group whose reach covers our tile is awake and hitting us, so the
+    // escape, the heal and the recall clearance see it (corridors: Ryth recalled five turns running
+    // under a wolf at 3 tiles, 780 -> 300 hp, with incoming 0 and no camp in sight).
+    if (tune::unseen_monster_hits && alive && beingHit && incoming <= 0) {
+        bool champHitting = false;
+        for (const auto& e : enemies) champHitting = champHitting || (e.hp > 0 && dist(e.pos, pos) <= e.range + 2);
+        if (!champHitting)
+            for (const auto& g : statics.groups) {
+                if (g.harmless || !g.reach.is_set(pos)) continue;
+                auto& mem = groups[static_cast<std::size_t>(g.id)];
+                if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) continue;
+                mem.awakeRound = round;
+                danger |= g.reach;
+                float strength = 0;
+                for (auto t : g.tiles)
+                    if (const auto* tc = statics.campAt(t); tc && tc->strength > 0 && dist(t, pos) <= tc->range) strength = std::max(strength, tc->strength);
+                incoming += strength;
+                if (engagedGroup < 0) engagedGroup = g.id;
+            }
+    }
     // Stun-aware positioning: alone (no ally within stun_danger_ally_radius) against two or more, or
     // outnumbered by two by the enemies within 6 (alone against one it cost tempo: collision and
     // pilgrimage -400/-540 a game vs the live bot, +455/+380 without it), the tiles a recently seen enemy reaches next round are danger too: its stun

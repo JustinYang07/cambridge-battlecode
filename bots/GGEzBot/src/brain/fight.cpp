@@ -183,6 +183,29 @@ void fight(World& w, std::vector<Option>& out) {
         // the decision, so it is visibly considered and rejected.
         o.mul("win margin", std::clamp((edge - 1.0f) / (tune::fight_win_margin - 1.0f), 0.02f, 1.5f));
         if (ours.count == 1 && myTurnsToDie < turnsToKill) o.mul("die first", 0.3f);
+        // GGEzBot: the front takes the hits. The edge pools our side's health, but the enemies hit
+        // whoever is nearest: a melee in front with allies behind scored the fight as if the allies'
+        // health were hers (packs: Marcella fought a 1v3 from 1,100 to 250 hp while Vesper and Prism
+        // stood 6 tiles back). Nearest of our side to the target: the fight is worth it only as far
+        // as we outlast their side ourselves, not as far as the pool does.
+        if (tune::front_takes_hits && ours.count > 1) {
+            bool front = true;
+            for (int sl = 0; sl < w.allyCount && sl < 8 && front; ++sl) {
+                if (sl == w.slot) continue;
+                const auto p = w.allyPosCached(sl);
+                if (p.x >= 0 && (dist(p, e.pos) <= tune::fight_join_radius + 1 || dist(p, w.pos) <= tune::fight_beside_radius) && dist(p, e.pos) < dist(w.pos, e.pos)) front = false;
+            }
+            // Against their front (the target), not their whole side: measured against the pool
+            // nobody ever fronted a 3v3 and the trio walked while the enemy farmed (packs 312-1000).
+            if (front && myTurnsToDie < turnsToKill) {
+                o.mul("front takes the hits", std::clamp(myTurnsToDie / turnsToKill, 0.1f, 1.0f));
+                o.c.note << "front: die in " << static_cast<int>(myTurnsToDie) << " vs their front " << static_cast<int>(turnsToKill) << "; ";
+            }
+        }
+        if (tune::outnumbered_fight && theirCount > ours.count) {
+            const float ratio = static_cast<float>(ours.count) / static_cast<float>(theirCount);
+            o.mul("outnumbered", ratio * ratio * std::clamp(w.hpFrac() / tune::outnumbered_full_hp, 0.1f, 1.0f));
+        }
         // Mid to late game, a lost fight costs the bag we have built up: only take fights we are
         // likely to win (mode 0), or whose expected gain beats the expected loss (mode 1). Win chance from the edge, fitted on traced fights from round 300 (a win:
         // an enemy dies near the target before this champion does, within 15 rounds); it levels off

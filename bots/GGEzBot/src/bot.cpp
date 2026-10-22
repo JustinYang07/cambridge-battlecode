@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cambc.h>
 #include "brain/brain.h"
+#include "combat/combat.h"
 #include "strategy/cohesion.h"
 #include "strategy/loop.h"
 #include "strategy/wards.h"

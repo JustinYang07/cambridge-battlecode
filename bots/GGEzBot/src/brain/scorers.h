@@ -16,6 +16,8 @@ void regroupOption(World& w, std::vector<Option>& out);
 void hunt(World& w, std::vector<Option>& out);       // survive.cpp: after being stuck, go after enemies  // survive.cpp: join an ally who sees an enemy
 
 float goldValue(const World& w);
+// GGEzBot: damage per turn from awake camps whose reach covers the tiles beside this altar.
+float campFireAt(const World& w, cambc::vec2 at);
 float recallBankTurns(const World& w, int altarIdx);  // bank.cpp: recall-then-walk turns to this altar
 // Our factor for this group's capture (<1: a teammate keeps it), and a teammate stands on its tiles now.
 float captureShareOf(const World& w, int groupId);

@@ -903,7 +903,9 @@ bool Navigator::stepHome(World& w) {
         if (w.danger.is_set(t)) c += tune::flee_reach_cost;
         // A bush hides us from enemies outside it: worth a few steps of home distance while they
         // chase, unless one is close enough to be in or beside the same bush.
-        if (tune::flee_bush_bonus > 0 && nearest > 2 && nearest <= tune::flee_bush_chase && isBush(t))
+        // GGEzBot: not a bush inside an awake camp's reach: camps hit into bushes (concentrated
+        // wealth: Ryth bounced between two bush tiles beside an elk from 580 hp to dead).
+        if (tune::flee_bush_bonus > 0 && nearest > 2 && nearest <= tune::flee_bush_chase && isBush(t) && !w.danger.is_set(t))
             c -= tune::flee_bush_bonus;
         return c;
     };

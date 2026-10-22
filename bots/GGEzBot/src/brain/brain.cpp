@@ -49,6 +49,16 @@ std::vector<Option> think(World& w, const Option* keptCamp) {
         options.push_back(*keptCamp);
         options.back().c.note.clear();
         options.back().c.note << "camp kept (farm not rescored)";
+        // GGEzBot: the kept score was computed before the enemies arrived and never changes, so heal
+        // and flee could not beat it until death (packs: Marcella held a 3,259 camp score from 1,200
+        // down to 52 hp in a 1v3). Discount it by health and by the enemies here.
+        // Only once it matters: hurt, or outnumbered where we stand (at full health beside allies the
+        // discount made every passing enemy pull us off our camp: fewer deaths, fewer gems).
+        {
+            const float hf = w.hpFrac();
+            const bool outnumbered = w.enemyPressure(w.pos, tune::regroup_enemy_radius) > w.alliedPower(w.pos, tune::fight_beside_radius + 2);
+            if (hf < tune::kept_camp_hurt_hp || outnumbered) options.back().score *= tune::kept_camp_enemy_factor * hf * hf;
+        }
     }
     fuel::mark("think.farm");
     scorers::bank(w, options);

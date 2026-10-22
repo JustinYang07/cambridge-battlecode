@@ -87,6 +87,7 @@ bool holdForTank(World& w, const GroupInfo& g) {
 }
 
 void farmGroup(World& w, const GroupInfo& g, int need);
+bool recallClear(const World& w);  // GGEzBot: no recall within reach of any live camp (defined below)
 void capture(World& w, const GroupInfo& g);
 
 // While waiting for the party, work a gem/gold cluster beside the camp instead of standing idle
@@ -422,93 +423,6 @@ void farmGroup(World& w, const GroupInfo& g, int need) {
     }
 }
 
-// Recall spacing (user): a recall is a 5-turn channel that damage cancels, and champions kept
-// recalling inside a monster camp's reach and dying to it. The camps come from the map table, not
-// from vision: monsters see through bushes and hit round corners, so a camp out of sight is still
-// a camp (a check over visible camps only let 57 of 77 recall deaths start inside the killer's range).
-struct CampThreat {
-    bc::vec2 pos;
-    int range;
-};
-
-// Every monster near us that can hit us: its group not known dead or respawning, and active (seen
-// awake this turn, the group we are engaged with, its live state awake, or its state unreadable).
-// hitAnyway: we were just hit and nothing visible explains it: count every live group as active.
-std::vector<CampThreat> activeCampsNear(const World& w, int radius, bool hitAnyway) {
-    const auto& st = Statics::get();
-    std::vector<CampThreat> out;
-    for (const auto& g : st.groups) {
-        if (g.harmless || g.tiles.empty() || dist(g.center, w.pos) > radius + 6) continue;
-        const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
-        if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) continue;
-        bool active = hitAnyway || mem.awakeRound == w.round || g.id == w.engagedGroup;
-        if (!active) {
-            active = true;  // unknown: assume it can hit us
-            if (const auto* info = st.campAt(g.tiles.front()); info && info->handle) {
-                try {
-                    active = !info->handle->state().is_asleep();
-                } catch (const bc::error&) {
-                }
-            }
-        }
-        if (!active) continue;
-        for (auto t : g.tiles) {
-            const auto* c = st.campAt(t);
-            if (!c || c->strength <= 0) continue;
-            if (w.isVisible(t) && !w.campAt(t)) continue;  // we can see it is dead
-            out.push_back({t, c->range});
-        }
-    }
-    return out;
-}
-
-// Before any recall: every active monster at least its range + recall_camp_margin away (map
-// distances), and no enemy champion that just hit us still in reach. Otherwise walk to the nearest
-// tile within recall_search_radius that is that far from all of them, and recall there on a later
-// turn. Returns true when the recall may go ahead here (also when no tile helps: cornered, recall
-// anyway as before). checkOnly: never move, just say whether it is clear (optional recalls - bank,
-// capture - skip the recall and carry on instead).
-bool clearToRecall(World& w, bool checkOnly = false) {
-    if (!tune::recall_spacing) return true;
-    const int margin = tune::recall_camp_margin;
-    const int radius = tune::recall_search_radius;
-    std::vector<bc::vec2> hitters;  // enemy champions that can have hit us
-    if (w.beingHit)
-        for (const auto& e : w.enemies)
-            if (e.hp > 0 && dist(e.pos, w.pos) <= e.range + 1) hitters.push_back(e.pos);
-    const auto camps = activeCampsNear(w, radius + margin + 6, w.beingHit && hitters.empty());
-    auto campSafe = [&](bc::vec2 t) {
-        for (const auto& c : camps)
-            if (dist(c.pos, t) < c.range + margin) return false;
-        return true;
-    };
-    if (campSafe(w.pos) && hitters.empty()) return true;
-    if (checkOnly) return false;
-    const auto& st = Statics::get();
-    bc::bitboard bad, goals;
-    bad.clear();
-    goals.clear();
-    for (const auto& c : camps) bad.draw_chebyshev(c.pos, static_cast<float>(c.range + margin - 1));
-    for (const auto& e : w.enemies)
-        if (e.hp > 0 && dist(e.pos, w.pos) <= e.range + radius) bad.draw_chebyshev(e.pos, static_cast<float>(e.range + 1));
-    goals.draw_chebyshev(w.pos, static_cast<float>(radius));
-    goals = goals & ~bad & ~st.terrain & st.reach;
-    // No avoid set: the way out may cross the unsafe tiles we are standing among.
-    bool moved = !goals.is_empty() && nav().stepToward(w, goals, true, nullptr, st.spawnCenter);
-    if (!moved) {
-        std::vector<bc::vec2> threats = hitters;
-        for (const auto& c : camps)
-            if (dist(c.pos, w.pos) < c.range + margin) threats.push_back(c.pos);
-        moved = !threats.empty() && nav().stepAway(w, threats, tune::monster_range + margin);
-    }
-    if (moved) {
-        trace().note(hitters.empty() ? "recall: to a tile clear of the camps" : "recall: away from what hit us first");
-        combat::act(w, combat::Focus{.noCamps = true}, false);
-        return false;
-    }
-    return true;
-}
-
 void capture(World& w, const GroupInfo& g) {
     // A teammate keeps this capture: never stand on its tiles too (the reward is split between
     // everyone on them; rows split its wolves 33/33 all game once the opening rotation ended).
@@ -541,13 +455,13 @@ void capture(World& w, const GroupInfo& g) {
         // about as quick as walking to an altar, or we want the heal anyway, and nobody is about.
         if (tune::recall_on_capture && w.captureTurns >= static_cast<int>(tune::capture_turns) - 1 &&
             w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0 && !w.beingHit && w.incoming <= 0 &&
-            scorers::captureShareOf(w, g.id) >= 1.0f) {
+            scorers::captureShareOf(w, g.id) >= 1.0f && recallClear(w)) {
             float viaHome = 1e9f, walk = 1e9f;
             for (int i = 0; i < static_cast<int>(Statics::get().altars.size()); ++i) {
                 viaHome = std::min(viaHome, scorers::recallBankTurns(w, i));
                 if (const int d = fields::toAltar(i, w.pos); d >= 0 && d < Navigator::unreachable) walk = std::min(walk, w.walkTurns(static_cast<float>(d)));
             }
-            if ((viaHome <= walk + tune::capture_recall_margin || w.hpFrac() < tune::capture_recall_hp) && clearToRecall(w, true)) {
+            if (viaHome <= walk + tune::capture_recall_margin || w.hpFrac() < tune::capture_recall_hp) {
                 try {
                     bc::self().recall();
                     trace().action("rc");
@@ -577,6 +491,141 @@ void capture(World& w, const GroupInfo& g) {
 
 void offTeammateCapture(World& w);
 
+// GGEzBot: a recall is cancelled by any hit, and the "out of the engaged camp's reach" test kept
+// leaving us inside another camp's reach (ranges differ per map: wolf 3, elk 3-4, monolith 3-5;
+// recalls were interrupted again and again in the ladder replays). Hard rule instead: no recall
+// within its reach (+ tune::recall_clearance_margin) of any tile of a group that may have live monsters, from the
+// static layout (a group counts until it is dead or respawning), not from vision. The clearance
+// is each group's own longest range plus a margin: wolves 3, elks 3-4, monoliths 3-5 (user).
+// A group can hit us: live, and (awake-only mode) seen awake lately or damaged (a camp we or a
+// teammate fought stays awake; sleeping camps never swing at a recall beside them).
+bool campCanHit(const World& w, const GroupInfo& g) {
+    if (g.harmless) return false;
+    const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+    if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) return false;
+    if (!tune::recall_clearance_awake_only) return true;
+    return (mem.awakeRound >= 0 && w.round - mem.awakeRound <= tune::recall_awake_rounds) || mem.healthLeft < 0.999f ||
+           w.engagedGroup == g.id;
+}
+
+bool clearToRecall(World& w, bool checkOnly);
+bool recallClear(const World& w) { return clearToRecall(const_cast<World&>(w), true); }
+bool recallClearTheirs(const World& w) {
+    for (const auto& g : Statics::get().groups) {
+        if (!campCanHit(w, g)) continue;
+        for (auto t : g.tiles)
+            if (dist(w.pos, t) <= g.maxRange + tune::recall_clearance_margin) return false;
+    }
+    return true;
+}
+
+// One step away from every such camp tile nearby (toward spawn on ties); false if none is near.
+bool stepClearOfCamps(World& w) {
+    std::vector<bc::vec2> threats;
+    int keep = 0;
+    for (const auto& g : Statics::get().groups) {
+        if (!campCanHit(w, g)) continue;
+        for (auto t : g.tiles)
+            if (dist(w.pos, t) <= g.maxRange + tune::recall_clearance_margin + 2) threats.push_back(t);
+        keep = std::max(keep, g.maxRange + tune::recall_clearance_margin);
+    }
+    return nav().stepAway(w, threats, keep);
+}
+
+// Recall spacing (user): a recall is a 5-turn channel that damage cancels, and champions kept
+// recalling inside a monster camp's reach and dying to it. The camps come from the map table, not
+// from vision: monsters see through bushes and hit round corners, so a camp out of sight is still
+// a camp (a check over visible camps only let 57 of 77 recall deaths start inside the killer's range).
+struct CampThreat {
+    bc::vec2 pos;
+    int range;
+};
+
+// Every monster near us that can hit us: its group not known dead or respawning, and active (seen
+// awake this turn, the group we are engaged with, its live state awake, or its state unreadable).
+// hitAnyway: we were just hit and nothing visible explains it: count every live group as active.
+std::vector<CampThreat> activeCampsNear(const World& w, int radius, bool hitAnyway) {
+    const auto& st = Statics::get();
+    std::vector<CampThreat> out;
+    for (const auto& g : st.groups) {
+        if (g.harmless || g.tiles.empty() || dist(g.center, w.pos) > radius + 6) continue;
+        const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+        if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) continue;
+        // Flat rule (recall_clearance_awake_only off): every live group counts, asleep or not. A camp
+        // asleep when the channel starts can be woken during it (version 2's rule: 0.01 camp-hit
+        // recall deaths a game vs 0.19 trusting the asleep reading).
+        bool active = hitAnyway || !tune::recall_clearance_awake_only || mem.awakeRound == w.round || g.id == w.engagedGroup;
+        if (!active) {
+            active = true;  // unknown: assume it can hit us
+            if (const auto* info = st.campAt(g.tiles.front()); info && info->handle) {
+                try {
+                    active = !info->handle->state().is_asleep();
+                } catch (const bc::error&) {
+                }
+            }
+        }
+        if (!active) continue;
+        for (auto t : g.tiles) {
+            const auto* c = st.campAt(t);
+            if (!c || c->strength <= 0) continue;
+            if (w.isVisible(t) && !w.campAt(t)) continue;  // we can see it is dead
+            out.push_back({t, tune::recall_group_range ? g.maxRange : c->range});
+        }
+    }
+    return out;
+}
+
+// Before any recall: every active monster at least its range + recall_camp_margin away (map
+// distances), and no enemy champion that just hit us still in reach. Otherwise walk to the nearest
+// tile within recall_search_radius that is that far from all of them, and recall there on a later
+// turn. Returns true when the recall may go ahead here (also when no tile helps: cornered, recall
+// anyway as before). checkOnly: never move, just say whether it is clear (optional recalls - bank,
+// capture - skip the recall and carry on instead).
+bool clearToRecall(World& w, bool checkOnly) {
+    if (!tune::recall_spacing) return true;
+    const int margin = tune::recall_camp_margin;
+    const int radius = tune::recall_search_radius;
+    std::vector<bc::vec2> hitters;  // enemy champions that can have hit us
+    if (w.beingHit)
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, w.pos) <= e.range + 1) hitters.push_back(e.pos);
+    const auto camps = activeCampsNear(w, radius + margin + 6, w.beingHit && hitters.empty());
+    auto campSafe = [&](bc::vec2 t) {
+        for (const auto& c : camps)
+            if (dist(c.pos, t) < c.range + margin) return false;
+        return true;
+    };
+    if (campSafe(w.pos) && hitters.empty()) return true;
+    if (checkOnly) return false;
+    const auto& st = Statics::get();
+    bc::bitboard bad, goals;
+    bad.clear();
+    goals.clear();
+    for (const auto& c : camps) bad.draw_chebyshev(c.pos, static_cast<float>(c.range + margin - 1));
+    for (const auto& e : w.enemies)
+        if (e.hp > 0 && dist(e.pos, w.pos) <= e.range + radius) bad.draw_chebyshev(e.pos, static_cast<float>(e.range + 1));
+    goals.draw_chebyshev(w.pos, static_cast<float>(radius));
+    goals = goals & ~bad & ~st.terrain & st.reach;
+    // No avoid set: the way out may cross the unsafe tiles we are standing among.
+    bool moved = !goals.is_empty() && nav().stepToward(w, goals, true, nullptr, st.spawnCenter);
+    if (!moved) {
+        std::vector<bc::vec2> threats = hitters;
+        for (const auto& c : camps)
+            if (dist(c.pos, w.pos) < c.range + margin) threats.push_back(c.pos);
+        moved = !threats.empty() && nav().stepAway(w, threats, tune::monster_range + margin);
+    }
+    // Cornered (no clear tile, no step away): never channel in a camp's reach (version 2's rule; with
+    // "recall anyway" here 6 of 19 deaths after a recall still started inside the killer's range).
+    // Walk home instead.
+    if (!moved && tune::recall_never_in_reach) moved = nav().stepToward(w, st.allySpawn, true, nullptr, st.spawnCenter);
+    if (moved) {
+        trace().note(hitters.empty() ? "recall: to a tile clear of the camps" : "recall: away from what hit us first");
+        combat::act(w, combat::Focus{.noCamps = true}, false);
+        return false;
+    }
+    return !tune::recall_never_in_reach;
+}
+
 void bank(World& w, int altarIdx) {
     auto& me = bc::self();
     const auto altar = Statics::get().altars[static_cast<std::size_t>(altarIdx)];
@@ -584,6 +633,14 @@ void bank(World& w, int altarIdx) {
     // one an enemy stunner can reach in time, or that the enemies about could kill us during.
     // Judged at the altar (not at our tile) so the verdict does not flip as we step toward it.
     const bool unsafe = w.tributeAtRisk(altar, w.gems);
+    // GGEzBot: an awake camp covers the altar and we are hurt: wait outside its reach for the camp
+    // to sleep or die (or us to be healthier) instead of tributing under fire.
+    if (dist(w.pos, altar) > 1 && w.hpFrac() < tune::altar_fire_wait_hp && scorers::campFireAt(w, altar) > 0) {
+        if (!recallClear(w) && stepClearOfCamps(w)) {}
+        combat::act(w, combat::Focus{.awakeCampsOnly = true}, false);
+        trace().note("altar under a camp: waiting outside its reach");
+        return;
+    }
     if (unsafe) {
         // Keep our distance instead of walking up and backing off every other turn.
         trace().note("unsafe to tribute: holding");
@@ -595,7 +652,7 @@ void bank(World& w, int altarIdx) {
     }
     // Recall first when it is clearly quicker than walking, and nothing can cancel it (damage does).
     if (tune::bank_by_recall && !w.atSpawn && dist(w.pos, altar) > 1 && w.incoming <= 0 && !w.beingHit &&
-        w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0 && clearToRecall(w, true)) {
+        w.enemyPressure(w.pos, tune::enemy_watch_radius) <= 0 && recallClear(w)) {
         const int walk = fields::toAltar(altarIdx, w.pos);
         if (walk > 0 && scorers::recallBankTurns(w, altarIdx) + tune::bank_recall_margin < w.walkTurns(static_cast<float>(walk))) {
             offTeammateCapture(w);
@@ -713,6 +770,21 @@ void heal(World& w) {
         trace().note("monsters hitting: out of their reach first");
         return;
     }
+    // GGEzBot: an awake camp's reach beside us is a wall while hurt, not a soft avoid: the ally and
+    // home walks fell through to a plain route whenever the safe route failed, and the champion
+    // stepped back under the camp every other turn (concentrated wealth: Ryth, 20 rounds, dead).
+    if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit) && tune::hurt_walk_camp_wall) {
+        bc::bitboard near;
+        near.clear();
+        near.draw_chebyshev(w.pos, 2.0f);
+        if (!(w.danger & near).is_empty()) {
+            if (nav().stepHome(w)) {
+                combat::act(w, combat::Focus{.noCamps = true}, false);
+                trace().note("enemy close, camp beside us: home around both");
+                return;
+            }
+        }
+    }
     if (enemyClose && !(w.stuckTurns > 0 && !w.beingHit)) {
         // Toward an ally first when one is near and away from the threat: the chaser meets two of us.
         if (const auto ally = retreatTarget(w); ally.x >= 0 && nav().stepToward(w, ally, 1, true, &avoid)) {
@@ -738,7 +810,8 @@ void heal(World& w) {
             return;
         }
     }
-    if (!clearToRecall(w)) return;
+    // Clear of every camp's reach before the channel starts, whatever escapeTurns() said.
+    if (!clearToRecall(w, false)) return;
     offTeammateCapture(w);
     try {
         me.recall();

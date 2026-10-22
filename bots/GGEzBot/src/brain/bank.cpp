@@ -27,6 +27,19 @@ float recallBankTurns(const World& w, int altarIdx) {
 // Exposure of an altar, in walking tiles added to its cost: towards the enemy spawn (a centre
 // altar about half, one on their side the full amount) and enemies seen near it, both growing with
 // the bag (corners: every tribute went to the centre altar, where we fought and died).
+float campFireAt(const World& w, bc::vec2 at) {
+    float dmg = 0;
+    for (const auto& g : Statics::get().groups) {
+        if (g.harmless) continue;
+        const auto& mem = w.groups[static_cast<std::size_t>(g.id)];
+        if (mem.status == GroupStatus::respawning || mem.status == GroupStatus::reward) continue;
+        if (!(mem.awakeRound >= 0 && w.round - mem.awakeRound <= tune::recall_awake_rounds)) continue;
+        for (auto t : g.tiles)
+            if (dist(t, at) <= g.maxRange + 1) { dmg += g.totalStrength; break; }
+    }
+    return dmg;
+}
+
 float altarExposure(const World& w, int altarIdx) {
     if (tune::altar_exposure_tiles <= 0 && tune::altar_enemy_tiles <= 0) return 0;
     const auto& st = Statics::get();
@@ -91,9 +104,13 @@ void bank(World& w, std::vector<Option>& out) {
         if (w.invadeWithoutMelee(altars[i])) continue;           // nor, ranged, without our melee there
         const bool locked = enemyLock(w, k);
         if (locked && !tune::break_altar_locks) continue;
+        // GGEzBot: an awake camp covering the altar hits us through the whole tribute (corners: the
+        // centre altar sits in an elk's reach; champions walked in, bounced and died there).
+        const float fire = tune::altar_camp_tiles > 0 || tune::altar_fire_min_hp > 0 ? campFireAt(w, altars[i]) * (std::ceil(static_cast<float>(w.gems) / 10.0f) + 2.0f) : 0.0f;
+        if (fire > 0 && w.hp - fire < tune::altar_fire_min_hp * w.maxHp) continue;
         const int exact = fields::toAltar(k, w.pos);
         const int d = exact >= 0 ? exact : nav().distToRange(w, altars[i], 1);
-        const int cost = d + (locked ? tune::lock_break_turns : 0) + static_cast<int>(altarExposure(w, k));
+        const int cost = d + (locked ? tune::lock_break_turns : 0) + static_cast<int>(altarExposure(w, k)) + (fire > 0 ? tune::altar_camp_tiles : 0);
         if (cost < bestCost) { bestCost = cost; bestTravel = d; bestIdx = k; bestLocked = locked; }
     }
     if (bestIdx < 0) return;

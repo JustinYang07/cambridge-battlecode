@@ -697,7 +697,17 @@ Option scoreGroup(World& w, const Candidate& c) {
         // combatBotv3: down bodies, a ranged champion does not open a monster camp alone (elkring vs
         // alfungus r83: Stellar woke g0's elk alone at 4v6 while four of them walked into our half).
         if (tune::outnumbered_ranged_pair && w.ranged && !g.harmless && w.alliesAlive < w.enemiesAlive) need = std::max(need, 2);
-        const int k = std::max(need, 1 + claims);
+        int k = std::max(need, 1 + claims);
+        // GGEzBot: already taking the camp's hits, the fight is judged with the bodies actually at
+        // the camp, not the claims: Marcella soloed two elks from 1,300 to 160 hp (corners) while a
+        // party of three or four that had claimed the camp held 2-6 tiles away.
+        // Also from just outside its reach while it is awake and we are beside it: stepping out to
+        // heal and back in on the claimed party's numbers was the bounce (corners r216, 620 -> 200 hp).
+        if (tune::engaged_real_party) {
+            const bool fightUnderWay = w.engagedGroup == g.id ||
+                                       (mem.awakeRound >= 0 && w.round - mem.awakeRound <= 5 && dist(w.pos, g.center) <= g.maxRange + 4);
+            if (fightUnderWay) k = std::min(k, 1 + w.alliesWithin(g.center, g.maxRange + 3));
+        }
         const unsigned mates = comms::claimersMask(g.id, w.slot) | movingMates;
         const auto fight = k == 1 ? solo : combat::campFight(w, g, left, k, share, mates);
         if (allyTanks) o.c.note << "ally tanking";
@@ -837,6 +847,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         // Once a fight has started, waiting for help is no longer an option: finish or leave.
         awaiting = need > 1 + claims && !engaged && !rotating;
         if (awaiting) {
+            // GGEzBot: hurt, a hold beside a party camp is worth less than the trip home that the
+            // wait would leave time for anyway (concentrated wealth: Vesper held at 44% health for
+            // 10 rounds with heal a hair behind, then took the elks at 44%).
+            if (tune::hold_hurt_factor && w.hpFrac() < tune::heal_start_frac) o.mul("hurt: no holding", std::clamp(w.hpFrac() / tune::heal_start_frac, 0.2f, 1.0f));
             // On the loop the party is on its way (members follow each other's claims).
             if (g.id != loop::target()) {
                 o.nnOk = false; o.mul("awaiting help", 0.7f);

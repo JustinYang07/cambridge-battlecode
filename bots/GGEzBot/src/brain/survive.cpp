@@ -81,7 +81,12 @@ void survive(World& w, std::vector<Option>& out) {
         // reach (rows: Ren left the third wolves at 35% with ~6 turns of health to spare).
         if (tune::late_heal && !enemiesAbout && w.engagedGroup >= 0 && w.hitRate > 1.0f) {
             const float spare = w.hp / w.hitRate - static_cast<float>(nav().escapeTurns(w)) - tune::death_margin_turns;
+            const float plain = urgency;
             urgency = spare <= 0 ? 1.0f : spare >= tune::late_heal_window ? 0.0f : 1.0f - spare / tune::late_heal_window;
+            // GGEzBot: at low health the plain urgency is a floor (tune::late_heal_floor): the hit rate
+            // decays while a slow camp is not swinging, the spare looks large, heal scores 0 and the
+            // champion walks back into the camp at 20% health.
+            if (tune::late_heal_floor && f < tune::heal_urgent_frac) urgency = std::max(urgency, plain);
             o.c.note << "turns to spare " << static_cast<int>(spare) << "; ";
         }
         o.add("low health", urgency * urgency * 60.0f);
@@ -130,14 +135,33 @@ void survive(World& w, std::vector<Option>& out) {
     const float pressure = w.enemyPressure(w.pos, 5);
     if (threat > 0 || pressure > 0) {
         // Allies right beside us share the enemy's attention (Varg fled at 90% with Ryth adjacent).
-        const float beside = static_cast<float>(1 + w.alliesWithin(w.pos, tune::fight_beside_radius));
+        float beside = static_cast<float>(1 + w.alliesWithin(w.pos, tune::fight_beside_radius));
+        // GGEzBot: the enemies hit whoever is nearest. In front of our allies we take the hits alone:
+        // no sharing (Marcella counted two allies 6 tiles behind her as sharing a 1v3).
+        if (tune::front_takes_hits && beside > 1.0f && f < tune::front_flee_hp) {
+            int nearestD = 1 << 20; bc::vec2 nearest{-1, -1};
+            for (const auto& x : w.enemies)
+                if (x.hp > 0 && dist(x.pos, w.pos) < nearestD) { nearestD = dist(x.pos, w.pos); nearest = x.pos; }
+            bool front = nearest.x >= 0;
+            for (int sl = 0; sl < w.allyCount && sl < 8 && front; ++sl) {
+                if (sl == w.slot) continue;
+                const auto p = w.allyPosCached(sl);
+                if (p.x >= 0 && dist(p, w.pos) <= tune::fight_beside_radius && dist(p, nearest) <= nearestD) front = false;
+            }
+            if (front) beside = 1.0f;
+        }
         const float pairRisk = tune::pair_lives && w.pairChampion() ? tune::pair_risk : 1.0f;  // two lives
         const float turnsToDie = w.hp * beside / std::max(threat, pressure) / pairRisk;
         const float outnumbered = pressure / std::max(w.alliedPower(w.pos, 5), 1.0f);
         // Danger rises as death gets close, and with a bag when we are outnumbered.
         const float bagRisk = w.gems >= tune::bag_avoid_gems ? (outnumbered - 1.0f) * 0.8f : 0.0f;
         const float horizon = tune::flee_horizon_turns;
-        const float danger = std::clamp(std::max((horizon - turnsToDie) / horizon, bagRisk), 0.0f, 1.0f);
+        // GGEzBot: outnumbered and hurt is danger before death is in sight (flee scored 0 until the
+        // last ~10 turns: Marcella left a 1v3 at 254 hp).
+        const float outnumberedRisk = tune::outnumbered_fight && outnumbered > 1.0f
+                                          ? std::clamp(outnumbered - 1.0f, 0.0f, 1.0f) * std::clamp((tune::outnumbered_full_hp - f) / tune::outnumbered_full_hp, 0.0f, 1.0f) * 2.0f
+                                          : 0.0f;
+        const float danger = std::clamp(std::max({(horizon - turnsToDie) / horizon, bagRisk, outnumberedRisk}), 0.0f, 1.0f);
         Option o;
         o.kind = OptionKind::flee;
         o.c.target << "flee";
