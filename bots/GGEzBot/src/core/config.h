@@ -41,14 +41,14 @@ inline constexpr bool keeper_vesper_first = true;    // GGEzBot: Vesper Vale at 
 inline constexpr bool keeper_stellar_first = false;  // yBot: Stellar at the camp keeps the capture (Fish: Stellar takes 7.3 captures a game, ours 2.3)
 inline constexpr int stellar_keeper_radius = 6;  // ...from this far from the camp, even when a teammate is already on its tiles
 inline constexpr bool late_heal = true;              // combatBotv2: tanking a camp, heal by damage taken: leave ~death_margin_turns before death
-inline constexpr float death_margin_turns = 3.0f;     // ...turns of hits kept in hand after the walk out of reach
+inline constexpr float death_margin_turns = 3.199f;     // ...turns of hits kept in hand after the walk out of reach
 inline constexpr bool unseen_monster_hits = true;   // GGEzBot: being hit with no visible camp or champion in reach: the static layout names the camp (members in bushes are invisible)
 inline constexpr bool late_heal_floor = true;         // GGEzBot: below heal_urgent_frac the plain urgency is a floor: with the camp slow to hit, the late-heal spare looked large, heal scored 0 and the champion walked back in (corners: Varg died at 30 hp beside an elk without ever recalling)
 inline constexpr float late_heal_window = 2.0f;       // ...urgency ramps over this many turns before that
 inline constexpr bool keeper_tank_first = false;      // combatBotv2 (as Fish): a tank at a dead camp keeps its capture (and recalls with it)
 inline constexpr bool recall_on_capture = true;       // combatBotv2 (as Fish): the keeper recalls from the tile a round before the capture completes
 inline constexpr float capture_recall_margin = 3.0f;  // ...when banking via spawn is within this many turns of walking to an altar
-inline constexpr float capture_recall_hp = 0.5f;      // ...or below this health (yBot: 0.9 -> 0.5: Fish recalls at 30-60% after 1-3 captures)
+inline constexpr float capture_recall_hp = 0.5208f;      // ...or below this health (yBot: 0.9 -> 0.5: Fish recalls at 30-60% after 1-3 captures)
 inline constexpr bool partial_tank = true;            // combatBotv2: leading a party camp, tank until our retreat point and leave; the party finishes it
 inline constexpr float partial_tank_floor = 0.3f;     // ...retreat point (health fraction; Fish's Ren left at ~29%), also what allies keep
 inline constexpr float partial_tank_min_share = 0.25f; // ...worth it when we can take at least this share of the fight's damage
@@ -75,7 +75,7 @@ inline constexpr float rotate_bonus = 1.5f;         // ...the next free party ca
 inline constexpr float capture_turns = 5.0f;        // engine capture time
 inline constexpr float reset_attack_bonus = 1.0f / 8.0f; // attack reset adds ~1 attack per cooldown
 inline constexpr float max_fight_hp_use = 0.80f;    // never plan to spend more HP than this on a camp
-inline constexpr float camp_budget_scale = 1.8f;     // yBot: x the camp health budget when sizing parties (Fish: solo wolves, pairs on an elk)
+inline constexpr float camp_budget_scale = 1.751f;     // yBot: x the camp health budget when sizing parties (Fish: solo wolves, pairs on an elk)
 inline constexpr float ally_claim_factor = 0.25f;   // a group a teammate claimed is worth this fraction
 inline constexpr float engaged_bonus = 1.35f;       // finishing a group we already damaged is attractive
 inline constexpr float defensive_stun_hp = 0.75f;  // pure stuns go on the monster hitting us below this health
@@ -85,7 +85,7 @@ inline constexpr float contested_camp_factor = 0.35f;  // an enemy champion was 
 inline constexpr int race_end_gems = 850;          // enemy banked this many: bank what we carry now
 inline constexpr float race_end_bank_boost = 6.0f;
 inline constexpr int enemy_spawn_radius = 7;       // fights this close to the enemy spawn are not worth taking
-inline constexpr float travel_weight = 2.0f;       // walking turns count this much in farm scores (patch, cambc 3.0.1, 42 games: 3.0 35 wins, 2.0 38 and +770 gems, 1.5 38 but -580 gems and +25 deaths)
+inline constexpr float travel_weight = 2.492f;       // walking turns count this much in farm scores (patch, cambc 3.0.1, 42 games: 3.0 35 wins, 2.0 38 and +770 gems, 1.5 38 but -580 gems and +25 deaths)
 inline constexpr int max_scored_groups = 6;        // fully score at most this many camp groups per turn
 inline constexpr int max_team_per_camp = 4;
 inline constexpr bool team_rush = true;
@@ -138,7 +138,7 @@ inline constexpr float team_rush_bonus = 3.0f;     // ...and it is never "too st
 inline constexpr int max_party_wait_claimed = 5;   // ...also when allies have claimed it (was 30: 100-turn holds)
 inline constexpr int wait_farm_radius = 6;         // while waiting, farm gem/gold clusters this close to the camp
 inline constexpr int max_party_wait = 5;           // turns to wait for allies before giving up on a group         // largest party we plan around for one camp group
-inline constexpr float party_focus_share = 0.7f;    // in a party, share of monster hits we expect to absorb
+inline constexpr float party_focus_share = 0.6102f;    // in a party, share of monster hits we expect to absorb
 inline constexpr float escape_margin_turns = 1.5f;  // extra turns of incoming damage kept in reserve to walk away
 inline constexpr float respawn_wait_weight = 2.0f;  // turns spent waiting for a respawn count double (was 1)
 
@@ -209,20 +209,20 @@ inline constexpr float contested_capture_factor = 0.05f;  // capture with an ene
 inline constexpr float fight_hurt_bonus = 1.0f;    // fight score x(1 + this * enemy's missing health fraction)
 
 // ---- navBot2 behaviour
-inline constexpr float heal_start_frac = 0.7f;  // healing urgency grows from full health... (A/B: recalling only near 20% lost ~225 gems/game)
-inline constexpr float heal_urgent_frac = 0.35f;  // ...and dominates by here
+inline constexpr float heal_start_frac = 0.7293f;  // healing urgency grows from full health... (A/B: recalling only near 20% lost ~225 gems/game)
+inline constexpr float heal_urgent_frac = 0.4033f;  // ...and dominates by here
 inline constexpr float heal_enemy_margin = 0.35f;   // both shift up this much with enemy champions about
-inline constexpr float shop_trip_hp = 0.6f;           // yBot: shopping adds to a trip home only below this health...
+inline constexpr float shop_trip_hp = 0.5793f;           // yBot: shopping adds to a trip home only below this health...
 inline constexpr int shop_trip_wait = 80;            // ...or to complete an emblem affordable this many rounds
 inline constexpr int altar_lock_every = 4;            // yBot: bank scoring re-reads an altar's lock this often
 inline constexpr bool cast_first = true;
 inline constexpr bool free_cast = false;             // yBot: cast movement-forfeiting spells at enemies on turns we did not move             // yBot: fights cast a ready movement-forfeiting spell that can hit before stepping
-inline constexpr float bank_target_scale = 1.5f;     // yBot: x every role's bank target (Fish tributes bigger bags). zBot h2h vs 1.5 (cambc 3.0.4, 70 games): 3.0 40/70 +12; 2.2 35/70 +27; with density 0.15: 3.0 39/70 -24, 2.2 41/70 +21
+inline constexpr float bank_target_scale = 1.545f;     // yBot: x every role's bank target (Fish tributes bigger bags). zBot h2h vs 1.5 (cambc 3.0.4, 70 games): 3.0 40/70 +12; 2.2 35/70 +27; with density 0.15: 3.0 39/70 -24, 2.2 41/70 +21
 inline constexpr float heal_first_min_missing = 0.6f; // yBot: 0.9 -> 0.6 // yBot: "heal first" only below this health
 inline constexpr float heal_first_factor = 0.5f;    // a camp that needs a trip home first
 inline constexpr bool shop_trips = true;            // trips home to spend gold once we can afford shards (A/B switch)
 inline constexpr int shop_min_shards = 3;            // ...this many affordable shards, or the rest of an emblem
-inline constexpr float shop_shard_value = 8.0f;      // gem-equivalents per shard bought now
+inline constexpr float shop_shard_value = 10.24f;      // gem-equivalents per shard bought now
 inline constexpr float shop_urgency_per_round = 0.02f;  // the trip's bonus grows this much per round the gold waits...
 inline constexpr float shop_urgency_max = 3.0f;      // ...up to this
 inline constexpr float focus_bonus_per_damage = 0.0f;  // extra commitment per damage dealt (A/B: 1.5 cost ~130 gems/game)
@@ -264,7 +264,7 @@ inline constexpr float early_bank_factor = 1.0f;   // opening gem rush off: -207
 inline constexpr float opening_gold_bonus = 1.0f;   // gold-only clusters in the opening (A/B: 1.8 cost ~125 gems/game, 3.0 neutral; off)
 
 // ---- decision stability
-inline constexpr float switch_hysteresis = 1.2f;    // last turn's decision gets this edge
+inline constexpr float switch_hysteresis = 1.228f;    // last turn's decision gets this edge
 inline constexpr int flip_lock_turns = 6;           // after A,B,A,B commit to the newest choice this long
 inline constexpr float lock_emergency_hp = 0.3f;    // below this health a lock no longer binds
 inline constexpr int party_commit_turns = 8;
@@ -290,14 +290,56 @@ inline constexpr bool hunt_ends_on_arrival = true;      // a hunt with nowhere f
 // fight (this group and any other live camp whose reach covers its edge) before their hits kill the
 // tank - the party's earliest-drafted champion, who takes them all (combat::tankSurvives).
 inline constexpr bool tank_check = true;
+inline constexpr bool camp_unseen_members = false;  // a group partly in sight: members on unseen tiles count (at the group's remembered health), not just the visible ones
+// Territories (user; strategy/territory.cpp, mapplan::planTerritories): regions of camps within
+// territory_link walking tiles (at most territory_max_camps each) over the whole map; each champion
+// gets the region where it adds the most value per round, its camps score x territory_bonus and
+// far camps outside it x territory_off. Re-picked every territory_replan rounds and when enemies
+// show up in it (contested or recently deadly regions count x territory_contested_factor).
+inline constexpr bool territory = false;
+inline constexpr int territory_link = 10;
+inline constexpr int territory_max_camps = 5;
+inline constexpr float territory_walk_per_camp = 6.0f;    // turns walking between a region's camps, per camp
+inline constexpr float territory_far_weight = 0.5f;       // their side: x this from 70% of the way to their spawn (none while most of them are dead)
+inline constexpr float territory_stay = 200.0f;           // rounds a champion expects to stay: the walk there counts against that
+inline constexpr float territory_bonus = 1.6f;
+inline constexpr float territory_off = 0.7f;
+inline constexpr int territory_near = 6;                  // camps this close to us are never "outside"
+inline constexpr int territory_first_replan = 150;
+inline constexpr int territory_replan = 100;
+inline constexpr int territory_contest_rounds = 30;
+inline constexpr int territory_death_rounds = 60;
+inline constexpr int territory_death_gap = 5;             // rounds without acting that mean we died
+inline constexpr float territory_contested_factor = 0.4f;
+inline constexpr float territory_switch_margin = 1.3f;    // another region must be worth this much more
+inline constexpr unsigned long long draft_territory_floor = 150000;  // solve territories last on the first draft turn, only with this much fuel left (else none this game)
+inline constexpr int territory_min_stay = 60;             // rounds in a region before switching again (a death there aside)
+inline constexpr float territory_travel_share = 0.3f;     // share of the walk our region's camps pay until we get there
+inline constexpr bool need_recal = false;        // party sizes from outcomes: solos need a margin, 3+ camps one fewer (brain/farm.cpp)
+inline constexpr float solo_budget_share = 0.3f;  // ...a solo only when its predicted damage is at most this share of the budget
+inline constexpr int need_discount_from = 3;       // ...camps needing this many or more get one fewer
+inline constexpr bool tank_dies_zero = false;     // a camp the tank check says no party can take scores 0 (was x0.05), unless an ally is already fighting it
+inline constexpr bool engage_check = false;       // before the first hit on an untouched camp, the tank check with only the champions there must pass; else hold for the party
 inline constexpr bool monolith_needs_win = true;  // a Monolith group judged too strong scores 0, not x0.05 (brain/farm.cpp)
-inline constexpr float tank_hp_use = 0.85f;     // ...of the tank's current health        // once a party is ready, engage for at least this long
+inline constexpr float tank_hp_use = 0.8554f;     // ...of the tank's current health        // once a party is ready, engage for at least this long
+inline constexpr float tank_dps_scale = 1.0f;   // the party's damage in the tank check x this (70 traced games: real kill rate ~0.81 of the estimate)
 // The champion whose arrival completes a party holds this many turns before engaging: the others
 // read its claim a turn later (stampede: Stellar saw four claims and went in alone, the four waiting
 // saw three and held; she died in 3 rounds, respawned and did it again all game, 0 gems).
 inline constexpr int party_sync_turns = 2;
 inline constexpr float stuck_factor = 0.3f;         // a decision that left us bouncing between two tiles...
 inline constexpr int stuck_turns = 8;               // ...is penalised this long
+// Ping-pong fixes (user; 70 traced games: 4.5% of our champions' turns moved back and forth in
+// place, mostly regroup 115, farm 58, party waits 49 and flee 46 rounds a game). A decision that
+// switches itself off one step later hands the turn to the option it beat, which walks back:
+inline constexpr bool regroup_stay = false;          // 1: grouped with the spotter, a "stay with the group" option (stand) instead of none
+inline constexpr float regroup_stay_value = 10.0f;  // ...scored over 100 turns: beats camps outside the leash (x regroup_farm_factor), not camps near the spotter
+inline constexpr int party_form_cap = 0;           // 2: travelling with a teammate counts toward dropping the camp: this many travel and hold turns (0: off)
+inline constexpr int flee_hold_turns = 0;           // 3: after fleeing enemies, options whose target is nearer them than we are score x flee_hold_factor this long (0: off)
+inline constexpr float flee_hold_factor = 0.15f;
+inline constexpr int flee_hold_radius = 6;          // ...or whose target is this close to the enemy we fled from
+inline constexpr bool bounce_loose = false;          // 4: the bounce check also catches 3-tile loops and same-kind decisions; a bouncing flight runs home only
+inline constexpr bool flee_bush_hold = false;        // 5: fleeing, when our own bush is the best tile home weighting finds, stay in it (no escape step out)
 
 // ---- purchasing (A/B switches; see shop.cpp). Chosen 2026-10-14: treasure rush (+~210 gems/game
 //      vs jungle-first), then monster; altar locks (+~115); stat matching hurt (-~75).
@@ -353,13 +395,13 @@ inline constexpr int tp_min_gain = 6;               // ...taken when it saves th
 // ---- staying alive around enemy champions
 inline constexpr int enemy_memory_rounds = 10;      // remember enemy sightings this long
 inline constexpr int enemy_watch_radius = 7;        // enemies this close count as pressure
-inline constexpr float alone_bank_factor = 0.8f;    // solo champions bank at this fraction of their target
+inline constexpr float alone_bank_factor = 0.7822f;    // solo champions bank at this fraction of their target
 inline constexpr int bag_avoid_gems = static_cast<int>(20 * gem_scale);           // carrying this many gems, path around enemy reach
 
 // ---- fighting enemy champions
 inline constexpr float kill_gold_value = 100.0f;   // patch: kill gold 50 -> 100 (bc::constants::kill_gold)
 inline constexpr float fight_our_dps_scale = 1.0f;  // our side's damage in fight estimates (measured real/predicted ~0.21)
-inline constexpr float fight_win_margin = 1.25f;    // need this edge in time-to-kill to commit
+inline constexpr float fight_win_margin = 1.271f;    // need this edge in time-to-kill to commit
 // Mid/late-game fights (combatBotv3): from fight_mid_round, a fight whose estimated win chance is
 // under fight_mid_win_chance scores x fight_mid_factor (channelling targets exempt). Win chance =
 // logistic(a + b ln edge), fitted on traced fights from round 300 (edge 1.3: 50%, 2.9: 60%, 7: 70%).
@@ -367,7 +409,7 @@ inline constexpr int fight_mid_round = 300;
 inline constexpr float fight_mid_win_chance = 0.70f;
 inline constexpr float fight_mid_factor = 0.3f;     // 1: off
 inline constexpr int fight_mid_mode = 1;            // 0: win-chance cutoff; 1: pot odds (p x gain vs (1-p) x stake)
-inline constexpr float death_time_value = 12.0f;    // pot odds: gem-equivalents of a death (~13 farming over 60 rounds). With model 2: 12 -8, 18 -27, 24 -10, 30 -19, 36 -28 vs model 0 at 36 (1,020 games each)
+inline constexpr float death_time_value = 11.08f;    // pot odds: gem-equivalents of a death (~13 farming over 60 rounds). With model 2: 12 -8, 18 -27, 24 -10, 30 -19, 36 -28 vs model 0 at 36 (1,020 games each)
 // Lab fight data (traced builds only): on a new contact (no enemy within 6 tiles for 10 rounds),
 // this share of contacts does the opposite of the fight scorer for 10 rounds (0: off; data runs).
 inline constexpr float fight_explore_rate = 0.0f;
@@ -430,7 +472,7 @@ inline constexpr float fwm_dist = -0.1519f;       // tiles to the target
 inline constexpr int favour_radius = 6;             // bodies counted this close to the target (both sides)
 inline constexpr float linked_pair_bonus = 1.0f;      // Cassi or Issac as a target: + this x (kill gold + denial) for the partner who dies too
 inline constexpr float kill_denial_value = 12.0f;   // gem-equivalents of an enemy out for 60 rounds (favourable fights; was 20)
-inline constexpr float favourable_max = 1.5f;       // favourable fight score at full health (x1 at half; was x2)
+inline constexpr float favourable_max = 1.567f;       // favourable fight score at full health (x1 at half; was x2)
 inline constexpr int their_half_fight_round = 150;  // from this round, fights against enemies on their half...
 inline constexpr float their_half_fight_factor = 0.25f;  // ...score this (channelling targets and raids exempt)
 inline constexpr float no_chase_factor = 1.0f;     // fights against an enemy out of reach and moving away (1: off)
@@ -768,7 +810,7 @@ inline constexpr bool call_on_several = true;        // seeing 2+ enemies (anywh
 inline constexpr float chain_bonus = 1.5f;
 // Camp density (user): farm score x (1 + weight x min(value of other camps within the radius /
 // the mean camp's value, cap)). Computed once a game (brain/farm.cpp densityFactor). 0: off.
-inline constexpr float camp_density_weight = 0.15f;  // zBot h2h vs 0 (cambc 3.0.4, 70 games): 0.15 41/70 +75 gems/game; 0.08 29/70 -98; 0.20 32/70 -25; 0.25 31/70 -65
+inline constexpr float camp_density_weight = 0.1917f;  // zBot h2h vs 0 (cambc 3.0.4, 70 games): 0.15 41/70 +75 gems/game; 0.08 29/70 -98; 0.20 32/70 -25; 0.25 31/70 -65
 inline constexpr int camp_density_radius = 8;
 inline constexpr float camp_density_cap = 3.0f;
 inline constexpr int chain_rounds = 30;              // how long the bonus lasts

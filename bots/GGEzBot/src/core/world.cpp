@@ -315,9 +315,14 @@ void World::refresh(bool firstTurn) {
         for (const auto& mb : m)
             if (mb.index < visibleBits_.size() && (visibleBits_[mb.index] & mb.bits)) { mem.visibleNow = true; break; }
         if (!mem.visibleNow) continue;
+        // Part of a group in sight: members on tiles we cannot see now are still there while the group
+        // lives (only those in sight report). Without them every estimate counted just the visible
+        // ones: 4-elk camps judged with 0-2 elks were taken solo and won 6% of the time.
+        const bool unseenLive = tune::camp_unseen_members && mem.status != GroupStatus::reward && mem.status != GroupStatus::respawning;
         for (const auto& mb : m) {
             if (mb.index >= campBits_.size()) continue;
             std::uint8_t present = static_cast<std::uint8_t>(campBits_[mb.index] & mb.bits);
+            if (unseenLive && mb.index < visibleBits_.size()) present |= static_cast<std::uint8_t>(mb.bits & ~visibleBits_[mb.index]);
             while (present) {
                 const int bitIdx = __builtin_ctz(present);
                 present = static_cast<std::uint8_t>(present & (present - 1));

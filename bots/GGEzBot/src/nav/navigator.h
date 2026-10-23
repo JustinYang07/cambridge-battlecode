@@ -68,6 +68,8 @@ public:
     // enemy whose reach covers a tile (and awake monsters' reach) costing tune::flee_reach_cost.
     // False when the spawn field is not ready or no tile improves on standing still.
     bool stepHome(World& w);
+    // stepHome found our own tile (a bush) the best place to be: it did not move.
+    bool homeHeld() const { return homeHeld_; }
 
 private:
     bool tryMove(World& w, cambc::vec2 dest);
@@ -91,6 +93,7 @@ private:
     cambc::bitboard fromMeVisited_;
     cambc::vec2 fromMePos_{-1, -1};
     bool fromMeValid_ = false;
+    bool homeHeld_ = false;
 };
 
 Navigator& nav();

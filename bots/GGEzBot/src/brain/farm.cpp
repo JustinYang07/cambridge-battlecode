@@ -14,6 +14,7 @@
 #include "../strategy/cohesion.h"
 #include "../strategy/lanes.h"
 #include "../strategy/loop.h"
+#include "../strategy/territory.h"
 #include "../strategy/mapplan.h"
 #include "../strategy/regroup.h"
 #include "nnfarm.h"
@@ -583,7 +584,7 @@ Option scoreGroup(World& w, const Candidate& c) {
     // Long walks cost more than their turns: a far camp is often contested or respawned by the
     // time we arrive, and walking past nearer camps leaves them to the enemy (collision: walking
     // 33 tiles past two elks to a richer corner camp).
-    o.turns("travel", w.walkTurns(static_cast<float>(c.travel)) * tune::travel_weight);
+    o.turns("travel", w.walkTurns(static_cast<float>(c.travel)) * tune::travel_weight * territory::travelFactor(w, g));
     if (c.wait > 0) o.turns("respawn wait", static_cast<float>(c.wait) * tune::respawn_wait_weight);
     // routeBot (plan R3): the gems still have to reach an altar. One trip serves a whole bag,
     // so each camp pays its share of the walk from it to the nearest altar.
@@ -685,6 +686,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         };
         int need = 1;
         while (need < tune::max_team_per_camp && damageFor(need) > budget) ++need;
+        // Recalibrated (user; 140 traced games): solos the estimate called safe won 67-74% up to 30%
+        // of the budget and ~50% or less beyond, so a solo needs a clear margin; and camps it gave
+        // 3 or 4 champions went 80% / 77% with one fewer (applied after the tank check below).
+        if (tune::need_recal && need == 1 && !g.harmless && solo.damage > tune::solo_budget_share * budget) need = 2;
         // combatBotv3: a camp nearer their spawn than ours is where they find us mid-fight: take it
         // with enough of us to win that fight too, or not at all (elkring vs alfungus: Ren and Varg
         // took an elk 26 from our spawn, 19 from theirs; three of them walked over and killed both,
@@ -739,6 +744,7 @@ Option scoreGroup(World& w, const Candidate& c) {
         // Tank check (user): every camp that can hit the fight, against the party's tank. Not enough
         // with the party we planned: one more body each time (up to the camp cap and who is alive);
         // no party size works: too strong, whatever the per-champion budget said.
+        bool tankDies = false;
         if (tune::tank_check && !g.harmless && !tooStrong && !engaged && !combat::tankSurvives(w, g, left, k, mates)) {
             int kk = k;
             const int most = std::min(tune::max_team_per_camp, std::max(w.alliesAlive, 1));
@@ -749,8 +755,13 @@ Option scoreGroup(World& w, const Candidate& c) {
                 o.c.note << "tank needs " << (kk + 1) << "; ";
             } else {
                 tooStrong = true;
+                tankDies = true;
                 o.c.note << "tank would die; ";
             }
+        }
+        if (tune::need_recal && need >= tune::need_discount_from) {
+            --need;
+            o.need = need;
         }
         if (gemRally && !tooStrong) o.mul("rally: ally holds gems", tune::gem_rally_bonus);
         // combatBotv2: partial tank. Leading the pull we need not survive the whole fight: we take
@@ -825,6 +836,10 @@ Option scoreGroup(World& w, const Candidate& c) {
             // enough (monolith vs patisserie: all five at one Monolith r1000-1113, Vesper and Varg at
             // the other r1155-1231 beside two sleeping wolves).
             o.nnOk = false; o.mul("monolith out of reach", 0.0f);
+        } else if (tooStrong && tankDies && tune::tank_dies_zero && !allyFightingCamp(w, g)) {
+            // Hopeless camps (user): x0.05 was not enough, a gem camp still beat every other option at
+            // 100-350 and one champion went in alone (traced games: 0.46 a game, 2-6 elks, lost).
+            o.nnOk = false; o.mul("tank would die: not an option", 0.0f);
         } else if (tooStrong) {
             o.nnOk = false; o.mul("too strong", 0.05f);
             if (g.id == loop::target()) loop::tooStrong(w, g.id);
@@ -1098,6 +1113,10 @@ Option scoreGroup(World& w, const Candidate& c) {
         if (lanes::mine(g.id)) o.mul("my lane", tune::lane_bonus);
         else if (lanes::others(g.id) && lanes::laneBusy()) o.mul("another lane", tune::lane_other_factor);
     }
+    // Territories: our region's camps first, far camps outside it less (raids aside).
+    if (!raiding) {
+        if (const float tf = territory::farmFactor(w, g); tf != 1.0f) o.mul(tf > 1.0f ? "my territory" : "outside my territory", tf);
+    }
     if (const int lt = loop::target(); lt >= 0) {
         if (g.id == lt) {
             o.mul("loop", tune::loop_bonus);
@@ -1149,6 +1168,17 @@ bool bushBeside(const GroupInfo& g) {
         }
     }
     return c == 1;
+}
+
+// An ally is already fighting this camp: beside it while it is damaged.
+bool allyFightingCamp(const World& w, const GroupInfo& g) {
+    if (w.groups[static_cast<std::size_t>(g.id)].healthLeft >= 0.99f) return false;
+    for (int sl = 0; sl < w.allyCount && sl < 8; ++sl) {
+        if (sl == w.slot) continue;
+        const auto p = w.allyPosCached(sl);
+        if (p.x >= 0 && dist(p, g.center) <= g.maxRange + 2) return true;
+    }
+    return false;
 }
 
 bool captureHold(const World& w) {
@@ -1213,7 +1243,7 @@ void farm(World& w, std::vector<Option>& out) {
     // Largest product of '*' factors any option can get (committed, join/support party, home region).
     const float maxMultiplier = (tune::engaged_bonus + tune::focus_bonus_per_damage) * 1.5f *
                                 tune::safe_camp_bonus * tune::route_bonus * tune::centre_bonus_max * tune::loop_bonus * tune::lane_bonus * tune::chain_bonus * tune::nearest_camp_bonus * (1.0f + std::max(0.0f, tune::camp_density_weight) * tune::camp_density_cap) * (tune::cohesion ? tune::cohesion_leader_bonus : 1.0f) * std::max(1.0f, tune::group_farm_bonus) * std::max(1.0f, tune::spell_clear_quiet_bonus) *
-                                (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
+                                (tune::territory ? tune::territory_bonus : 1.0f) * (w.enemyBodies >= 2 && w.enemiesAlive <= tune::raid_max_alive ? tune::raid_cluster_factor : 1.0f);
     const float gv = goldValue(w);
     const float gemV = gemValue(w);
     // Only the nearest farm_pre_max groups get a bound (plus the plan's, rush, loop and lane camps):
@@ -1236,6 +1266,10 @@ void farm(World& w, std::vector<Option>& out) {
         if (lanes::active())
             for (const auto& g : statics.groups)
                 if (g.id < kMax && lanes::mine(g.id)) consider[static_cast<std::size_t>(g.id)] = 1;
+        // Our territory's camps, however far (else a distant region was never scored at all).
+        if (const int region = territory::mine(); region >= 0)
+            for (const auto& g : statics.groups)
+                if (g.id < kMax && territory::regionOf(g.id) == region) consider[static_cast<std::size_t>(g.id)] = 1;
     }
     for (const auto& g : statics.groups) {
         if (n >= kMax) break;
@@ -1277,7 +1311,9 @@ void farm(World& w, std::vector<Option>& out) {
         // Include the respawn wait: without it a respawning camp's bound looked huge, it took
         // the few fully-scored slots, and nearby wolves were never scored at all (expanse).
         // max(cheb, respawn) never exceeds the real travel + wait, so the bound stays valid.
-        const float time = static_cast<float>(cheb + wait) + tune::capture_turns + minKill;
+        // Our territory's camps pay a share of the walk (territory::travelFactor): keep the bound valid.
+        const float walkShare = std::min(1.0f, territory::travelFactor(w, g) * tune::travel_weight);
+        const float time = static_cast<float>(cheb) * walkShare + static_cast<float>(wait) + tune::capture_turns + minKill;
         pre[static_cast<std::size_t>(n++)] = {&g, cheb, 0, g.center, reward / std::max(time, 1.0f) * 100.0f * maxMultiplier, dash};
     }
     fuel::mark("farm.pre");

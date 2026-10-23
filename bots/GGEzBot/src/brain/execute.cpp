@@ -132,8 +132,42 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     // damaged camp. Damage alone is not enough, since camps do not heal: Vendetta found lanes'
     // elk at 55% from its own earlier attempt and went back in alone three times.
     const bool underWay = (w.engagedGroup == g.id && w.beingHit) || (mem.healthLeft < 0.99f && alliesNear(w, g) > 0);
-    if (underWay || (partyReady && !syncing)) {
+    // Engage check (user: no hopeless camps): the plan counted a party; before the first hit on an
+    // untouched camp, the champions actually here must outlast it (traced games: 1.3 a game passed
+    // with a planned party of 2-3 and one champion went in alone, then left or died).
+    bool hereIsEnough = true;
+    if (tune::engage_check && !underWay && partyReady && !syncing && !g.harmless && mem.healthLeft >= 0.99f) {
+        unsigned here = 0;
+        int count = 1;
+        for (int sl = 0; sl < w.allyCount && sl < 8; ++sl)
+            if (sl != w.slot) {
+                const auto p = w.allyPosCached(sl);
+                if (p.x >= 0 && dist(p, g.center) <= g.maxRange + 3) { here |= 1u << sl; ++count; }
+            }
+        hereIsEnough = combat::tankSurvives(w, g, mem.healthLeft, count, here);
+        if (!hereIsEnough) trace().note("engage check: the champions here would lose it");
+    }
+    if (underWay || (partyReady && !syncing && hereIsEnough)) {
         w.waitingTurns = 0;
+        w.partyTurns = 0;
+        return false;
+    }
+    // Nobody is coming: drop this camp for a while and take something else rather than stand at it.
+    const auto dropCamp = [&](const char* why) {
+        w.stuckGroup = g.id;
+        w.stuckUntil = w.round + tune::party_drop_rounds;
+        w.partyHoldBlockUntil = w.round + tune::party_drop_rounds;  // fix 5: no chain of holds on other camps
+        if (scorers::teamRushOn(w, g.id)) w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
+        w.waitingTurns = 0;
+        w.partyTurns = 0;
+        w.forceReplan = true;
+        trace().note(why);
+    };
+    // Travelling counts too (ping-pong fix 2): walking to a teammate reset the hold count, then the
+    // ring walk took us back, so the cap never tripped (ambush r1092-1100: 43,29 <-> 44,30, "need 3 more").
+    if (w.lastOption != static_cast<int>(OptionKind::farm) || w.lastTarget != g.id) w.partyTurns = 0;  // a new camp or a break
+    if (++w.partyTurns > tune::party_form_cap && tune::party_form_cap > 0 && !g.blocksAltars) {
+        dropCamp("party not forming after travel: dropping the camp");
         return false;
     }
     // Travel together (user): a teammate claiming this camp is still on its way: walk with them so
@@ -161,15 +195,7 @@ bool waitForParty(World& w, const GroupInfo& g, int need) {
     // Waits are short (user: at most party_wait_cap rounds): nobody is coming, so drop this camp for a
     // while and take something else rather than stand at it (monolith vs patisserie: all five held the
     // Monolith's edge ~110 rounds; the 80-turn stuck valve was the only way out).
-    if (tune::party_wait_cap > 0 && w.waitingTurns > tune::party_wait_cap && !g.blocksAltars) {
-        w.stuckGroup = g.id;
-        w.stuckUntil = w.round + tune::party_drop_rounds;
-        w.partyHoldBlockUntil = w.round + tune::party_drop_rounds;  // fix 5: no chain of holds on other camps
-        if (scorers::teamRushOn(w, g.id)) w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
-        w.waitingTurns = 0;
-        w.forceReplan = true;
-        trace().note("party not forming: dropping the camp");
-    }
+    if (tune::party_wait_cap > 0 && w.waitingTurns > tune::party_wait_cap && !g.blocksAltars) dropCamp("party not forming: dropping the camp");
     if (tune::rush_form_turns > 0 && w.waitingTurns > tune::rush_form_turns && scorers::teamRushOn(w, g.id) && !g.blocksAltars) {
         w.rushGiveUpUntil = w.round + tune::rush_retry_rounds;
         w.waitingTurns = 0;
@@ -881,7 +907,7 @@ void flee(World& w) {
     std::vector<bc::vec2> threats;
     for (const auto& e : w.enemies) threats.push_back(e.pos);
     // Toward an ally away from the threat, around enemy reach; else out of reach, else home.
-    if (const auto ally = retreatTarget(w); ally.x >= 0) {
+    if (const auto ally = w.round < w.fleeHomeUntil ? bc::vec2{-1, -1} : retreatTarget(w); ally.x >= 0) {
         const auto avoid = w.enemyReach();
         if (nav().stepToward(w, ally, 1, true, &avoid)) {
             trace().note("fleeing to an ally");
@@ -892,6 +918,13 @@ void flee(World& w) {
     // Run home around their reach (43% of our deaths came while fleeing, a third of those flights
     // drifting away from home: the nearest tile out of reach is often deeper in their half).
     if (tune::flee_home_weighted && nav().stepHome(w)) {
+        if (!tune::flee_no_attack) combat::act(w, combat::Focus{.noCamps = true}, false);
+        return;
+    }
+    // Ping-pong fix 5: home weighting judged our bush the best tile. The escape below then stepped
+    // out of it and the next turn's home step went back in (eight r1562: 20,22 <-> 19,21). Stay hidden.
+    if (tune::flee_bush_hold && tune::flee_home_weighted && nav().homeHeld()) {
+        trace().note("fleeing: staying hidden in the bush");
         if (!tune::flee_no_attack) combat::act(w, combat::Focus{.noCamps = true}, false);
         return;
     }
@@ -1539,7 +1572,10 @@ void execute(World& w, const Option& o) {
     case OptionKind::flee: flee(w); break;
     case OptionKind::fight: fight(w, o); break;
     case OptionKind::wait:
-        if (o.target == 2) nav().stepToward(w, o.at, tune::regroup_arrive - 1, true, &w.danger);  // regroup
+        if (o.target == 2) {  // regroup (o.at is our own tile when we stay with the group)
+            if (o.at != w.pos) w.regroupWalkRound = w.round;
+            nav().stepToward(w, o.at, tune::regroup_arrive - 1, true, &w.danger);
+        }
         else if (o.target == 3) {                                                                // hunt (their spawn is not walkable)
             // Arrived where the enemy was last seen and nobody is here (or no path): the hunt is over,
             // think again next turn instead of standing (boss-battle: "hunt" with no action 30-80 rounds).

@@ -305,9 +305,30 @@ void regroupOption(World& w, std::vector<Option>& out) {
     if (!regroup::active()) return;
     const auto at = regroup::at();
     const int d = dist(w.pos, at);
-    if (d <= tune::regroup_arrive) return;  // grouped: farm near the spotter or fight
     // combatBotv3: finish the capture we are standing on first (it takes a few rounds).
     if (captureHold(w)) return;
+    // Hysteresis (ping-pong fix 1b): walking in, we come to regroup_arrive; once there, a camp within
+    // the leash (scored normally) took us past regroup_arrive and the regroup pulled us straight back
+    // (eight r519-527: farm, regroup, farm, regroup). Grouped, only leaving the leash pulls us back.
+    const bool walkingIn = w.regroupWalkRound == w.round - 1;
+    const int arrive = tune::regroup_stay && !walkingIn ? std::max(tune::regroup_arrive, tune::regroup_leash) : tune::regroup_arrive;
+    if (d <= arrive) {
+        // Grouped: farm near the spotter or fight. With no option here, a camp outside the leash
+        // (scored x regroup_farm_factor) won the turn and walked us out, and the regroup walked us
+        // back next turn (00contest r713-719: farm, regroup, farm, regroup). Stand with the group.
+        if (!tune::regroup_stay) return;
+        Option o;
+        o.kind = OptionKind::wait;
+        o.target = 2;
+        o.at = w.pos;
+        o.c.target << "regroup";
+        o.add("stay with the group", tune::regroup_stay_value);
+        o.turns("turn", 100.0f);
+        o.c.note << "grouped";
+        o.finish();
+        out.push_back(std::move(o));
+        return;
+    }
     Option o;
     o.kind = OptionKind::wait;
     o.target = 2;  // regroup (idle is -1)

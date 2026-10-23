@@ -254,6 +254,10 @@ void play_draft() {
             mapplan::solveLoops(mapplan::bodies(guess), tune::draft_loop_floor);
             mark();
             mapplan::prepare(tune::draft_prepare_floor);
+            mark();
+            // Last, and only with fuel to spare: taking fuel from the steps above changed the map
+            // features and so the picks (8 maps, 32 of 140 drafts).
+            if (bc::fuel_remaining() > tune::draft_territory_floor) mapplan::solveTerritories(mapplan::bodies(guess));
         } else {
             mapplan::solveLoops({}, tune::draft_loop_floor_late);
         }

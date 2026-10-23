@@ -163,6 +163,7 @@ public:
     int lastTarget = -1;           // group/altar id of last turn's choice
     int turnsOnOption = 0;
     int waitingTurns = 0;          // consecutive turns spent waiting for a party
+    int partyTurns = 0;            // ...or travelling with a teammate to it (tune::party_form_cap)
     int rushGiveUpUntil = -1;      // no team rush (rush camp, team opening) before this round: its party never formed
     // Stuck watchdog: turns standing on one tile while idle or holding for a party; when it trips,
     // the camp we held is dropped until stuckUntil and we hunt enemies until huntUntil.
@@ -191,6 +192,10 @@ public:
     std::array<cambc::vec2, 6> posHistory{};     // our tile after each turn, newest first
     std::pair<int, std::string> stuck{-1, ""};   // decision that left us bouncing between two tiles
     int stuckTurns = 0;
+    cambc::vec2 fledFrom{-1, -1};  // nearest enemy when we last fled (tune::flee_hold_turns)
+    int fledRound = -100;
+    int fleeHomeUntil = -1;        // a flight bounced in place: flee home only (no ally detour) until this round
+    int regroupWalkRound = -100;   // last round we walked toward a regroup spot
     bool forceReplan = false;
     // Party rotation: allies (bit per slot) who worked the party camp we are on, and that camp.
     unsigned partyMates = 0;

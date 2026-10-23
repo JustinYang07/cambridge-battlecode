@@ -8,6 +8,7 @@
 #include "combat/combat.h"
 #include "strategy/cohesion.h"
 #include "strategy/loop.h"
+#include "strategy/territory.h"
 #include "strategy/wards.h"
 #include "strategy/mapplan.h"
 #include "strategy/regroup.h"
@@ -253,6 +254,9 @@ void Bot::play_turn() {
         const int loopBefore = loop::target();
         loop::update(w);
         if (loop::target() != loopBefore) w.forceReplan = true;
+        const int regionBefore = territory::mine();
+        territory::update(w);
+        if (territory::mine() != regionBefore) w.forceReplan = true;
         // Commit to a plan like a human would: rescoring every option costs most of a turn's
         // fuel, so only replan when something relevant changed.
         std::vector<Option> options;

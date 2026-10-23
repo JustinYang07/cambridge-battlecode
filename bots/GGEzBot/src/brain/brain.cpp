@@ -116,6 +116,7 @@ int choose(const std::vector<Option>& options, World& w) {
     }
     const bool teamCall = callFight >= 0 || callRetreat;
     const bool committed = tune::fight_commit_rounds > 0 && !teamCall && w.round < w.commitUntil && !hurt;
+    const bool fleeHold = tune::flee_hold_turns > 0 && w.fledFrom.x >= 0 && w.round - w.fledRound <= tune::flee_hold_turns && !emergency;
     int best = -1;
     float bestScore = -1;
     for (int i = 0; i < static_cast<int>(options.size()); ++i) {
@@ -125,6 +126,11 @@ int choose(const std::vector<Option>& options, World& w) {
         if (key == last) s *= tune::switch_hysteresis;            // changing our mind has a cost
         if (w.lockTurns > 0 && !emergency && key == w.lock) s = 1e9f;  // locked after flip-flopping
         if (w.stuckTurns > 0 && key == w.stuck) s *= tune::stuck_factor;  // it left us bouncing in place
+        // Ping-pong fix 3: just after fleeing enemies, walking back toward them is not a decision, it
+        // is the flee switching itself off one step out of reach (eight r214-218: fight, flee, fight).
+        if (fleeHold && o.kind != OptionKind::flee && o.kind != OptionKind::heal && o.at.x >= 0 &&
+            (dist(o.at, w.fledFrom) < dist(w.pos, w.fledFrom) || dist(o.at, w.fledFrom) <= tune::flee_hold_radius))
+            s *= tune::flee_hold_factor;
         if (teamCall) {
             if (callRetreat && o.kind == OptionKind::fight) continue;
             if (callRetreat && o.kind == OptionKind::flee) s = std::max(s, 5e8f);
@@ -142,6 +148,12 @@ int choose(const std::vector<Option>& options, World& w) {
         if (s > bestScore) { bestScore = s; best = i; }
     }
     if (best < 0) return best;
+    if (options[static_cast<std::size_t>(best)].kind == OptionKind::flee) {
+        int nearest = 1 << 20;
+        for (const auto& e : w.enemies)
+            if (e.hp > 0 && dist(e.pos, w.pos) < nearest) { nearest = dist(e.pos, w.pos); w.fledFrom = e.pos; }
+        if (nearest < (1 << 20)) w.fledRound = w.round;
+    }
     // Start a commitment when we enter a fight or a flight (it runs out, then we decide afresh).
     if (tune::fight_commit_rounds > 0) {
         const auto& b = options[static_cast<std::size_t>(best)];
@@ -174,8 +186,30 @@ void noteMovement(World& w) {
     for (std::size_t i = w.posHistory.size() - 1; i > 0; --i) w.posHistory[i] = w.posHistory[i - 1];
     w.posHistory[0] = w.pos;
     const auto& p = w.posHistory;
-    if (p[0] != p[1] && p[0] == p[2] && p[2] == p[4] && p[1] == p[3] && p[3] == p[5] && w.stuckTurns == 0 &&
-        w.history[0] == w.history[1] && w.history[1] == w.history[2]) {
+    bool bouncing = p[0] != p[1] && p[0] == p[2] && p[2] == p[4] && p[1] == p[3] && p[3] == p[5] &&
+                    w.history[0] == w.history[1] && w.history[1] == w.history[2];
+    // Ping-pong fix 4: also a loop over three tiles (ambush r1092: 43,29 44,30 45,31 44,30 43,29), and
+    // one kind of decision under changing labels: 5 moves in 6 turns ending where we started.
+    if (!bouncing && tune::bounce_loose && p[5].x >= 0) {
+        int moves = 0, distinct = 0;
+        for (std::size_t i = 0; i + 1 < p.size(); ++i) moves += p[i] != p[i + 1];
+        for (std::size_t i = 0; i < p.size(); ++i) {
+            bool seen = false;
+            for (std::size_t j = 0; j < i; ++j) seen = seen || p[j] == p[i];
+            distinct += !seen;
+        }
+        bouncing = moves >= 5 && distinct <= 3 && dist(p[0], p[5]) <= 1 &&
+                   w.history[0].first == w.history[1].first && w.history[1].first == w.history[2].first && w.history[2].first == w.history[3].first;
+    }
+    // Never penalise a flight: that walks us back into whatever we ran from. A flight bouncing in
+    // place is "to an ally" and "home" taking turns (beside the ally it no longer counts, home steps
+    // away, then it counts again; eight r1562-1571 at "die in 0"): run home only for a while.
+    if (bouncing && tune::bounce_loose && w.history[0].first == static_cast<int>(OptionKind::flee)) {
+        if (w.round >= w.fleeHomeUntil) trace().note("flight bouncing: running home only");
+        w.fleeHomeUntil = w.round + tune::stuck_turns;
+        return;
+    }
+    if (bouncing && w.stuckTurns == 0) {
         w.stuck = w.history[0];
         w.stuckTurns = tune::stuck_turns;
         w.forceReplan = true;

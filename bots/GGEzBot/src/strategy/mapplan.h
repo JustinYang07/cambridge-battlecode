@@ -76,7 +76,12 @@ struct Plan {
     int openingCamp = -1;
     int openingParty = 0;
     bool teamOpening = false;  // combatBotv3: the whole team opens on it (tune::team_opening)
+    // Territories (user): regions of nearby camps over the whole map, and the region each champion
+    // farms (strategy/territory.cpp). regionOf[g] is 255 for camps in no region.
+    std::vector<std::uint8_t> regionOf;
+    std::vector<std::pair<cambc::champion_type, std::uint8_t>> regionFor;
 };
+inline constexpr int kMaxRegions = 15;  // region ids fit 4 bits (15 = none)
 inline constexpr int kNeighbours = 3;
 
 // ---- draft side
@@ -98,6 +103,9 @@ std::vector<cambc::champion_type> bodies(const std::vector<cambc::champion_draft
 // Solve (or continue solving) the farming loops for a team of `predicted` bodies while more than
 // `floor` fuel is left. The first call sets the team; later calls (empty roster) resume.
 void solveLoops(const std::vector<cambc::champion_type>& predicted, unsigned long long floor);
+// Territories (user): regions and the region slots for a team of `predicted` bodies, once, on the
+// first draft turn (planFor then hands the slots to the real roster, tanks first).
+void solveTerritories(const std::vector<cambc::champion_type>& predicted);
 // Nearest-camp lists (Plan::neighbours) while more than `floor` fuel is left; resumes next pick.
 void buildNeighbours(unsigned long long floor);
 // Below `fuelFloor` fuel, remaining champions get only their first camp (no lookahead).

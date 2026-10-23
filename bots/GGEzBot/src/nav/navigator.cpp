@@ -881,6 +881,7 @@ int Navigator::escapeTurns(const World& w) {
 }
 
 bool Navigator::stepHome(World& w) {
+    homeHeld_ = false;
     if (fields::toSpawn(0, w.pos) < 0) {
         if (bc::fuel_remaining() <= tune::field_build_fuel) return false;
         fields::ensureSpawn(0);
@@ -937,6 +938,7 @@ bool Navigator::stepHome(World& w) {
             return true;
         }
     }
+    if (walk.x < 0 && isBush(w.pos)) homeHeld_ = true;  // hidden here beats every step (the bush bonus)
     if (walk.x < 0 || !bc::self().can_move()) return false;
     trace().note(tune::flee_bush_bonus > 0 && isBush(walk) ? "fleeing home: into a bush" : "fleeing home");
     return tryMove(w, walk);

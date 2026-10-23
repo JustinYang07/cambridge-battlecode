@@ -30,6 +30,8 @@ bool altarsBlocked(const World& w);
 bool teamRushOn(const World& w, int groupId);
 // combatBotv3: capturing now (on a reward's spawn tiles) with no enemy champion within capture_hold_radius.
 bool captureHold(const World& w);
+// An ally is beside this camp while it is damaged (its fight is under way).
+bool allyFightingCamp(const World& w, const GroupInfo& g);
 // combatBotv3: a bush within 3 tiles of the group's centre (cached per group).
 bool bushBeside(const GroupInfo& g);
 

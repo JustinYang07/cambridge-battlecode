@@ -18,6 +18,7 @@ constexpr int kFar = 1 << 14;
 constexpr std::uint8_t kMagic = 0x52;  // 'R'
 constexpr std::uint8_t kVersion = 3;
 constexpr std::uint8_t kOpeningMarker = 0xA5;  // loopBot: opening camp follows
+constexpr std::uint8_t kTerritoryMarker = 0x7E;  // territories follow
 constexpr std::size_t kHeader = 4 + 32;  // magic, version, flags, group count, centre bitmap
 
 // One BFS, exported so reads are local array lookups instead of host calls.
@@ -888,6 +889,192 @@ void buildNeighbours(unsigned long long floor) {
     }
 }
 
+// ---- territories (user): we kept to our own corner and the contested middle while rich areas
+// went unfarmed (quadrants: the quadrant beside our spawn with 2x our corner's gems got 2% of our
+// time; expanse: 78% of our time in a corner worth a quarter of either neighbour). Regions are
+// camps within territory_link walking tiles of each other, over the whole map; each champion gets
+// the region where it adds the most gems per round, so a second champion in a region adds less
+// than the first and the team spreads when there is room. In game the region's camps score higher
+// and the choice is revisited as regions get contested (strategy/territory.cpp).
+namespace {
+struct RegionStat {
+    std::vector<int> groups;
+    float rate = 0;  // value per round its camps give back (respawns)
+    int dOur = kFar, dEnemy = kFar;
+};
+
+// Champions a camp needs: the fewest whose tank outlasts the clear (hits on the tank, the party's
+// average damage and health from the roster).
+int partyNeed(const GroupInfo& g, float dpsEach, float hpEach) {
+    if (g.harmless) return 1;
+    for (int m = 1; m <= 5; ++m) {
+        const float kill = g.totalHealth / std::max(dpsEach * static_cast<float>(m), 1.0f);
+        const float tankHit = kill * g.totalStrength * (m > 1 ? tune::party_focus_share : 1.0f);
+        if (tankHit <= tune::route_max_hp_use * hpEach) return m;
+    }
+    return 6;
+}
+
+} // namespace
+
+// Solved once on the first draft turn (its 10x fuel) for the roster we expect: the loops below
+// cost ~100k a pick, and later pick turns have ~99k in all, so they overran and the engine picked
+// at random (48 of 70 drafts changed). Later picks only hand these slots to the real roster.
+struct TerritoryCache {
+    bool done = false;
+    std::vector<std::uint8_t> regionOf;
+    std::vector<std::uint8_t> slots;  // region per champion, in tank-first order
+    unsigned long long fuel = 0;      // what solving cost (describe)
+} TC;
+
+namespace {
+std::vector<std::size_t> tankFirst(const std::vector<bc::champion_type>& roster) {
+    std::vector<std::size_t> order(roster.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        const auto& pa = profile(roster[a]);
+        const auto& pb = profile(roster[b]);
+        return pa.roles.tank * pa.survivability > pb.roles.tank * pb.survivability;
+    });
+    return order;
+}
+} // namespace
+
+void solveTerritories(const std::vector<bc::champion_type>& roster) {
+    if (!tune::territory || !analysed() || roster.empty() || TC.done) return;
+    TC.done = true;
+    const auto fuel0 = bc::fuel_remaining();
+    struct FuelMark {
+        unsigned long long start;
+        ~FuelMark() { TC.fuel = start - bc::fuel_remaining(); }
+    } fuelMark{fuel0};
+    Plan scratch;
+    Plan& p = scratch;
+    const int n = std::min(A.n, kMaxGroups);
+    const auto& s = Statics::get();
+    std::vector<int> ids;
+    for (int g = 0; g < n; ++g) {
+        const auto& grp = s.groups[static_cast<std::size_t>(g)];
+        if (A.farmable[static_cast<std::size_t>(g)] && A.dOur[static_cast<std::size_t>(g)] < kFar && !grp.hasMonolith && (grp.gems > 0 || grp.gold > 0))
+            ids.push_back(g);
+    }
+    // Single linkage by walking distance, regions capped at territory_max_camps.
+    std::vector<int> root(static_cast<std::size_t>(n)), size(static_cast<std::size_t>(n), 1);
+    for (int g = 0; g < n; ++g) root[static_cast<std::size_t>(g)] = g;
+    auto find = [&](int x) {
+        while (root[static_cast<std::size_t>(x)] != x) x = root[static_cast<std::size_t>(x)];
+        return x;
+    };
+    std::vector<std::array<int, 3>> pairs;
+    for (std::size_t i = 0; i < ids.size(); ++i)
+        for (std::size_t j = i + 1; j < ids.size(); ++j)
+            if (const int d = groupDist(ids[i], ids[j]); d <= tune::territory_link) pairs.push_back({d, ids[i], ids[j]});
+    std::sort(pairs.begin(), pairs.end());
+    for (const auto& [d, a, b] : pairs) {
+        const int ra = find(a), rb = find(b);
+        if (ra == rb || size[static_cast<std::size_t>(ra)] + size[static_cast<std::size_t>(rb)] > tune::territory_max_camps) continue;
+        root[static_cast<std::size_t>(rb)] = ra;
+        size[static_cast<std::size_t>(ra)] += size[static_cast<std::size_t>(rb)];
+    }
+    std::vector<RegionStat> regions;
+    std::vector<int> regionAt(static_cast<std::size_t>(n), -1);
+    for (int g : ids) {
+        const int r = find(g);
+        if (regionAt[static_cast<std::size_t>(r)] < 0) {
+            regionAt[static_cast<std::size_t>(r)] = static_cast<int>(regions.size());
+            regions.emplace_back();
+        }
+        auto& R = regions[static_cast<std::size_t>(regionAt[static_cast<std::size_t>(r)])];
+        R.groups.push_back(g);
+        const auto& grp = s.groups[static_cast<std::size_t>(g)];
+        R.rate += value(grp) / static_cast<float>(std::max(grp.respawn, 1));
+        R.dOur = std::min(R.dOur, A.dOur[static_cast<std::size_t>(g)]);
+        R.dEnemy = std::min(R.dEnemy, A.dEnemy[static_cast<std::size_t>(g)]);
+    }
+    // Keep the richest kMaxRegions.
+    std::sort(regions.begin(), regions.end(), [](const RegionStat& a, const RegionStat& b) { return a.rate > b.rate; });
+    if (static_cast<int>(regions.size()) > kMaxRegions) regions.resize(static_cast<std::size_t>(kMaxRegions));
+    if (regions.empty()) return;
+    p.regionOf.assign(static_cast<std::size_t>(n), 255);
+    for (std::size_t r = 0; r < regions.size(); ++r)
+        for (int g : regions[r].groups) p.regionOf[static_cast<std::size_t>(g)] = static_cast<std::uint8_t>(r);
+    // Their side counts less in the plan (live sightings decide in game), and the walk there is
+    // time not farmed over the expected stay.
+    std::vector<float> weight(regions.size());
+    for (std::size_t r = 0; r < regions.size(); ++r) {
+        const auto& R = regions[r];
+        const float side = R.dEnemy >= kFar ? 0.0f : static_cast<float>(R.dOur) / std::max(static_cast<float>(R.dOur + R.dEnemy), 1.0f);
+        const float t = std::clamp((side - 0.5f) / 0.2f, 0.0f, 1.0f);
+        weight[r] = (1.0f - (1.0f - tune::territory_far_weight) * t) * tune::territory_stay / (tune::territory_stay + static_cast<float>(R.dOur));
+    }
+    const auto order = tankFirst(roster);
+    float hpEach = 0, dpsEach = 0;
+    for (auto t : roster) {
+        hpEach += champ(t).hp;
+        dpsEach += champ(t).dps * tune::loop_dps_scale;
+    }
+    hpEach /= static_cast<float>(roster.size());
+    dpsEach /= static_cast<float>(roster.size());
+    // Yield table: value per round of k average champions in each region (k = 0..kMaxBodies), each
+    // camp's party need computed once. The assignment below only reads the table (later pick
+    // turns have ~99k fuel; the first version cost ~100k a pick and lost picks).
+    constexpr int kMaxBodies = 6;
+    const auto R = regions.size();
+    std::vector<std::array<float, kMaxBodies + 1>> yield(R);
+    for (std::size_t r = 0; r < R; ++r) {
+        std::array<float, 8> val{}, cap{}, hp{};
+        std::array<int, 8> need{};
+        int m = 0;
+        for (int g : regions[r].groups) {
+            if (m >= 8) break;
+            const auto& grp = s.groups[static_cast<std::size_t>(g)];
+            val[static_cast<std::size_t>(m)] = value(grp);
+            cap[static_cast<std::size_t>(m)] = value(grp) / static_cast<float>(std::max(grp.respawn, 1));
+            hp[static_cast<std::size_t>(m)] = grp.totalHealth;
+            need[static_cast<std::size_t>(m)] = partyNeed(grp, dpsEach, hpEach);
+            ++m;
+        }
+        yield[r][0] = 0;
+        for (int k = 1; k <= kMaxBodies; ++k) {
+            float total = 0, turns = 0, c = 0;
+            for (int i = 0; i < m; ++i) {
+                if (need[static_cast<std::size_t>(i)] > k) continue;
+                total += val[static_cast<std::size_t>(i)];
+                c += cap[static_cast<std::size_t>(i)];
+                turns += hp[static_cast<std::size_t>(i)] / (dpsEach * static_cast<float>(k)) + static_cast<float>(tune::capture_turns) + tune::territory_walk_per_camp;
+            }
+            yield[r][static_cast<std::size_t>(k)] = turns > 0 ? std::min(c, total / turns) : 0.0f;
+        }
+    }
+    std::vector<int> count(R, 0);
+    for (std::size_t n2 = 0; n2 < order.size(); ++n2) {
+        std::size_t best = 0;
+        float bestGain = -1;
+        for (std::size_t r = 0; r < R; ++r) {
+            // A party region pays only once the party is there: look up to three champions ahead
+            // and count the gain per champion (one champion alone in it added nothing).
+            const int c = count[r];
+            float gain = 0;
+            for (int extra = 1; extra <= 3 && c + extra <= kMaxBodies; ++extra)
+                gain = std::max(gain, (yield[r][static_cast<std::size_t>(c + extra)] - yield[r][static_cast<std::size_t>(c)]) / static_cast<float>(extra));
+            gain *= weight[r];
+            if (gain > bestGain) { bestGain = gain; best = r; }
+        }
+        ++count[best];
+        TC.slots.push_back(static_cast<std::uint8_t>(best));
+    }
+    TC.regionOf = p.regionOf;
+}
+
+// The real roster onto the solved slots, tanks first (cheap: any pick turn).
+void assignTerritories(Plan& p, const std::vector<bc::champion_type>& roster) {
+    if (!tune::territory || !TC.done || TC.slots.empty() || TC.regionOf.empty()) return;
+    p.regionOf = TC.regionOf;
+    const auto order = tankFirst(roster);
+    for (std::size_t k = 0; k < order.size(); ++k)
+        p.regionFor.push_back({roster[order[k]], TC.slots[std::min(k, TC.slots.size() - 1)]});
+}
+
 Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigned long long fuelFloor) {
     Plan p;
     if (!analysed()) return p;
@@ -1006,6 +1193,8 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
         }
     }
 
+    assignTerritories(p, roster);
+
     // Opening camp (loopBot): on round 1 nobody has claimed anything yet, so a party camp beside
     // spawn looked "too strong" to the first champions to move, and they walked off to a far
     // cluster (rows: Cassi and Issac took the gold 30 tiles away for 10 turns while Varg went to
@@ -1101,6 +1290,8 @@ Plan planFor(const std::vector<bc::champion_type>& roster, int teamSize, unsigne
     return p;
 }
 
+std::size_t lastPlanBytes = 0, lastPackedAt = 0;  // draft memory use (describe)
+
 void write(const Plan& p) {
     std::vector<std::uint8_t> bytes(kHeader, 0);
     bytes[0] = kMagic;
@@ -1133,7 +1324,23 @@ void write(const Plan& p) {
     bytes.push_back(kOpeningMarker);
     bytes.push_back(p.openingCamp >= 0 ? static_cast<std::uint8_t>(p.openingCamp) : 255);
     bytes.push_back(static_cast<std::uint8_t>(p.openingParty));
+    if (!p.regionOf.empty()) {
+        bytes.push_back(kTerritoryMarker);
+        bytes.push_back(static_cast<std::uint8_t>(p.regionOf.size()));
+        for (std::size_t i = 0; i < p.regionOf.size(); i += 2) {
+            const auto lo = static_cast<std::uint8_t>(std::min<int>(p.regionOf[i], 15));
+            const auto hi = static_cast<std::uint8_t>(i + 1 < p.regionOf.size() ? std::min<int>(p.regionOf[i + 1], 15) : 15);
+            bytes.push_back(static_cast<std::uint8_t>(lo | (hi << 4)));
+        }
+        bytes.push_back(static_cast<std::uint8_t>(p.regionFor.size()));
+        for (const auto& [t, r] : p.regionFor) {
+            bytes.push_back(static_cast<std::uint8_t>(t));
+            bytes.push_back(r);
+        }
+    }
+    lastPlanBytes = bytes.size();
     Statics::get().appendPacked(bytes);
+    lastPackedAt = static_cast<std::size_t>(bytes[1022]) | (static_cast<std::size_t>(bytes[1023]) << 8);
     bc::draft_memory = bytes;
 }
 
@@ -1172,6 +1379,21 @@ std::string describe(const Plan& p) {
         }
     }
     if (p.openingCamp >= 0) out += "; opening g" + num(p.openingCamp) + " x" + num(p.openingParty) + (p.teamOpening ? " (team)" : "");
+    // Diagnostics only on a turn with fuel to spare (the first): later pick turns have ~10-30k of
+    // margin and these strings cost enough to lose a pick.
+    const bool rich = bc::fuel_remaining() > 300000;
+    if (rich) out += "; memory plan " + num(static_cast<long long>(lastPlanBytes)) + (lastPackedAt ? " +statics" : " NO STATICS");
+    if (rich && tune::territory) out += TC.done ? "; territories solved (" + num(static_cast<long long>(TC.fuel / 1000)) + "k)" : std::string("; territories not solved");
+    if (rich && !p.regionOf.empty()) {
+        out += "; territories";
+        for (const auto& [t, r] : p.regionFor) out += std::string(" ") + name(t) + "->r" + num(static_cast<long long>(r));
+        for (int r = 0; r < kMaxRegions; ++r) {
+            std::string list;
+            for (std::size_t g = 0; g < p.regionOf.size(); ++g)
+                if (p.regionOf[g] == r) list += (list.empty() ? "" : ",") + num(static_cast<long long>(g));
+            if (!list.empty()) out += "; r" + num(static_cast<long long>(r)) + ": g" + list;
+        }
+    }
     return out;
 }
 
@@ -1218,6 +1440,22 @@ const Plan& read() {
         if (pos + 2 < m.size() && at(pos) == kOpeningMarker) {
             readCache.openingCamp = at(pos + 1) == 255 ? -1 : at(pos + 1);
             readCache.openingParty = at(pos + 2);
+            pos += 3;
+        }
+        if (pos + 1 < m.size() && at(pos) == kTerritoryMarker) {
+            const int count = at(pos + 1);
+            pos += 2;
+            readCache.regionOf.assign(static_cast<std::size_t>(count), 255);
+            for (int i = 0; i < count; ++i) {
+                const int v = (at(pos + static_cast<std::size_t>(i) / 2) >> ((i % 2) * 4)) & 15;
+                readCache.regionOf[static_cast<std::size_t>(i)] = v == 15 ? 255 : static_cast<std::uint8_t>(v);
+            }
+            pos += static_cast<std::size_t>((count + 1) / 2);
+            const int owners2 = at(pos++);
+            for (int i = 0; i < owners2; ++i) {
+                const auto t = static_cast<bc::champion_type>(at(pos++));
+                readCache.regionFor.push_back({t, at(pos++)});
+            }
         }
     } catch (const std::exception&) {
         // Truncated or foreign memory: whatever decoded so far stands; the brain covers the rest.

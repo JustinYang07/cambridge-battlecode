@@ -411,6 +411,8 @@ bool tankSurvives(const World& w, const GroupInfo& g, float healthLeft, int part
         if (sl < tankSlot && w.allyHp(sl) > 0) tankSlot = sl;
     }
     dps += mine * static_cast<float>(std::max(party - counted, 0));
+    // Measured: won camp fights killed at ~0.81 of this rate (walking, repositioning, missed casts).
+    dps *= tune::tank_dps_scale;
     float tankHp = tankSlot == w.slot ? w.hp : w.allyHp(tankSlot);
     if (tankHp <= 0) tankHp = w.hp;
     float mitigation = 1.0f;
